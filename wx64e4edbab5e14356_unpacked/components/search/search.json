@@ -1,0 +1,12 @@
+{
+  "component": true,
+  "usingComponents": {
+    "qs-admin": "/components/admin/admin",
+    "u-picker": "/uni_modules/uview-ui/components/u-picker/u-picker",
+    "u-icon": "/uni_modules/uview-ui/components/u-icon/u-icon",
+    "u-search": "/uni_modules/uview-ui/components/u-search/u-search",
+    "u-row": "/uni_modules/uview-ui/components/u-row/u-row",
+    "u-col": "/uni_modules/uview-ui/components/u-col/u-col",
+    "u-loading-icon": "/uni_modules/uview-ui/components/u-loading-icon/u-loading-icon"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "component": true,
+  "usingComponents": {
+    "u-popup": "/uni_modules/uview-ui/components/u-popup/u-popup",
+    "u-icon": "/uni_modules/uview-ui/components/u-icon/u-icon",
+    "u-loading-icon": "/uni_modules/uview-ui/components/u-loading-icon/u-loading-icon",
+    "l-painter": "/uni_modules/lime-painter/components/l-painter/l-painter",
+    "l-painter-view": "/uni_modules/lime-painter/components/l-painter-view/l-painter-view",
+    "l-painter-image": "/uni_modules/lime-painter/components/l-painter-image/l-painter-image",
+    "l-painter-text": "/uni_modules/lime-painter/components/l-painter-text/l-painter-text"
+  }
+}

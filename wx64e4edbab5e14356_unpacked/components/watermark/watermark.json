@@ -1,0 +1,6 @@
+{
+  "component": true,
+  "usingComponents": {
+    "zmm-watermark": "/uni_modules/zmm-watermark/components/zmm-watermark/zmm-watermark"
+  }
+}

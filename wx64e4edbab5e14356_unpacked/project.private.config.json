@@ -1,0 +1,9 @@
+{
+  "libVersion": "3.16.2",
+  "setting": {
+    "urlCheck": false,
+    "lazyloadPlaceholderEnable": true,
+    "skylineRenderEnable": true
+  },
+  "condition": {}
+}
