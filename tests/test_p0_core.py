@@ -96,3 +96,72 @@ def test_gold_fixture_exists():
         rows = list(csv.DictReader(f))
     assert len(rows) >= 5
     assert "expect_T_raw" in rows[0]
+
+
+def test_last_ok_contiguous_stops_at_gap(tmp_path, monkeypatch):
+    from scripts.common import db as dbmod
+
+    path = tmp_path / "trend.db"
+    monkeypatch.setenv("TREND_DB", str(path))
+    conn = dbmod.get_conn()
+    dbmod.init_schema(conn)
+    for d, st in [
+        ("2024-01-05", "ok"),
+        ("2024-01-08", "partial"),
+        ("2024-01-09", "ok"),  # must not count as last_ok
+    ]:
+        conn.execute(
+            "INSERT INTO run_meta (trade_date, status) VALUES (?, ?)", (d, st)
+        )
+    conn.commit()
+    assert dbmod.last_ok_trade_date(conn) == "2024-01-05"
+    assert dbmod.first_unfinished_trade_date(conn) == "2024-01-08"
+    conn.close()
+
+
+def test_queue_stops_and_resume_from_gap(tmp_path, monkeypatch):
+    from scripts.common import calendar as cal
+    from scripts.common.coverage import CoverageMetrics
+    from scripts.daily_run import build_queue, process_day
+
+    monkeypatch.setenv("TREND_DB", str(tmp_path / "trend.db"))
+    cal.clear_trade_date_cache()
+    cal.load_trade_dates_from_list(
+        ["2024-01-05", "2024-01-08", "2024-01-09", "2024-01-10"]
+    )
+    asof = date(2024, 1, 10)
+    good = CoverageMetrics(
+        bar_coverage=0.95,
+        computable_coverage=0.6,
+        limit_coverage_asof=0.9,
+    )
+    bad_asof = CoverageMetrics(
+        bar_coverage=0.95,
+        computable_coverage=0.6,
+        limit_coverage_asof=0.1,  # fails only when D==asof
+    )
+
+    assert process_day(date(2024, 1, 5), asof, metrics=good) == "ok"
+    # history day with low limit still ok
+    assert process_day(date(2024, 1, 8), asof, metrics=bad_asof) == "ok"
+
+    # simulate asof partial then ensure later day not processed by stop rule
+    st = process_day(date(2024, 1, 10), asof, metrics=bad_asof)
+    assert st == "partial"
+
+    # resume: hole at asof
+    q = build_queue(asof)
+    assert q[0] == date(2024, 1, 10)
+
+    # old bug pattern: even if a later ok were somehow present, last_ok stays before gap
+    from scripts.common import db as dbmod
+
+    conn = dbmod.get_conn()
+    conn.execute(
+        "INSERT OR REPLACE INTO run_meta (trade_date, status) VALUES ('2024-01-09', 'ok')"
+    )
+    conn.commit()
+    # 01-08 ok, 01-09 ok, 01-10 partial → contiguous last_ok = 01-09
+    assert dbmod.last_ok_trade_date(conn) == "2024-01-09"
+    assert dbmod.first_unfinished_trade_date(conn) == "2024-01-10"
+    conn.close()

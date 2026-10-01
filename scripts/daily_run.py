@@ -19,7 +19,14 @@ from scripts.common.coverage import (
     OK_PREDICATE_VERSION,
     evaluate_ok,
 )
-from scripts.common.db import get_conn, init_schema, last_ok_trade_date, upsert_rows, write_heartbeat
+from scripts.common.db import (
+    first_unfinished_trade_date,
+    get_conn,
+    init_schema,
+    last_ok_trade_date,
+    upsert_rows,
+    write_heartbeat,
+)
 
 
 def _parse_date(s: str) -> dt.date:
@@ -27,13 +34,20 @@ def _parse_date(s: str) -> dt.date:
 
 
 def build_queue(session_asof: dt.date) -> list[dt.date]:
+    """从续跑起点到 asof 的交易日队列。
+
+    起点：若存在首个非 ok 日 → 该日；否则 next_trade_date(连续 ok 末尾)；
+    冷启动（无 run_meta）→ session_asof。
+    """
     conn = get_conn()
     init_schema(conn)
+    hole = first_unfinished_trade_date(conn)
     last = last_ok_trade_date(conn)
     conn.close()
-    if last:
-        last_d = _parse_date(last)
-        start = cal.next_trade_date(last_d)
+    if hole:
+        start = _parse_date(hole)
+    elif last:
+        start = cal.next_trade_date(_parse_date(last))
         if start is None:
             return []
     else:
@@ -60,12 +74,13 @@ def process_day(
     D: dt.date,
     session_asof: dt.date,
     *,
-    stub_metrics: bool = True,
+    metrics: CoverageMetrics | None = None,
 ) -> str:
     conn = get_conn()
     init_schema(conn)
     started = dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"
-    metrics = _stub_coverage() if stub_metrics else _stub_coverage()
+    if metrics is None:
+        metrics = _stub_coverage()
     decision = evaluate_ok(D, session_asof, metrics)
     finished = dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"
     upsert_rows(
@@ -155,14 +170,18 @@ def main(argv=None) -> int:
     print("[daily_run] queue=%s" % [d.isoformat() for d in queue])
     statuses = []
     for D in queue:
-        statuses.append(process_day(D, session_asof))
+        st = process_day(D, session_asof)
+        statuses.append(st)
+        if st != "ok":
+            print("[daily_run] stop queue at %s status=%s (no skip past gap)" % (D, st))
+            break
 
     write_heartbeat(
         {
             "job": "daily_run",
             "status": "ok" if statuses and statuses[-1] == "ok" else "partial",
             "asof": session_asof.isoformat(),
-            "days": [d.isoformat() for d in queue],
+            "days": [d.isoformat() for d in queue[: len(statuses)]],
             "statuses": statuses,
         }
     )

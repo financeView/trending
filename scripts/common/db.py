@@ -47,8 +47,9 @@ CREATE TABLE IF NOT EXISTS daily_stock (
   tag_warm_to_hot INTEGER,
   tag_warm_to_flat INTEGER,
   solar_term TEXT,
+  hard_frozen INTEGER,      -- P0 占位；P0.5+ 由 metrics 写入
   amount REAL,
-  close REAL,
+  close_qfq REAL,           -- 前复权收盘；盯市用 bars.close_raw
   float_mv REAL,
   PRIMARY KEY (trade_date, ts_code)
 );
@@ -91,7 +92,7 @@ CREATE TABLE IF NOT EXISTS paper_fill (
 
 
 def get_conn(db_path: Optional[str] = None) -> sqlite3.Connection:
-    path = db_path or DEFAULT_DB
+    path = db_path or os.environ.get("TREND_DB") or DEFAULT_DB
     os.makedirs(os.path.dirname(path), exist_ok=True)
     conn = sqlite3.connect(path)
     conn.execute("PRAGMA journal_mode=WAL")
@@ -117,8 +118,31 @@ def upsert_rows(conn, table: str, rows: List[Dict[str, Any]], commit: bool = Tru
 
 
 def last_ok_trade_date(conn: sqlite3.Connection) -> Optional[str]:
+    """连续 ok 前缀的末交易日（market-data §7.3）。
+
+    不得用「任意最大 ok 日」——中间若有 partial/fail，返回缺口前最后一个 ok。
+    """
+    rows = conn.execute(
+        "SELECT trade_date, status FROM run_meta ORDER BY trade_date ASC"
+    ).fetchall()
+    last: Optional[str] = None
+    for trade_date, status in rows:
+        if status == "ok":
+            last = trade_date
+        else:
+            break
+    return last
+
+
+def first_unfinished_trade_date(conn: sqlite3.Connection) -> Optional[str]:
+    """首个非 ok 行（partial/fail/…）；无则 None（整表连续 ok 或空表）。"""
     row = conn.execute(
-        "SELECT trade_date FROM run_meta WHERE status='ok' ORDER BY trade_date DESC LIMIT 1"
+        """
+        SELECT trade_date FROM run_meta
+        WHERE status IS NULL OR status != 'ok'
+        ORDER BY trade_date ASC
+        LIMIT 1
+        """
     ).fetchone()
     return row[0] if row else None
 
