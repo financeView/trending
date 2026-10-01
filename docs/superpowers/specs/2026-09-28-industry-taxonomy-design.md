@@ -44,7 +44,7 @@ A股宇宙
 | L1 | `l1_*` 稳定 slug | 主题分组、首页扫描、成员闭包 | 本产品 YAML |
 | L2 | 申万二级代码（6 位） | 个股归属、行业节点、下钻 | 申万 + 数据商同步 |
 | display_group | `dg_*` | 可选 UI 折叠 | 本产品 YAML（可选） |
-| 个股 | `ts_code` | 行情与指标 | 行情源 |
+| 个股 | `ts_code` | 行情与指标 | 行情源；**格式**见 [`2026-10-01-market-data-contract-design.md`](./2026-10-01-market-data-contract-design.md)（Tushare 式 `XXXXXX.SH|SZ`） |
 
 **禁止**：用自定义 L2 名覆盖申万二级归属码。展示合并只用 `display_group`。
 
