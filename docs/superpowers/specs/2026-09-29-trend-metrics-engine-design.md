@@ -279,13 +279,15 @@ hard_frozen := is_st
 
 ### 6.0 事件枚举（与 ops `signal_event.event` 对齐）
 
-| `event` | 何时写入（每标的×日至多一行该 event，除非注明） | `tag_*` | 账本 |
+| `event` | 何时写入（每标的×日×event：**至多一行 active**；重跑见 ops append/`superseded_by`） | `tag_*` | 账本 |
 |---------|--------------------------------------------------|---------|------|
 | `ENTER_RIGHT` | §6.2 进入右侧成功的收盘 | `tag_warm_to_hot=true` | **唯一**开仓信号 |
 | `EXIT_RIGHT` | 温度退出（平及以下）**或** `hard_frozen` 结束右侧 | `tag_warm_to_flat=true` | **唯一**常规平仓信号；`detail.exit_kind`=`temperature`\|`forced_exit_untradable` |
 | `WARM_TO_HOT` | **仅**存续期再确认：`R=true` 且 `T_prev_valid=温` 且 \(T_{fsm}\in\{热,沸\}\)`；**进入日不写此 event**（进入日只有 `ENTER_RIGHT`） | `tag_warm_to_hot=true` | **不**开仓 |
 
 禁止：仅凭 `tag_warm_to_hot` / 仅凭 `WARM_TO_HOT` 开仓。
+
+**active 行**：`superseded_by IS NULL`。因果消费 / 账本 / Issue 默认只读 active；历史 superseded 行保留审计，不计入「当日事件集合」。
 
 ### 6.1 评价时点
 
@@ -787,3 +789,4 @@ filters_meta                # 复权、资格过滤摘要
 | 2026-10-01 | 合成权重公式对齐 data-contract §6.3（null→1.0 再归一） |
 | 2026-10-01 | §3.1 去掉易误解的「等权」措辞，改指 §6.3 |
 | 2026-10-01 | 跨 spec 对齐：§6.0 事件枚举；`hard_frozen`=ST/显式旗且结束右侧；软冻≠硬冻；伪代码 emit `ENTER`/`EXIT`/`WARM_TO_HOT` |
+| 2026-10-01 | §6.0：每标的×日×event ≤1 **active**（`superseded_by` 允许多历史行） |

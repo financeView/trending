@@ -39,11 +39,11 @@
 
 | 项 | 设定 |
 |----|------|
-| 信号 | 交易日 **E 收盘** 出现 **`EXIT_RIGHT`（温转平）**：\(T\in\{\text{平},\text{凉},\text{寒},\text{冻}\}\)；另见 §4.1 **强制出清** |
+| 信号 | 交易日 **E 收盘** 出现 **`EXIT_RIGHT`（唯一卖出事件）**。`detail.exit_kind`：`temperature`（温度落到平及以下）或 `forced_exit_untradable`（`hard_frozen`，见 §4.1）。**禁止**另开「非事件强制出清」路径；**禁止**仅凭当日 \(T\) 过滤卖单（硬冻退出时 \(T\) 仍可能是温/热）。 |
 | 下单 | **下一交易日**开盘价卖出（E+1） |
 | 涨跌停 | E+1 开盘不可卖 → `unfilled_sell`；MVP：**下一交易日**开盘再试 |
 
-**不是「回落至温的次日卖出」。**
+**不是「回落至温的次日卖出」。**「温转平」是退出事件的产品名（含硬冻结束），不要求字面温→平。
 
 依据现行 FSM：
 
@@ -57,7 +57,7 @@
 ```text
 … 平/凉 … → D收盘 ENTER_RIGHT → 下一交易日开买入
 → 持有（可经 温/热/沸，含回落到温）
-→ E收盘 EXIT_RIGHT → 下一交易日开卖出
+→ E收盘 EXIT_RIGHT（temperature 或 forced_exit_untradable）→ 下一交易日开卖出
 （周五确认 → 周一开；见夹具 fill_fri_enter_mon_buy）
 ```
 
@@ -78,7 +78,7 @@
 | 事件 | 确认 | 意图成交 | 不可成交 |
 |------|------|----------|----------|
 | 买 | D 收盘 `ENTER_RIGHT` | 下一交易日开 | 涨停/停牌等 → 跳过（§4.4） |
-| 卖 | E 收盘 `EXIT_RIGHT` 或强制出清 | 下一交易日开 | 跌停/停牌 → 延期（§4.4） |
+| 卖 | E 收盘 `EXIT_RIGHT`（含两种 `exit_kind`） | 下一交易日开 | 跌停/停牌 → 延期（§4.4） |
 
 ---
 
@@ -219,10 +219,11 @@ hs300_series: 000300.SH        # Tushare 式；summary 原样抄写
 每个交易日 `T` 顺序（写死）：
 
 1. **延期卖**（`pending_sells`）→ §4.4 开盘试卖  
-2. **到期卖**：确认日 = `prev_trade_date(T)` 的 **`EXIT_RIGHT`**（含 `detail.exit_kind=temperature|forced_exit_untradable`）→ 开盘卖  
+2. **到期卖**：确认日 = `prev_trade_date(T)` 的 **`EXIT_RIGHT`**（`detail.exit_kind=temperature|forced_exit_untradable`）→ 开盘卖  
 3. **买入**：确认日 = `prev_trade_date(T)` 的 **`ENTER_RIGHT` 事件**、且无持仓 → 开盘买  
-4. **扫描强制出清**：当日收盘触发 §4.1 → 入下一交易日卖队列（确认日=`T`）  
-5. 日终 `close_raw` 估值  
+4. 日终 `close_raw` 估值  
+
+**无**单独「扫描强制出清」步：`hard_frozen` 已由 metrics 在确认日收盘写成 `EXIT_RIGHT`，次日由步骤 2 消费。禁止账本在 `R=true` 时另开强平队列。
 
 同日排序：卖先于买；买按确认日 `RS` 降序，同分 `ts_code` 升序。  
 已持仓新 `ENTER_RIGHT` → `ignored_already_held`；无仓 `EXIT_RIGHT` → `ignored_flat_exit`。  
@@ -249,7 +250,7 @@ fill_day(T, signals_on_prev_trade_date(T), book_state, bars, costs)
 | H | MVP **默认**：钉死 `param_version` **因果重算**整段；重放库内事件仅用于与 L 对账审计 | `paper_book.py` |
 | L | 落库时的 `signal_event` 行（带稳定 `id`）；见 §4.10 不可变 | `live_shadow_step.py` |
 
-流水线（ops）：交易日 `T` 的 bars + 截面/事件落库成功后，再 `fill_day(T, …)`（用 `prev_trade_date(T)` 的信号买/卖今开）。缺今开 bars → 不跑 L，记 warn。
+流水线（ops）：交易日 `T` 的 bars + 截面/事件落库成功、且 **`run_meta(T).status=ok`**（及意图用到的确认日若已跑过亦须曾 `ok`，见 market-data §7.2 影子句）后，再 `fill_day(T, …)`（用 `prev_trade_date(T)` 的信号买/卖今开）。缺今开 bars 或 `status≠ok` → **不跑 L**，记 warn。
 
 ### 4.7 `trades` / `paper_fill` schema
 
@@ -390,7 +391,7 @@ python scripts/eval/live_shadow_step.py --asof today
 | 统计上线后实盘收益？ | **部分对**：要做上线后**影子账本**；同时必须有**历史纸面**；真钱可选且不唯一 |
 | 温转热次日开买入？ | **否（字面温转热不够）**：须 **`ENTER_RIGHT`**；存续期温→热再确认只打 tag，**不开仓** |
 | 涨跌停开盘不操作？ | **买：对（跳过）**；**卖：跌停则延期再卖**，不是永久不操作 |
-| 回落至温次日卖？ | **不对**；主规则是 **回落到平及以下（温转平）的次日开卖**；温是持有 |
+| 回落至温次日卖？ | **不对**；主规则是 **`EXIT_RIGHT` 次日开卖**（温度退出或 `hard_frozen`）；温是持有 |
 
 ---
 
@@ -407,3 +408,4 @@ python scripts/eval/live_shadow_step.py --asof today
 | 2026-10-01 | 交叉引用 market-data-contract：MVP data_gap；预留 board_calc_v1 |
 | 2026-10-01 | §4.4 明确 limit 与 open_raw 同为 raw 空间 |
 | 2026-10-01 | 跨 spec：强制出清改走 metrics `EXIT_RIGHT`+`hard_frozen`（结束 R）；卖单只认 EXIT 事件 |
+| 2026-10-01 | 清歧义：§1 卖=唯一 `EXIT_RIGHT`；删 §4.5 独立强平步；L 须 `run_meta=ok` |

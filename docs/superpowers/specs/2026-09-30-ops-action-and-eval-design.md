@@ -32,7 +32,7 @@ GitHub Actions (cron 工作日 北京 19:00 + workflow_dispatch)
         ├─ upsert stock_sw_l2 / 合成 L2·L1
         ├─ metrics engine → 截面 + 事件
         ├─ update L1 Issues（14 个）
-        └─ P2: live_shadow_step(T)  # fill_day(T, prev_trade signals)；缺开盘 bars 则 skip+warn
+        └─ P2: live_shadow_step(T)  # 仅当 run_meta(T)=ok；fill_day(T, prev_trade signals)；否则 skip+warn
   └─ commit data/trend.db (+ heartbeat)  rebase-retry push
 ```
 
@@ -230,19 +230,33 @@ meta: param=… map=… run=…
 | 期 | 内容 |
 |----|------|
 | **P0** | 日历门禁 + bars sync 骨架 + daily_run（重算策略 A）+ `run_meta` §7.2 `ok` + trend.db commit + 金标 loader/单测；**不含**完整 T 树/滞回/FSM/节气（见 plan：FSM 属 **P0.5+**） |
-| **P0.5** | T_raw 决策树 + 滞回 + 右侧 FSM（含 §6.0 事件）+ 节气线性式 + 命名夹具 |
-| **P1** | 14 个 L1 Issue + 总览 Radar Issue；`signal_event` 落库 |
+| **P0.5** | T_raw 决策树 + 滞回 + 右侧 FSM + 节气线性式 + 命名夹具；**计算并落库** `daily_*` 与 `signal_event`（§6.0 枚举）；Issue 仍属 P1 |
+| **P1** | 14 个 L1 Issue + 总览 Radar Issue（消费已落库截面/事件）；可选影子闸门对齐 |
 | **P2** | 回测 spec：层 B 周报 + 层 C 纸面 + 层 L 影子（见 backtest-eval） |
 | **P3** | 页面（另开 UX spec） |
 
-## 9. 验收（P0/P1）
+## 9. 验收（按期）
 
-1. 本地 `--date <最近交易日>` 跑通，db 有当日 stock/l2/l1 行。  
-2. 同日重跑行内容稳定。  
+**P0**
+
+1. 本地 `--date <最近交易日>` 跑通；`run_meta` 有当日行与覆盖率字段；bars schema/sync 骨架可用。  
+2. **不要求**完整 `daily_stock` T/FSM 列（可为缺省/stub 或仅写 `run_meta`）；正式截面属 P0.5。  
 3. 假日 workflow 一次：跳过且无空 commit。  
-4. `workflow_dispatch` 指定历史某日可覆盖重算。  
-5. P1：14 Issue 更新成功，正文含 as_of 与温转热表。  
-6. 抽 3 只股人工看图：热/温与均线直觉不离谱（定性，非贴趋势动物）。
+4. `workflow_dispatch` 指定历史某日可覆盖重算（至少 `run_meta`）。  
+5. `pytest` 离线绿（日历 / ok 谓词 / 金标 loader）。
+
+**P0.5**
+
+1. 可算宇宙写出 `daily_stock` / `daily_l2` / `daily_l1`；同日重跑行内容稳定。  
+2. `signal_event` 按 metrics §6.0 落库（含 `ENTER_RIGHT` / `EXIT_RIGHT` / `WARM_TO_HOT`）。  
+3. FSM/节气命名夹具全绿。
+
+**P1**
+
+1. 14 Issue 更新成功，正文含 as_of 与温转热表。  
+2. 抽 3 只股人工看图：热/温与均线直觉不离谱（定性，非贴趋势动物）。
+
+层 L：`live_shadow_step` 仅当意图日 `run_meta.status=ok`（见 market-data §7.2 / backtest §4.6）。
 
 ## 10. 修订记录
 
@@ -256,3 +270,4 @@ meta: param=… map=… run=…
 | 2026-10-01 | 依赖 market-data-contract；cron 19:00；断点续跑按 next_trade_date(last_ok) |
 | 2026-10-01 | cron 改为 UTC 11:00；run_meta 覆盖率字段；daily_stock.float_mv |
 | 2026-10-01 | 跨 spec：P0 对齐 plan（FSM→P0.5）；`close_qfq`/`hard_frozen`；事件枚举指 metrics §6.0 |
+| 2026-10-01 | P0.5 落库事件；§9 按期验收；L 闸 `run_meta=ok` |
