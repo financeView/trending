@@ -1,0 +1,12 @@
+cost_version: v1
+commission_rate: 0.0003
+min_commission: 0
+stamp_tax_sell: 0.0005
+impact_bp_buy: 5
+impact_bp_sell: 5
+lot_size: 100
+N_cap: 20
+initial_cash: 1000000
+limit_rule: vendor_fields
+fill_price: open_raw
+hs300_series: 000300.SH

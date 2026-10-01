@@ -1,0 +1,8 @@
+id,above_ma20,above_ma60,ma20_slope_up,ma60_slope_up,adx_ge_hot,adx_ge_warm,adx_lt_flat,vol_high,ret_extreme_up,ret_extreme_down,expect_T_raw
+boil_up,1,1,1,1,1,1,0,1,1,0,沸
+hot_trend,1,1,1,1,1,1,0,0,0,0,热
+warm_soft,1,1,1,0,0,1,0,0,0,0,温
+flat_chop,1,0,0,0,0,0,1,0,0,0,平
+cool_down,0,0,0,0,0,1,0,0,0,0,凉
+cold_bear,0,0,0,0,1,1,0,0,0,0,寒
+freeze_crash,0,0,0,0,1,1,0,1,0,1,冻
