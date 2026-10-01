@@ -137,8 +137,10 @@ daily_stock (
   T, S_temp, RS, universe_id,
   right_side, right_side_days_natural, right_side_days_trading,
   tag_warm_to_hot, tag_warm_to_flat, solar_term,
-  amount, close,
-  float_mv,                -- 可空；当日同步写入；历史回填禁 spot 回刷
+  hard_frozen,             -- metrics §5.5；MVP=is_st∨显式硬冻旗
+  amount,
+  close_qfq,               -- 信号/展示用前复权收盘；盯市用 bars.close_raw
+  float_mv,                -- 可空；当日同步写入；历史回填禁 spot 回刷；缺省权重见 market-data §6.3
   PRIMARY KEY (trade_date, ts_code)
 )
 
@@ -151,8 +153,8 @@ daily_l2 / daily_l1 (
 signal_event (              -- 回测/审计；L 轨锚定 id
   id INTEGER PK,            -- 稳定主键；已消费于 paper_fill 的行不得物理删除
   trade_date, ts_code, l1_id, sw_l2_code,
-  event TEXT,              -- ENTER_RIGHT / EXIT_RIGHT / WARM_TO_HOT / ...
-  T, RS, detail TEXT,
+  event TEXT,              -- ENTER_RIGHT | EXIT_RIGHT | WARM_TO_HOT（映射见 metrics §6.0）
+  T, RS, detail TEXT,      -- EXIT_RIGHT 时 detail.exit_kind=temperature|forced_exit_untradable
   superseded_by INTEGER NULL  -- 重跑产生替代事件时指向新 id；旧行保留
 )
 
@@ -207,7 +209,7 @@ meta: param=… map=… run=…
 
 本运维文档只提供评估底座：
 
-- 每日 upsert 截面 + `signal_event`（`ENTER_RIGHT` / `EXIT_RIGHT`）  
+- 每日 upsert 截面 + `signal_event`（`ENTER_RIGHT` / `EXIT_RIGHT` / `WARM_TO_HOT`；映射见 metrics §6.0）  
 - `run_meta` 钉死 `param_version` / `map_version`  
 - 因果重算策略 A（§3.3），保证历史日可重放  
 - P2 起可选 `live_shadow_step`（影子账本，非真钱）
@@ -227,7 +229,8 @@ meta: param=… map=… run=…
 
 | 期 | 内容 |
 |----|------|
-| **P0** | 日历门禁 + daily_run（重算策略 A）+ trend.db commit + 单测金标/FSM + heartbeat |
+| **P0** | 日历门禁 + bars sync 骨架 + daily_run（重算策略 A）+ `run_meta` §7.2 `ok` + trend.db commit + 金标 loader/单测；**不含**完整 T 树/滞回/FSM/节气（见 plan：FSM 属 **P0.5+**） |
+| **P0.5** | T_raw 决策树 + 滞回 + 右侧 FSM（含 §6.0 事件）+ 节气线性式 + 命名夹具 |
 | **P1** | 14 个 L1 Issue + 总览 Radar Issue；`signal_event` 落库 |
 | **P2** | 回测 spec：层 B 周报 + 层 C 纸面 + 层 L 影子（见 backtest-eval） |
 | **P3** | 页面（另开 UX spec） |
@@ -252,3 +255,4 @@ meta: param=… map=… run=…
 | 2026-09-30 | §3.3 例外：daily_* UPSERT；signal_event append；paper_fill 必建于 trend.db 且不可变 |
 | 2026-10-01 | 依赖 market-data-contract；cron 19:00；断点续跑按 next_trade_date(last_ok) |
 | 2026-10-01 | cron 改为 UTC 11:00；run_meta 覆盖率字段；daily_stock.float_mv |
+| 2026-10-01 | 跨 spec：P0 对齐 plan（FSM→P0.5）；`close_qfq`/`hard_frozen`；事件枚举指 metrics §6.0 |

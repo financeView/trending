@@ -93,7 +93,7 @@
 
 ## 4. 特征层（隔离）
 
-\(P_t\)：前复权收盘价。
+\(P_t\)：前复权收盘价（bars/`daily_stock` 的 `close_qfq`）。
 
 ### 4.1 温度专用（绝对）— MVP allowlist
 
@@ -259,88 +259,127 @@ S_temp = clip(S0 + s_vol_weight * (σ%ile - 0.5) * sign_trend, 0, 100)
 |------|------------|-----|
 | 历史不足，不可算 | 输出 `T=null`；滞回**不**推进 | 不得新开 `R` |
 | `R=false` 且当日 `T_raw=null` | 输出 null；滞回不推进；**不**用旧热填充 | **禁止**进入右侧 |
-| `R=true` 且当日 `T_raw=null`（停牌等） | FSM 输入用 `T_fill = T_last_valid`（上一可算交易日滞回后 \(T\)）；输出层可标 `T_filled=true` | 用 `T_fill` 做存续/退出判断；不因 null 单独清 `R`；**节气按 §8.2「可算才推进」冻结标签**（见下） |
-| 不可算持续且 `R=true`（如变 ST / 长期停牌） | **冻结**：停止推进滞回与 FSM 天数/节气（含 `stage_score_peak`），保留最后一组输出 | **不**强制立秋；恢复可算后从冻结态继续（`T_prev` = 冻结前 \(T\)） |
+| `R=true` 且当日 `T_raw=null`（短停牌等）且 **非** `hard_frozen` | FSM 用 `T_fill = T_last_valid`；可标 `T_filled=true` | 用 `T_fill` 做存续/退出；**不**因短 null 清 `R`；节气按 §8.2 可算才推进 |
+| `hard_frozen=true` 且 `R=true` | 见下；停止推进滞回/天数/节气 peak | **结束右侧**（与温度退出同形）：`R=false`，立秋，emit `EXIT_RIGHT`（`detail.exit_kind=forced_exit_untradable`） |
+
+**`hard_frozen`（导出布尔，MVP 钉死）**
+
+```text
+hard_frozen := is_st
+            OR (explicit_hard_freeze_flag from data layer)  # 如长期停牌由行情契约置位
+```
+
+- **不含**普通 1～数日 `is_suspended` / 单日 `T_raw=null`（那些走上一行软填）。  
+- MVP **不**另定「停牌连续 N 日」阈值；若以后要加，须进 data-contract + 新 `param_version`。  
+- 一旦 `hard_frozen` 在 `R=true` 时成立：**结束本段右侧**（避免账本强平后 `R` 仍 true、无法再 `ENTER_RIGHT` 的死锁）。恢复可交易后须重新满足进入条件才会 `ENTER_RIGHT`。
+
+夹具：`fsm_untradable_freeze` 改为「短不可算软冻不立秋」；新增 `fsm_st_ends_right`：`R` 中变 ST → 当日 `EXIT_RIGHT` + 立秋 + `R=false`。
 
 ## 6. 右侧状态机
+
+### 6.0 事件枚举（与 ops `signal_event.event` 对齐）
+
+| `event` | 何时写入（每标的×日至多一行该 event，除非注明） | `tag_*` | 账本 |
+|---------|--------------------------------------------------|---------|------|
+| `ENTER_RIGHT` | §6.2 进入右侧成功的收盘 | `tag_warm_to_hot=true` | **唯一**开仓信号 |
+| `EXIT_RIGHT` | 温度退出（平及以下）**或** `hard_frozen` 结束右侧 | `tag_warm_to_flat=true` | **唯一**常规平仓信号；`detail.exit_kind`=`temperature`\|`forced_exit_untradable` |
+| `WARM_TO_HOT` | **仅**存续期再确认：`R=true` 且 `T_prev_valid=温` 且 \(T_{fsm}\in\{热,沸\}\)`；**进入日不写此 event**（进入日只有 `ENTER_RIGHT`） | `tag_warm_to_hot=true` | **不**开仓 |
+
+禁止：仅凭 `tag_warm_to_hot` / 仅凭 `WARM_TO_HOT` 开仓。
 
 ### 6.1 评价时点
 
 - **状态转移**（进入/结束、温转热/温转平）：仅在**交易日收盘**，使用当日 FSM 输入温度 \(T_{fsm}\)（见下）。  
 - **自然日累加**：每个自然日日终，若 `R=true` 且当日未触发结束，则 `right_side_days_natural += 1`。  
-- 非交易日**不**新开右侧。
+- 非交易日**不**新开右侧。  
+- 每日先判 `hard_frozen`（§5.5）；若因此结束右侧，**不再**用温度做同日进入。
 
 定义：
 
 - \(T\)：§5.3 滞回后输出（可 null）。  
-- \(T_{fsm}\)：若 `R=true` 且 \(T\) 为 null → `T_last_valid`；若 `R=false` 且 \(T\) 为 null → **跳过本日 FSM 转移**（保持 `R=false`）；否则 \(T_{fsm}=T\)。  
-- `T_prev_valid`：**上一交易日**用于 FSM 的 \(T_{fsm}\)（与该日发出的有效温度一致；若上日跳过转移则沿用更早的上一有效 \(T_{fsm}\)）。用于温→热再确认标签。
+- \(T_{fsm}\)：若 `R=true` 且 \(T\) 为 null 且非 hard 结束 → `T_last_valid`；若 `R=false` 且 \(T\) 为 null → **跳过本日 FSM 转移**（保持 `R=false`）；否则 \(T_{fsm}=T\)。  
+- `T_prev_valid`：**上一交易日**用于 FSM 的 \(T_{fsm}\)。用于温→热再确认（只产 `WARM_TO_HOT`）。
 
 ### 6.2 语义表
 
 | 事件 | 条件 | 副作用 |
 |------|------|--------|
-| 进入右侧 | `R=false` 且 \(T_{fsm}\in\{\text{热},\text{沸}\}\) | `R=true`；两天数置 0；钉 `P0`/`atr_pct_entry`；`tag_warm_to_hot=true`；节气按 §8 起算 |
-| 存续 | `R=true` 且 \(T_{fsm}\in\{\text{温},\text{热},\text{沸}\}\) | `right_side_days_trading += 1`（**进入日不加**，见下）；或温→热再确认标签 |
-| 结束右侧 | `R=true` 且 \(T_{fsm}\in\{\text{平},\text{凉},\text{寒},\text{冻}\}\) | `R=false`；天数清零；`tag_warm_to_flat=true`；**当日** `solar_term=立秋`；`stage_score`/`stage_score_raw`=**null**；emit「温转平」 |
-| 未进入 | `R=false` 且 \(T_{fsm}=\text{温}\)（任意久） | **永不**因温单独开仓 |
+| 进入右侧 | `R=false` 且 \(T_{fsm}\in\{\text{热},\text{沸}\}` 且非 `hard_frozen` | `R=true`；天数置 0；钉 `P0`/`atr_pct_entry`；**`signal_event=ENTER_RIGHT`**；`tag_warm_to_hot=true`；节气按 §8 |
+| 存续 | `R=true` 且 \(T_{fsm}\in\{\text{温},\text{热},\text{沸}\}` 且非 hard 结束 | `days_trading +=1`（进入日不加）；若再确认则 **`WARM_TO_HOT`** + tag |
+| 结束右侧（温度） | `R=true` 且 \(T_{fsm}\in\{\text{平},\text{凉},\text{寒},\text{冻}\}` | `R=false`；**`EXIT_RIGHT`**（`exit_kind=temperature`）；立秋；score=null |
+| 结束右侧（不可交易） | `R=true` 且 `hard_frozen` | 同上，但 `exit_kind=forced_exit_untradable` |
+| 未进入 | `R=false` 且 \(T_{fsm}=\text{温}\) | **永不**因温单独开仓 |
 
 说明：
 
-- **`tag_warm_to_flat` / 「温转平」= 右侧退出事件**，不要求前一日必须是「温」；热→平、沸→凉同等触发。  
-- **`tag_warm_to_hot`**：进入日，或存续期 `T_prev_valid=温` 且 \(T_{fsm}\in\{\text{热},\text{沸}\}\)；**不重置**天数。  
-- **危险信号（§11）永不改写 `R`/天数**；是否平仓属策略层；「危险解除后再开仓」是组合纪律，不是 FSM 复位。  
-- **立秋**：仅结束当日（`R` 已为 false 的**一日例外**）；次日及以后若 `R=false`，`solar_term=null`。结束日对外 **`stage_score`/`stage_score_raw`=null**（禁止发清零后的 0）。
+- **`tag_warm_to_flat` / 「温转平」= 右侧退出**（含硬冻结束），不要求前一日必须是「温」。  
+- **`tag_warm_to_hot`**：进入日或再确认；再确认**不**重置天数、**不**产生 `ENTER_RIGHT`。  
+- **危险信号（§11）永不改写 `R`/天数**。  
+- **立秋**：仅结束当日；次日 `R=false` → `solar_term=null`；结束日 `stage_score`/`raw`=null。
 
 ### 6.3 伪代码
 
 ```text
-# 交易日收盘（已完成 §5；实体可算）：
+# 交易日收盘（已完成 §5）：
 tag_warm_to_hot = false
 tag_warm_to_flat = false
 just_exited_today = false
 solar_term = null if not R else <§8 计算中的节气>
 
-if T is null and not R:
-  # 跳过转移；不填充
-  pass
+# 1) 硬冻优先：结束右侧（与温度退出同形，避免账本强平后 R sticky）
+if R and hard_frozen:
+  R = false
+  tag_warm_to_flat = true
+  solar_term = 立秋
+  stage_score = null
+  stage_score_raw = null
+  stage_score_peak = 0
+  right_side_days_natural = 0
+  right_side_days_trading = 0
+  just_exited_today = true
+  emit EXIT_RIGHT (detail.exit_kind=forced_exit_untradable)
+  # 本日不再温度进入 / 再确认
 else:
-  T_fsm = T_last_valid if (T is null and R) else T
-
-  if not R:
-    if T_fsm in {热, 沸}:
-      R = true
-      right_side_days_natural = 0
-      right_side_days_trading = 0   # 进入收盘 = 0；之后每个存续交易日 +1
-      P0 = P_t
-      atr_pct_entry = ATR(atr_len)_t / P_t
-      stage_score_peak = 0
-      tag_warm_to_hot = true
-      solar_term = 谷雨             # 进入日强制；见 §8.2
-      stage_score = 0
-      stage_score_raw = 0
-      emit 进入右侧
+  if T is null and not R:
+    pass   # 跳过转移；不填充
   else:
-    if T_fsm in {平, 凉, 寒, 冻}:
-      R = false
-      tag_warm_to_flat = true
-      solar_term = 立秋              # 仅本日；强制，不跑 §8 切段
-      stage_score = null            # 对外禁止发 0
-      stage_score_raw = null
-      stage_score_peak = 0          # 内部复位，供下次进入
-      right_side_days_natural = 0
-      right_side_days_trading = 0
-      just_exited_today = true
-      emit 温转平                    # 退出事件，非字面「温→平」
-    else:
-      right_side_days_trading += 1
-      if T_prev_valid == 温 and T_fsm in {热, 沸}:
-        tag_warm_to_hot = true
-      solar_term = §8(peak)         # 谷雨…大暑；只前进；不可算则保留昨值
+    T_fsm = T_last_valid if (T is null and R) else T
 
-  T_prev_valid := T_fsm             # 供下一交易日
-  if T is not null:
-    T_last_valid := T
+    if not R:
+      if T_fsm in {热, 沸} and not hard_frozen:
+        R = true
+        right_side_days_natural = 0
+        right_side_days_trading = 0   # 进入收盘 = 0；之后每个存续交易日 +1
+        P0 = P_t
+        atr_pct_entry = ATR(atr_len)_t / P_t
+        stage_score_peak = 0
+        tag_warm_to_hot = true
+        solar_term = 谷雨             # 进入日强制；见 §8.2
+        stage_score = 0
+        stage_score_raw = 0
+        emit ENTER_RIGHT              # 唯一开仓；不另写 WARM_TO_HOT
+    else:
+      if T_fsm in {平, 凉, 寒, 冻}:
+        R = false
+        tag_warm_to_flat = true
+        solar_term = 立秋              # 仅本日；强制，不跑 §8 切段
+        stage_score = null            # 对外禁止发 0
+        stage_score_raw = null
+        stage_score_peak = 0          # 内部复位，供下次进入
+        right_side_days_natural = 0
+        right_side_days_trading = 0
+        just_exited_today = true
+        emit EXIT_RIGHT (detail.exit_kind=temperature)
+      else:
+        right_side_days_trading += 1
+        if T_prev_valid == 温 and T_fsm in {热, 沸}:
+          tag_warm_to_hot = true
+          emit WARM_TO_HOT            # 再确认；不开仓
+        solar_term = §8(peak)         # 谷雨…大暑；只前进；不可算则保留昨值
+
+    T_prev_valid := T_fsm             # 供下一交易日
+    if T is not null:
+      T_last_valid := T
 
 # 每个自然日日终（含非交易日）：
 if R and not just_exited_today:
@@ -361,13 +400,14 @@ if R and not just_exited_today:
 | `fsm_exit_hot_to_flat` | 热→平 | `tag_warm_to_flat` 真（非字面温→平） |
 | `fsm_exit_boil_to_cool` | 沸→凉 | 同上 |
 | `fsm_crash_boil_to_freeze` | 右侧内 `T_raw` 骤至冻 | 退出快路径：不经假温存续；≤1 日可到平并结束（默认参） |
-| `fsm_reconfirm` | 右侧内温→热 | 标签真；天数不重置 |
-| `fsm_reentry` | 结束后再次热 | 重新进入；天数从 0 |
-| `fsm_null_in_R` | `R=true` 间隔 null | 用 fill；不误结束；再确认夹具可接 |
+| `fsm_reconfirm` | 右侧内温→热 | `tag_warm_to_hot`；**`WARM_TO_HOT` 事件**；无 `ENTER_RIGHT`；天数不重置 |
+| `fsm_reentry` | 结束后再次热 | 重新进入；`ENTER_RIGHT`；天数从 0 |
+| `fsm_null_in_R` | `R=true` 间隔短 null（非 hard） | 用 fill；不误结束；再确认夹具可接 |
 | `fsm_null_not_R` | `R=false` 且 null，即使 `T_last` 曾为热 | **不**进入 |
 | `fsm_fri_mon` | 周五确认进入 | 周末 `days_natural` +2；周一 `days_trading` 符合 §6.3 |
 | `fsm_bootstrap` | 冷启动首日 `T_raw=热` | 当日不因 snap 进入；锚点为平再爬升 |
-| `fsm_untradable_freeze` | 右侧中变 ST/不可算 | 冻结不立秋；恢复后继续 |
+| `fsm_untradable_freeze` | `R=true` 短停牌/`T_raw=null`（非 ST） | 软冻：不立秋、不清 `R`；恢复后继续 |
+| `fsm_st_ends_right` | `R=true` 当日变 ST（`hard_frozen`） | `EXIT_RIGHT`（`forced_exit_untradable`）+ 立秋 + `R=false` |
 
 另：`test_C2_high_RS_warm_no_entry` — RS=99 且 \(T=温\)、`R=false` → 不进入。  
 
@@ -401,7 +441,7 @@ if R and not just_exited_today:
 
 **结束日（`R` 当日由 true→false）**：强制 `solar_term=立秋`；**不**跑切段；对外 `stage_score`/`stage_score_raw`=**null**（内部可清 `peak` 供下次进入，但**禁止**把清零后的 0 当作结束日对外分数）。次日若 `R=false`，`solar_term=null`。
 
-**节气可算才推进**（与 §5.5 对齐，MVP 一句规则）：存续日须 `R=true` 且当日 `P_t` 与 `σ%ile` 均可算，才更新 `stage_score_*` / 谷雨…大暑。若仅 `T_raw=null` 走 `T_fill`、但价或波动不可算（短停牌等）：**保留昨日** `solar_term` 与 `stage_score_peak`，不抬 peak；FSM 仍可用 `T_fill` 判存续/退出。长期不可算走 §5.5 硬冻结（天数与节气皆停，不立秋）。
+**节气可算才推进**（与 §5.5 对齐，MVP 一句规则）：存续日须 `R=true` 且当日 `P_t` 与 `σ%ile` 均可算，才更新 `stage_score_*` / 谷雨…大暑。若仅 `T_raw=null` 走 `T_fill`、但价或波动不可算（短停牌等）：**保留昨日** `solar_term` 与 `stage_score_peak`，不抬 peak；FSM 仍可用 `T_fill` 判存续/退出。`hard_frozen`（ST / 显式硬冻旗）走 §5.5：**结束右侧**（立秋 + `EXIT_RIGHT`），不是「冻住不立秋」。
 
 进行中（`R=true`、非进入日、非结束日、且节气可算）：
 
@@ -471,7 +511,7 @@ solar_term       = cut(stage_score)    # 谷雨…大暑
 | 启用 / 输出时机 | **存续** `R=true` → `{谷雨…大暑}`；**结束当日** `R=false` 且 `solar_term=立秋`（一日例外）；**其它** `R=false` → `solar_term=null` |
 | 进入日 | 强制谷雨；`stage_score=0`；Scorer/`v` 不写入 peak |
 | 因果 | 特征与分数只用 ≤ 当日收盘可得信息；入口锚点 \(P_0\)、`atr_pct_entry` 在进入日冻结 |
-| 可算 | 价或 `σ%ile` 不可算则不推进 peak/标签（§8.2）；硬冻结见 §5.5 |
+| 可算 | 价或 `σ%ile` 不可算则不推进 peak/标签（§8.2）；`hard_frozen` 结束右侧见 §5.5 |
 | 输入（公开） | 至少包含可复现的 \(g\_raw,d\_raw,v\_raw\)（或同语义特征）；新增特征须进 allowlist 与 `param_version` |
 | 分数输出 | 存续日 `stage_score ∈ [0,1]`（MVP=peak）；**结束日与非右侧日 `stage_score`/`stage_score_raw`=null**（禁止发 0 冒充） |
 | 单调（MVP） | 同一次右侧内，谷雨…大暑只前进不回退；立秋除外 |
@@ -541,7 +581,7 @@ solar_term       = cut(stage_score)    # 谷雨…大暑
 | `solar_early_exit_liqiu` | 右侧仅数日即温转平 → 结束日立秋；不要求途经大暑 |
 | `solar_exit_day_liqiu` | 结束日：`right_side=false`，`solar_term=立秋`，`stage_score`/`stage_score_raw` **is null**（不是 0），不输出大暑等 |
 | `solar_clamp_high` | `g_raw_eff>5`（或超右端）→ g 分量 = 1.0，无 NaN/外推 |
-| `solar_halt_no_advance` | `R=true` 且价/`σ%ile` 不可算（或与 `fsm_untradable_freeze` 衔接）→ peak/节气标签不前进、不立秋；恢复可算后继续 |
+| `solar_halt_no_advance` | `R=true` 且价/`σ%ile` 不可算（短间隙，非 `hard_frozen`）→ peak/节气标签不前进、不立秋；恢复可算后继续 |
 
 实现：`fixtures/solar_*.json`（或与 FSM 同目录命名约定）；`test_solar_suite` 全绿。
 
@@ -746,3 +786,4 @@ filters_meta                # 复权、资格过滤摘要
 | 2026-10-01 | §3/`float_mv` 与 market-data-contract 对齐：落库、空则等权；ts_code Tushare 式 |
 | 2026-10-01 | 合成权重公式对齐 data-contract §6.3（null→1.0 再归一） |
 | 2026-10-01 | §3.1 去掉易误解的「等权」措辞，改指 §6.3 |
+| 2026-10-01 | 跨 spec 对齐：§6.0 事件枚举；`hard_frozen`=ST/显式旗且结束右侧；软冻≠硬冻；伪代码 emit `ENTER`/`EXIT`/`WARM_TO_HOT` |

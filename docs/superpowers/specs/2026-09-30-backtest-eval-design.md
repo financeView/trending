@@ -150,19 +150,19 @@ H（历史纸面）与 L（影子）**必须共用同一执行纯函数**；只�
 | 信号范围 | 主结论只评估个股 **`ENTER_RIGHT` / `EXIT_RIGHT` 事件**；L1/L2 不做账本 |
 | 对照 | 可选 `RS≥70` 子集另跑，不进主结论 |
 
-**持仓遇不可交易（与 metrics 冻结对齐）**
+**持仓遇不可交易（与 metrics `hard_frozen` 对齐）**
 
-metrics：长期 ST / 不可算时 FSM **冻结**、**不**发 `EXIT_RIGHT`。账本不得假设「等 EXIT 再卖」（会永久持仓）。
+metrics：`hard_frozen`（MVP=`is_st` 或 data-layer 显式硬冻旗）且 `R=true` 时 **结束右侧**：emit `EXIT_RIGHT`（`detail.exit_kind=forced_exit_untradable`）、立秋、`R=false`。普通短停牌 / `T_raw=null` 走软填，**不**发该退出。
 
-MVP：**强制出清**（仅不可恢复类，不因短停牌误杀）
+账本：消费同一 `EXIT_RIGHT` 做次日开卖（与温度退出同路径）；`paper_fill.exit_kind` 抄自 `detail.exit_kind`。
 
-- **触发（二选一即出）**  
-  1. 持仓标的在交易日 `U` 收盘 `is_st=true`（含新标 ST）；或  
-  2. metrics 已对该标的置 **硬冻结**（§5.5 长期不可算 / `fsm_untradable_freeze` 同义旗）的首日。  
-- **不触发**：普通 1～数日停牌、`T_raw=null` 走 `T_fill` 的短间隙 → **不**强制出清；若已在卖出队列则按 §4.4 延期，若仍持仓则标签/节气按 metrics 软冻规则，等恢复或日后 `EXIT_RIGHT`。  
-- 动作：视同卖出意图，确认日=`U`，意图成交日=`next_trade_date(U)`；成交后 `exit_kind=forced_exit_untradable`。  
+MVP 触发与延期：
+
+- **触发**：确认日 `U` 收盘出现上述 `EXIT_RIGHT` 且 `exit_kind=forced_exit_untradable`（通常因 `is_st` / 显式硬冻旗）。  
+- **不触发**：普通 1～数日停牌、`T_raw=null` 软填 → **不**合成强制卖；若已在卖出队列则按 §4.4 延期。  
+- 动作：确认日=`U`，意图成交日=`next_trade_date(U)`。  
 - 不可卖则进延期卖队列。  
-- **不**改写指标层 `R`/节气。
+- **禁止**在指标仍 `R=true` 时单独强平（否则 sticky-R，无法再 `ENTER_RIGHT`）。
 
 ### 4.2 价格与复权
 
@@ -219,7 +219,7 @@ hs300_series: 000300.SH        # Tushare 式；summary 原样抄写
 每个交易日 `T` 顺序（写死）：
 
 1. **延期卖**（`pending_sells`）→ §4.4 开盘试卖  
-2. **到期卖**：确认日 = `prev_trade_date(T)` 的 `EXIT_RIGHT` 或 `forced_exit_untradable` → 开盘卖  
+2. **到期卖**：确认日 = `prev_trade_date(T)` 的 **`EXIT_RIGHT`**（含 `detail.exit_kind=temperature|forced_exit_untradable`）→ 开盘卖  
 3. **买入**：确认日 = `prev_trade_date(T)` 的 **`ENTER_RIGHT` 事件**、且无持仓 → 开盘买  
 4. **扫描强制出清**：当日收盘触发 §4.1 → 入下一交易日卖队列（确认日=`T`）  
 5. 日终 `close_raw` 估值  
@@ -264,7 +264,7 @@ paper_fill / trades row:
   fill_date
   ts_code
   side               # buy | sell
-  exit_kind          # exit_right | forced_exit_untradable | null(buy)
+  exit_kind          # temperature | forced_exit_untradable | null(buy)；与 signal_event.detail 对齐
   qty, px, costs
   status             # filled | unfilled_buy | unfilled_sell
                      # | rejected_no_slot | rejected_no_cash | rejected_lot
@@ -338,7 +338,7 @@ paper_fill / trades row:
 |----|------|
 | `fill_fri_enter_mon_buy` | 周五 ENTER → 周一开买 |
 | `fill_enter_right_only` | 仅有 `tag_warm_to_hot` 再确认、无 ENTER → 不买 |
-| `fill_forced_exit_st` | 持仓变 ST → 下一交易日强制卖意图，不等 EXIT |
+| `fill_forced_exit_st` | 持仓变 ST → metrics 当日 `EXIT_RIGHT`（`forced_exit_untradable`）→ 下一交易日开卖 |
 | `fill_open_end_kpi` | 窗口末未平仓不进入 win_rate；`n_open_end≥1` |
 
 **输入**：`cache/bars.db`；`trend.db`（L）；`config/eval/costs.yaml`；版本钉。
@@ -406,3 +406,4 @@ python scripts/eval/live_shadow_step.py --asof today
 | 2026-09-30 | 二次修补：强制出清仅 ST/硬冻结；WF 对齐 vs_random；max_dd_random 曲线钉死；L 终态即消费；paper_fill∈trend.db |
 | 2026-10-01 | 交叉引用 market-data-contract：MVP data_gap；预留 board_calc_v1 |
 | 2026-10-01 | §4.4 明确 limit 与 open_raw 同为 raw 空间 |
+| 2026-10-01 | 跨 spec：强制出清改走 metrics `EXIT_RIGHT`+`hard_frozen`（结束 R）；卖单只认 EXIT 事件 |

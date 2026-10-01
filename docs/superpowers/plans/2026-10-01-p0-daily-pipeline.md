@@ -71,9 +71,9 @@
 - [ ] Optional stub `scripts/metrics/temp_raw.py` for 2–3 gold rows
 - [ ] Commit
 
-## Out of P0 (next plans)
+## Out of P0 (next plans / **P0.5+**)
 
-- Full T_raw decision tree + hysteresis + FSM suite
+- Full T_raw decision tree + hysteresis + FSM suite（ops 分期表 **P0.5**；含 metrics §6.0 事件与 `hard_frozen`）
 - BaoStock ST/suspend + EM f51/f52 daily limits
 - L1 Issues, paper_book, live_shadow
 - Taxonomy YAML full SW map load

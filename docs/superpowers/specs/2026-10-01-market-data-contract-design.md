@@ -100,8 +100,9 @@ bars (
   volume, amount, turnover,
   float_mv,                 -- 可空；元；§6
   limit_up, limit_down,     -- 可空；§5
-  is_suspended INTEGER,     -- 0/1
-  is_st INTEGER,            -- 0/1
+  is_suspended INTEGER,     -- 0/1；短停牌 → metrics 软填，不单独 hard_frozen
+  is_st INTEGER,            -- 0/1；is_st=1 → metrics hard_frozen（结束右侧）
+  -- 可选预留：hard_freeze_flag INTEGER  # 长期停牌等显式旗；MVP 默认可不建，有则并入 hard_frozen
   bar_source, flag_source, limit_source,
   fetched_at,
   PRIMARY KEY (ts_code, trade_date)
@@ -169,7 +170,7 @@ MVP 优先落东财（或等价）**「流通市值」**（单位：**元**）�
 | 场景 | 规则 |
 |------|------|
 | **当日同步 trade_date=T** | 允许用同步时刻 spot 流通市值写入 **`bars.float_mv` 且必须写入 `daily_stock.float_mv`**（可空若 spot 失败） |
-| **历史回填 / 补旧日** | **禁止**用「今天的 spot」回刷过去的 `trade_date`；旧日无历史市值源则 **`float_mv=null` → 等权** |
+| **历史回填 / 补旧日** | **禁止**用「今天的 spot」回刷过去的 `trade_date`；旧日无历史市值源则 **`float_mv=null` → §6.3 占位权重 1.0 再归一** |
 | 重放 | 合成权重只读该日已落库的 `daily_stock.float_mv`（或 bars 同日值），不现场再拉 spot |
 
 ### 6.3 缺省加权公式（钉死）
@@ -198,7 +199,7 @@ w_i     = w_i_raw / sum(w_j_raw for j in M)
 **Session `asof`**：本轮 Actions / `workflow_dispatch` 要收尾的**最新已收盘交易日**（19:00 日更通常即「今天」对应交易日；手动 `--date` 时即为该参数日）。  
 缺口队列里的中间日记为 `D`；**仅当 `D == asof` 时**施加「asof 专用」门槛；**`D < asof` 的历史/追赶日不要求当日 `limit_*` 覆盖率**。
 
-分母 \(U\) = 当日 taxonomy **tradable** 宇宙（非 quarantine；ST/停牌规则与 metrics 一致）。  
+分母 \(U\) **权威定义** = metrics **§3.2** 的 `members_tradable`（分类宇宙 ∧ 非 quarantine ∧ 非 ST/\*ST ∧ 非停牌）。taxonomy 节点上的 `members_tradable` 计数是同集合的局部视图；覆盖率分母用**全局**该集合，不以单 L2 成员数代替。  
 下列写入该日 `run_meta`：`bar_coverage`, `computable_coverage`, `limit_coverage_asof`, `open_raw_coverage_asof`, `ok_predicate_version=v1`。  
 （历史日仍可填 `limit_coverage_asof` 作监控，**不参与**该日 ok 判定。）
 
@@ -286,3 +287,4 @@ for D in 待跑:
 | 2026-10-01 | 初版：免费栈；data_gap 默认；board_calc 预留；float_mv 落库空则等权；Tushare 式 ts_code；19:00；交易日断点续跑；分批回填 |
 | 2026-10-01 | review 修补：ok 覆盖率谓词；float_mv as-of/禁回刷；qfq 三句；limit 只对 open_raw；limit 覆盖并入 ok；cron UTC 11:00 |
 | 2026-10-01 | 澄清 session asof：仅 asof 日卡 limit 覆盖率；历史追赶日不要求 limit；fail/partial；冷启动不进 last_ok |
+| 2026-10-01 | 跨 spec：scrub「空则等权」措辞；\(U\)=metrics §3.2 `members_tradable` |
