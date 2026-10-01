@@ -60,7 +60,9 @@ jobs:
           if [ "${{ github.event.inputs.force_trade_day }}" = "true" ]; then
             FORCE="--force-trade-day"
           fi
-          python scripts/daily_run.py ${DATE:+--date $DATE} $FORCE
+          # P0.5: real coverage from bars when present; stub keeps Actions green
+          # until full-universe sync lands in this workflow.
+          python scripts/daily_run.py ${DATE:+--date $DATE} $FORCE --stub-coverage
 
       - name: Commit trend.db + heartbeat
         run: |

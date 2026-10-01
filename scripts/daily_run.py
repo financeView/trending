@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""P0 daily_run：交易日历门禁 + 断点续跑 + run_meta ok 谓词。"""
+"""P0/P0.5 daily_run：交易日历门禁 + 断点续跑 + run_meta ok 谓词。"""
 from __future__ import annotations
 
 import argparse
@@ -13,10 +13,11 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from scripts.common import calendar as cal
+from scripts.common.bars import bars_conn
 from scripts.common.coverage import (
-    COMPUTABLE_COVERAGE_MIN,
     CoverageMetrics,
     OK_PREDICATE_VERSION,
+    compute_coverage_from_bars,
     evaluate_ok,
 )
 from scripts.common.db import (
@@ -59,7 +60,7 @@ def build_queue(session_asof: dt.date) -> list[dt.date]:
 
 
 def _stub_coverage(universe_size: int = 100) -> CoverageMetrics:
-    """P0 offline/smoke：全绿占位；真实 sync 后由统计替换。"""
+    """离线 CI / smoke：全绿占位；真实 sync 后由 bars 统计替换。"""
     return CoverageMetrics(
         bar_coverage=1.0,
         computable_coverage=1.0,
@@ -70,17 +71,44 @@ def _stub_coverage(universe_size: int = 100) -> CoverageMetrics:
     )
 
 
+def _resolve_coverage(
+    D: dt.date,
+    *,
+    metrics: CoverageMetrics | None,
+    stub_coverage: bool,
+    bars_path: str | None,
+) -> CoverageMetrics:
+    if metrics is not None:
+        return metrics
+    use_stub = stub_coverage or os.environ.get("STUB_COVERAGE", "").strip() in (
+        "1",
+        "true",
+        "True",
+        "yes",
+    )
+    if use_stub:
+        return _stub_coverage()
+    bconn = bars_conn(bars_path)
+    try:
+        return compute_coverage_from_bars(bconn, D)
+    finally:
+        bconn.close()
+
+
 def process_day(
     D: dt.date,
     session_asof: dt.date,
     *,
     metrics: CoverageMetrics | None = None,
+    stub_coverage: bool = False,
+    bars_path: str | None = None,
 ) -> str:
     conn = get_conn()
     init_schema(conn)
     started = dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"
-    if metrics is None:
-        metrics = _stub_coverage()
+    metrics = _resolve_coverage(
+        D, metrics=metrics, stub_coverage=stub_coverage, bars_path=bars_path
+    )
     decision = evaluate_ok(D, session_asof, metrics)
     finished = dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"
     upsert_rows(
@@ -110,14 +138,25 @@ def process_day(
     )
     conn.close()
     print(
-        "[daily_run] D=%s asof=%s status=%s reason=%s limit_gate=%s"
-        % (D, session_asof, decision.status, decision.reason, decision.apply_limit_gate)
+        "[daily_run] D=%s asof=%s status=%s reason=%s limit_gate=%s "
+        "bar=%.3f comp=%.3f lim=%.3f U=%d"
+        % (
+            D,
+            session_asof,
+            decision.status,
+            decision.reason,
+            decision.apply_limit_gate,
+            metrics.bar_coverage,
+            metrics.computable_coverage,
+            metrics.limit_coverage_asof,
+            metrics.tradable_count,
+        )
     )
     return decision.status
 
 
 def main(argv=None) -> int:
-    p = argparse.ArgumentParser(description="trending P0 daily_run")
+    p = argparse.ArgumentParser(description="trending P0.5 daily_run")
     p.add_argument("--date", default="", help="YYYY-MM-DD session asof（默认最近交易日）")
     p.add_argument(
         "--force-trade-day",
@@ -128,6 +167,16 @@ def main(argv=None) -> int:
         "--offline-calendar",
         action="store_true",
         help="仅用 data/cache/trade_dates.json，不访问网络",
+    )
+    p.add_argument(
+        "--stub-coverage",
+        action="store_true",
+        help="使用全绿 CoverageMetrics（离线 CI）；默认从 bars.db 统计",
+    )
+    p.add_argument(
+        "--bars-db",
+        default="",
+        help="bars.db 路径（默认 data/cache/bars.db）",
     )
     args = p.parse_args(argv)
 
@@ -169,8 +218,14 @@ def main(argv=None) -> int:
 
     print("[daily_run] queue=%s" % [d.isoformat() for d in queue])
     statuses = []
+    bars_path = args.bars_db or None
     for D in queue:
-        st = process_day(D, session_asof)
+        st = process_day(
+            D,
+            session_asof,
+            stub_coverage=args.stub_coverage,
+            bars_path=bars_path,
+        )
         statuses.append(st)
         if st != "ok":
             print("[daily_run] stop queue at %s status=%s (no skip past gap)" % (D, st))
