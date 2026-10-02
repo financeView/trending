@@ -2,13 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship the metrics engine end-to-end for P0.5: real OHLC → §5.1/§5.2 `T_raw` + §5.3 hysteresis → §6 right-side FSM (incl. §6.0 events + `hard_frozen` ends R) → §8.2 solar linear → persist `daily_stock` / `daily_l2` / `daily_l1` + `signal_event`; named §6.4 / §8.9 fixtures green in CI; wire **real** coverage stats into `daily_run` (replace `_stub_coverage`).
+**Goal:** Ship the metrics engine end-to-end for P0.5: real OHLC → §5.1/§5.2 `T_raw` + §5.3 hysteresis → §6 right-side FSM (incl. §6.0 events + `hard_frozen` ends R) → §8.2 solar linear → persist `daily_stock` / `daily_l2` / `daily_l1` + `signal_event`; named §6.4 / §8.9 fixtures green in CI; **extend** existing `daily_run` so `process_day` computes the cross-section (coverage scorer already exists — keep stub only behind `--stub-coverage`).
 
-**Architecture:** Pure metrics functions under `scripts/metrics/` consume per-symbol OHLC (+ ST/suspend flags) and emit temperature / FSM / solar outputs; `daily_run.process_day` orchestrates load → compute → UPSERT `daily_*` + append `signal_event` → evaluate `run_meta` with **real** coverage. Taxonomy for MVP may be a universe subset / stub L1–L2 map (`map_version` still written). Full SW YAML load, L1 Issues, and paper/live_shadow stay out of this plan.
+**Architecture:** Pure metrics functions under `scripts/metrics/` consume per-symbol OHLC (+ ST/suspend flags) and emit temperature / FSM / solar outputs; `daily_run.process_day` orchestrates **≤D 全日重放** from bars → UPSERT `daily_*` + append `signal_event` → evaluate `run_meta` with existing `compute_coverage_from_bars`. Taxonomy for MVP may be a universe subset / stub L1–L2 map (`map_version` still written). Full SW YAML load, L1 Issues, and paper/live_shadow stay out of this plan.
 
-**Dependency (钉死):** Real coverage wiring **depends on parallel data-wiring work** that populates `bars` with ST / suspend / `limit_*` and can compute `bar_coverage` / `computable_coverage` / `limit_coverage_asof` over `members_tradable` (market-data §7.2). Until those stats exist, keep stub only behind an explicit flag; default path must call the real scorer once data-wiring lands. Do **not** invent coverage from empty bars.
+**Data-wiring status（已落地，勿再当 blocker）:** `bars` 已有 qfq/raw、`is_st`/`is_suspended`、`limit_*` 写入路径；`compute_coverage_from_bars` + `members_tradable` stub 已在库；`daily_run` 默认真覆盖率、`--stub-coverage` 仅离线。本计划 **Tasks 1–7 不堵在 coverage**；Task 8 是把 **metrics 截面** 接进 `process_day`，不是重做 coverage API。Actions 仍 `--stub-coverage` 属运维跟进（全宇宙 sync 齐套后再关），不挡引擎开发。
 
-**重算策略：** ops §3.3 **Strategy A** — UPSERT `run_meta` / `daily_stock` / `daily_l2` / `daily_l1`；`signal_event` **append-only**（重跑日新行 + 旧行 `superseded_by`；禁止物理删已被引用行）。
+**重算策略：** ops §3.3 **Strategy A = 全日重放**：每次对可算宇宙用 **仅 ≤D 的 bars** + 冻结 `param_version`/`map_version` 从足够历史窗口滚到 D；**禁止**依赖持久化脏 `engine_state` 做增量步进（那是路径 B）。截面结果 **UPSERT** `run_meta` / `daily_*`；`signal_event` **append-only**（内容变了才新行 + 旧行 `superseded_by`；禁止物理删已被引用行）。
 
 **Tech Stack:** Python 3.11, pandas/numpy (features), sqlite3, PyYAML, pytest, GitHub Actions（沿用 P0 workflow）.
 
@@ -16,13 +16,14 @@
 
 - Specs: metrics ([`2026-09-29-trend-metrics-engine-design.md`](../specs/2026-09-29-trend-metrics-engine-design.md) §5–§8 / §6.4 / §8.9) · ops ([`2026-09-30-ops-action-and-eval-design.md`](../specs/2026-09-30-ops-action-and-eval-design.md) §4 schema · §8 P0.5 · §9) · market-data ([`2026-10-01-market-data-contract-design.md`](../specs/2026-10-01-market-data-contract-design.md) §6–§7) · P0 plan ([`2026-10-01-p0-daily-pipeline.md`](./2026-10-01-p0-daily-pipeline.md))
 - `ts_code` = Tushare `XXXXXX.SH|SZ`；信号价一律 `close_qfq`；`limit_*` 只与 raw 空间比较（本计划不实现成交层）
-- `hard_frozen := is_st OR explicit_hard_freeze_flag`；短停牌 / 单日 `T_raw=null` = **软冻**（不清 R）；ST 结束右侧 + `EXIT_RIGHT` (`forced_exit_untradable`)
+- **`hard_frozen`（MVP）:** `= bool(is_st)` from bars；`explicit_hard_freeze_flag` 预留，P0.5 **不建列**、不另定停牌 N。短停牌 / 单日 `T_raw=null` = **软冻**（不清 R）；ST → 结束右侧 + `EXIT_RIGHT` (`forced_exit_untradable`)
 - 事件枚举仅：`ENTER_RIGHT` | `EXIT_RIGHT` | `WARM_TO_HOT`（metrics §6.0）；进入日**不**另写 `WARM_TO_HOT`
 - 节气：进入日强制谷雨；结束日强制立秋且 `stage_score`/`raw`=**null**（禁止用 0）；只前进 peak；不可算不推进；拒绝 `require_solar_term_for_entry`
 - `float_mv`：合成权重 `null→1.0` 再归一；历史禁 spot 回刷
 - 续跑硬闸不变：队列遇首个 `status≠ok` 立即停；`last_ok` = 连续 ok 前缀末尾
 - Params：`config/metrics/a_share_daily.yaml`；变更 → bump `param_version`（离开 `p0-stub`）
 - Feature allowlist only（metrics §4.1）；禁止跨标的 rank 进温度树
+- `rank(T)`：**有符号** `沸=3 … 平=0 … 冻=-3`（metrics；替换 P0 `RANK.index` 无符号序）
 
 ## File map
 
@@ -37,19 +38,19 @@
 | `scripts/metrics/solar.py` | §8.2 线性 scorer + cut + clamp |
 | `scripts/metrics/s_temp.py` | §5.4 `S_temp`（MVP 保留；可从属） |
 | `scripts/metrics/aggregate.py` | L2/L1 合成收益 → 同套纯函数（§10；宇宙子集可 stub） |
-| `scripts/metrics/pipeline.py` | 单标的 / 单日编排：features→T→FSM→solar |
-| `scripts/common/db.py` | 补齐 `daily_l2`/`daily_l1`；`signal_event` supersede helper |
-| `scripts/common/coverage.py` | 保持 §7.2 谓词；新增 `compute_coverage_metrics(...)` 接口（实现可薄包装 data-wiring） |
-| `scripts/daily_run.py` | `process_day`：算截面 + 落库 + **真实 coverage** → `run_meta` |
+| `scripts/metrics/pipeline.py` | 单标的全日重放驱动：features→T→FSM→solar（无脏状态表） |
+| `scripts/common/db.py` | 补齐 `daily_l2`/`daily_l1`；`daily_stock` 加 `stage_score`/`stage_score_raw`；supersede helper |
+| `scripts/common/coverage.py` | **沿用**已有 `compute_coverage_from_bars` / `evaluate_ok`（勿新建并行 API） |
+| `scripts/daily_run.py` | `process_day`：全日重放 metrics → 落库 → 已有真实 coverage → `run_meta` |
 | `fixtures/temp_raw_gold.csv` | ≥20 行：§5.1 特征快照 → `T_raw`（升级列名对齐真实谓词） |
-| `fixtures/fsm/*.json` | §6.4 命名夹具（每 ID 一文件或一目录约定） |
+| `fixtures/fsm/*.json` | §6.4 命名夹具 |
 | `fixtures/solar/*.json` | §8.9 命名夹具 |
 | `tests/test_temp_raw_gold.py` | 金标 CI |
 | `tests/test_hysteresis.py` | max_step / 退出快路径 / bootstrap |
 | `tests/test_fsm_suite.py` | §6.4 全绿 |
 | `tests/test_solar_suite.py` | §8.9 全绿 |
 | `tests/test_signal_event_persist.py` | UPSERT daily_* + append/supersede |
-| `tests/test_daily_run_coverage_wire.py` | stub 替换；mock coverage 进 `run_meta` |
+| `tests/test_daily_run_metrics_wire.py` | `process_day` 写出截面 + `run_meta` 用真实 coverage |
 
 ## Tasks
 
@@ -69,7 +70,7 @@
 - [ ] Rewrite `scripts/metrics/temp_raw.py`:
   - Implement boolean predicates exactly as metrics §5.1 (`stack_bull/bear`, `hot_body`, `warm_body`, `cold_body`, `cool_body`, `boil_boost`, `freeze_boost`, `flat_body`)
   - Decision order §5.2: 沸→热→温→冻→寒→凉→平→兜底平
-  - Keep `RANK` / `rank()` but align numeric ranks to metrics：`沸=3…冻=-3`（与 P0 七档序一致即可用于 max_step）
+  - **`rank(T)` 钉死有符号：** `{"沸":3,"热":2,"温":1,"平":0,"凉":-1,"寒":-2,"冻":-3}`（删除 P0 无符号 `RANK.index`）
   - **API:** `decide_t_raw(preds: Mapping) -> str` 仍可测；另提供 `decide_t_raw_from_features(feats, params) -> str | None`（不可算 → `None`）
 - [ ] Upgrade `fixtures/temp_raw_gold.csv` to ≥20 rows using **§5.1 predicate columns** (or feature snapshots that deterministically map to them). Update `tests/test_temp_raw_gold.py` accordingly
 - [ ] Remove reliance on P0 stub columns (`above_ma20`, `vol_high`, …) once gold migrates; keep a one-release adapter only if needed for green CI mid-refactor, then delete
@@ -78,7 +79,7 @@
 ### Task 3: Hysteresis (§5.3)
 
 - [ ] Add `scripts/metrics/hysteresis.py`:
-  - State: `T_prev`, `pending_target`, `pending_count`
+  - State: `T_prev`, `pending_target`, `pending_count` — **仅作为重放过程中的内存态**，不落 engine_state 表
   - Bootstrap §5.3.1: first non-null `T_raw` with no usable `T_prev` → synthetic `T_prev=平`, clear pending, then §5.3.2
   - Daily step §5.3.2: extreme adjacency (热↔沸 / 寒↔冻); exit fast-path when `R=true` and `rank(desired)≤0` (clamp stepped ≥平 toward 0); else clip `max_step`; hysteresis_up/down pending
   - `T_raw=null`：不推进滞回（交 FSM §5.5）
@@ -88,7 +89,7 @@
 ### Task 4: Right-side FSM (§6 including §6.0)
 
 - [ ] Add `scripts/metrics/fsm.py` implementing metrics §6.3 pseudocode:
-  - Inputs: `T`, `hard_frozen`, prior state (`R`, days, `T_last_valid`, `T_prev_valid`, solar peak fields, `P0`, …)
+  - Inputs: `T`, `hard_frozen`（调用方传入；见 Global / Task 8 映射）, prior **replay** state (`R`, days, `T_last_valid`, `T_prev_valid`, solar peak fields, `P0`, …)
   - Priority: `hard_frozen` ends R first → `EXIT_RIGHT` / `exit_kind=forced_exit_untradable` / 立秋 / scores null；**同日不再温度进入**
   - Soft null: `R=true` + `T=null` + not hard → `T_fsm=T_last_valid`；`R=false` + null → skip transitions
   - Enter: `R=false` + `T_fsm∈{热,沸}` → `ENTER_RIGHT`, days=0, force 谷雨, `tag_warm_to_hot=true`（**不** emit `WARM_TO_HOT`）
@@ -153,45 +154,45 @@
 
 - [ ] Extend `scripts/common/db.py` SCHEMA:
   - `CREATE TABLE IF NOT EXISTS daily_l2` / `daily_l1` per ops §4（`trade_date, code, T, S_temp, RS, right_side, …, members_tradable, members_total`）
-  - Ensure `daily_stock` columns cover ops §4（已有则核对 `hard_frozen` / `close_qfq` / `float_mv` / tags / solar）
+  - `daily_stock` 核对并补齐：`hard_frozen`, `close_qfq`, `float_mv`, tags, `solar_term`，以及 **`stage_score` / `stage_score_raw`**（可空；结束日必须能落 **SQL NULL**，禁止用 0 顶）
 - [ ] Helpers:
-  - `upsert_daily_stock/l2/l1(conn, rows)` — Strategy A
+  - `upsert_daily_stock/l2/l1(conn, rows)` — 重放后的幂等写入（Strategy A 的落库面）
   - `append_signal_events(conn, events)` — insert new ids
-  - `supersede_signal_events_for_day(conn, trade_date, ts_code, event, new_id)` — 重跑时把同日同标的同 `event` 且 `superseded_by IS NULL` 的旧行指向新 id
+  - **Supersede 规则（钉死）：** 仅当同日同标的同 `event` 的 **active** 行（`superseded_by IS NULL`）与新 payload（`T`/`RS`/`detail` 规范化后）**内容不同**时：插入新行并把旧行 `superseded_by=新id`。内容相同 → **不**插新行、不 supersede（避免无意义历史膨胀）
 - [ ] `scripts/metrics/aggregate.py`（MVP）:
   - Universe subset OK（fixture list or stub map）；`member_set=tradable`
   - Weight by `float_mv` null→1.0 normalize；synthetic series → same pipeline as stock
   - L1 = member closure once（不嵌套 L2）
-- [ ] Tests: roundtrip UPSERT idempotent content；signal append + supersede leaves old row；active filter `superseded_by IS NULL`
+- [ ] Tests: roundtrip UPSERT idempotent content；payload 变 → supersede；payload 同 → 行数不变；active filter `superseded_by IS NULL`
 - [ ] Commit
 
-### Task 8: Wire real coverage into `daily_run`（协调 data-wiring）
+### Task 8: Wire metrics cross-section into `daily_run`（extend，不重做 coverage）
 
-**Depends on:** parallel work that can answer, for trade date `D` and universe `U=members_tradable`:
+**已有（勿重复造）：** `compute_coverage_from_bars`、`evaluate_ok`、`--stub-coverage`、`members_tradable`、bars 上 ST/limit 字段。
 
-- `bar_coverage` — fraction with raw+qfq OHLC + `is_suspended`/`is_st`（§7.2）
-- `computable_coverage` — fraction meeting metrics history gate（§3.3）
-- `limit_coverage_asof` — fraction with both `limit_up`/`limit_down` non-null（asof gate only）
-- ST / suspend flags available on bars (or joined table) so `hard_frozen` / tradable set are real
+**本 Task 目标：** 把 Task 1–7 的引擎接进 `process_day`。
 
-- [ ] Add `scripts/common/coverage.py::compute_coverage_metrics(conn_bars, universe, trade_date, *, min_history) -> CoverageMetrics`（薄封装；具体 SQL/统计可委托 data-wiring 模块，但 **符号与返回类型钉在本仓库**）
-- [ ] Modify `scripts/daily_run.py`:
-  - Remove default `_stub_coverage()` from happy path
-  - `process_day`: load bars for universe → run metrics pipeline for computable names → UPSERT `daily_*` → append/supersede `signal_event` → **compute real coverage** → `evaluate_ok` → UPSERT `run_meta` with `param_version` / `map_version` from config
-  - Keep `--stub-coverage` **only** for offline smoke without bars（document in `--help`）；CI offline unit tests may use it；Actions daily path must **not**
-- [ ] Tests: mock CoverageMetrics low limit on asof → `partial`；history day without limits still `ok` if bar/computable pass；assert `run_meta` fields match computed metrics（not 1.0 stubs）
-- [ ] Coordinate checklist（plan gate, not code）:
-  - [ ] Data-wiring exposes ST/`is_st` on asof bars
-  - [ ] Data-wiring exposes `limit_*` for asof（EM f51/f52 or equivalent）
-  - [ ] Universe builder returns `members_tradable` consistent with metrics §3.2
-  - [ ] Only then flip Actions / default CLI off stub
+- [ ] Modify `scripts/daily_run.py` `process_day`（Strategy A）:
+  1. 加载 universe（stub YAML OK）与 ≤D bars  
+  2. 对每标的 **从历史窗口重放到 D**（内存态；不读不写 engine_state 表）  
+  3. `hard_frozen = bool(is_st)`（bars 当日；无显式旗）  
+  4. UPSERT `daily_stock`（含 `stage_score`/`stage_score_raw`/`hard_frozen`/`close_qfq`）及可算的 L2/L1  
+  5. 按 Task 7 规则 append/supersede `signal_event`  
+  6. 调用 **已有** `compute_coverage_from_bars` → `evaluate_ok` → UPSERT `run_meta`（`param_version`/`map_version` 来自 config，离开 `p0-stub`）  
+- [ ] `--stub-coverage` 仅跳过覆盖率统计（仍可跑 metrics 若有 bars）；无 bars 的纯单元测可继续 stub；**文档写清** Actions 关 stub 的前提是全宇宙 sync 齐套（非本 Task 阻塞）
+- [ ] Tests (`tests/test_daily_run_metrics_wire.py`): 合成 bars → `daily_stock.T` 非空；asof 低 limit → `run_meta=partial`；历史日无 limit 仍可 `ok`；`hard_frozen`/`stage_score` 列有写入路径
+- [ ] Data-wiring checklist（状态，非 gate）:
+  - [x] ST/`is_st` 可写 bars（BaoStock 路径）
+  - [x] `limit_*` API/落库（EM；生产网络另验）
+  - [x] `members_tradable` stub builder
+  - [ ] Actions 去掉 `--stub-coverage`（等全宇宙 sync；可选 follow-up）
 - [ ] Commit
 
 ### Task 9: Integration smoke + Done-when hardening
 
-- [ ] Offline integration: tiny fixture bars.db (2–3 symbols, ≥252 synthetic sessions) → `daily_run --date … --force-trade-day` writes `daily_stock` rows with non-null `T` where computable；`signal_event` on enter/exit paths from fixture scenario
-- [ ] Confirm `pytest tests/ -q` includes gold + fsm suite + solar suite + persist + coverage wire
-- [ ] Document in README or plan note: P0.5 does not ship L1 Issues / paper_book
+- [ ] Offline integration: tiny fixture bars.db (2–3 symbols, ≥252 synthetic sessions) → `daily_run --date … --force-trade-day`（可 `--stub-coverage` 若只测截面）writes `daily_stock` rows with non-null `T` where computable；`signal_event` on enter/exit paths from fixture scenario；重跑同日 payload 不变则 event 行数不涨
+- [ ] Confirm `pytest tests/ -q` includes gold + fsm suite + solar suite + persist + metrics wire
+- [ ] Document in README or plan note: P0.5 does not ship L1 Issues / paper_book；Spearman/`test_C1` 非本 Done when 硬门槛
 - [ ] Commit
 
 ## Out of P0.5
@@ -203,12 +204,13 @@
 - Exit tags §11（`exit_tags_enabled` 保持 false）
 - Neural / non-linear solar scorer；solar KPI calibration campaigns beyond fixture suite
 - `board_calc_v1` limits；Tushare Pro upgrades
+- 日历级「缺行挖洞」防御（正常全日重放不需要）；`explicit_hard_freeze_flag` 列
 
 ## Done when（对齐 ops §9 P0.5）
 
-1. `pytest tests/ -q` 离线绿：含 `temp_raw` 金标（≥20）、`test_fsm_suite`（§6.4 全 ID）、`test_solar_suite`（§8.9 全 ID）、persist/supersede、coverage 非 stub 路径单测  
-2. 可算宇宙写出 `daily_stock` / `daily_l2` / `daily_l1`；同日重跑 UPSERT 行内容稳定  
-3. `signal_event` 按 §6.0 落库（`ENTER_RIGHT` / `EXIT_RIGHT` / `WARM_TO_HOT`）；重跑 append + `superseded_by`  
-4. `hard_frozen`（ST）结束右侧夹具绿；软冻不立秋夹具绿  
-5. `daily_run` 默认使用 **真实** bar/computable/limit coverage 写入 `run_meta`（依赖 data-wiring；stub 仅显式 flag）；asof limit 门禁与历史日规则仍满足 market-data §7.2  
-6. **不要求** L1 Issues、paper/live_shadow、完整行业 YAML  
+1. `pytest tests/ -q` 离线绿：含 `temp_raw` 金标（≥20）、`test_fsm_suite`（§6.4 全 ID）、`test_solar_suite`（§8.9 全 ID）、persist/supersede（内容变才替）、metrics wire  
+2. 可算宇宙写出 `daily_stock` / `daily_l2` / `daily_l1`（含可空 `stage_score`/`stage_score_raw`）；同日重跑 UPSERT 行内容稳定  
+3. `signal_event` 按 §6.0 落库；重跑仅在 payload 变化时 append + `superseded_by`  
+4. `hard_frozen`（MVP=`is_st`）结束右侧夹具绿；软冻不立秋夹具绿  
+5. `process_day` 默认走 **全日重放 + 已有真实 coverage** 写 `run_meta`；stub 仅显式 flag；§7.2 asof/历史规则仍成立  
+6. **不要求** L1 Issues、paper/live_shadow、完整行业 YAML、Spearman 门禁、Actions 立刻关 stub  
