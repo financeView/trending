@@ -56,39 +56,39 @@
 
 ### Task 1: Params + feature layer (OHLC → §4.1)
 
-- [ ] Extend `config/metrics/a_share_daily.yaml`: add `knots_g` / `knots_d` / `knots_v` (metrics §8.2 初值), `slope_scale`/`band`/`adx_s_*`/`s_vol_weight`/`spearman_min` as needed, bump `param_version` to e.g. `p05-v1`
-- [ ] Add `scripts/metrics/params.py`: `load_params(path) -> MetricsParams`
-- [ ] Add `scripts/metrics/features.py`:
+- [x] Extend `config/metrics/a_share_daily.yaml`: add `knots_g` / `knots_d` / `knots_v` (metrics §8.2 初值), `slope_scale`/`band`/`adx_s_*`/`s_vol_weight`/`spearman_min` as needed, bump `param_version` to e.g. `p05-v1`
+- [x] Add `scripts/metrics/params.py`: `load_params(path) -> MetricsParams`
+- [x] Add `scripts/metrics/features.py`:
   - Input: sorted trade-date OHLC frame (`close_qfq` required; high/low for ADX/ATR)
   - Output per date (or asof row): `MA_f`, `MA_s`, `slope_f`, `slope_s`, `ADX`, `sign`, `sigma_n`, `sigma_pctile`, `ret_k`, `ret_pctile`, `atr_pct`, computable flag
   - History不足 → features null / `computable=False`（§3.3：温度需 ~252 日）
-- [ ] Unit tests with synthetic OHLC (no network): known SMA; ADX smoke; σ%ile ∈[0,1]; short series → not computable
-- [ ] Commit
+- [x] Unit tests with synthetic OHLC (no network): known SMA; ADX smoke; σ%ile ∈[0,1]; short series → not computable
+- [x] Commit
 
 ### Task 2: Real `T_raw` decision tree (§5.1 / §5.2)
 
-- [ ] Rewrite `scripts/metrics/temp_raw.py`:
+- [x] Rewrite `scripts/metrics/temp_raw.py`:
   - Implement boolean predicates exactly as metrics §5.1 (`stack_bull/bear`, `hot_body`, `warm_body`, `cold_body`, `cool_body`, `boil_boost`, `freeze_boost`, `flat_body`)
   - Decision order §5.2: 沸→热→温→冻→寒→凉→平→兜底平
   - **`rank(T)` 钉死有符号：** `{"沸":3,"热":2,"温":1,"平":0,"凉":-1,"寒":-2,"冻":-3}`（删除 P0 无符号 `RANK.index`）
   - **API:** `decide_t_raw(preds: Mapping) -> str` 仍可测；另提供 `decide_t_raw_from_features(feats, params) -> str | None`（不可算 → `None`）
-- [ ] Upgrade `fixtures/temp_raw_gold.csv` to ≥20 rows using **§5.1 predicate columns** (or feature snapshots that deterministically map to them). Update `tests/test_temp_raw_gold.py` accordingly
-- [ ] Remove reliance on P0 stub columns (`above_ma20`, `vol_high`, …) once gold migrates; keep a one-release adapter only if needed for green CI mid-refactor, then delete
-- [ ] Commit
+- [x] Upgrade `fixtures/temp_raw_gold.csv` to ≥20 rows using **§5.1 predicate columns** (or feature snapshots that deterministically map to them). Update `tests/test_temp_raw_gold.py` accordingly
+- [x] Remove reliance on P0 stub columns (`above_ma20`, `vol_high`, …) once gold migrates; keep a one-release adapter only if needed for green CI mid-refactor, then delete
+- [x] Commit
 
 ### Task 3: Hysteresis (§5.3)
 
-- [ ] Add `scripts/metrics/hysteresis.py`:
+- [x] Add `scripts/metrics/hysteresis.py`:
   - State: `T_prev`, `pending_target`, `pending_count` — **仅作为重放过程中的内存态**，不落 engine_state 表
   - Bootstrap §5.3.1: first non-null `T_raw` with no usable `T_prev` → synthetic `T_prev=平`, clear pending, then §5.3.2
   - Daily step §5.3.2: extreme adjacency (热↔沸 / 寒↔冻); exit fast-path when `R=true` and `rank(desired)≤0` (clamp stepped ≥平 toward 0); else clip `max_step`; hysteresis_up/down pending
   - `T_raw=null`：不推进滞回（交 FSM §5.5）
-- [ ] Tests (`tests/test_hysteresis.py`): bootstrap 首日 `T_raw=热` 不 snap；`max_step=2` 爬升；退出快路径从沸 ≤1 交易日可到平（默认参）；pending 未满保持 `T_prev`
-- [ ] Commit
+- [x] Tests (`tests/test_hysteresis.py`): bootstrap 首日 `T_raw=热` 不 snap；`max_step=2` 爬升；退出快路径从沸 ≤1 交易日可到平（默认参）；pending 未满保持 `T_prev`
+- [x] Commit
 
 ### Task 4: Right-side FSM (§6 including §6.0)
 
-- [ ] Add `scripts/metrics/fsm.py` implementing metrics §6.3 pseudocode:
+- [x] Add `scripts/metrics/fsm.py` implementing metrics §6.3 pseudocode:
   - Inputs: `T`, `hard_frozen`（调用方传入；见 Global / Task 8 映射）, prior **replay** state (`R`, days, `T_last_valid`, `T_prev_valid`, solar peak fields, `P0`, …)
   - Priority: `hard_frozen` ends R first → `EXIT_RIGHT` / `exit_kind=forced_exit_untradable` / 立秋 / scores null / **`tag_warm_to_flat=true`**（与温度退出同形；§6.0/§6.3）；**同日不再温度进入**
   - Soft null: `R=true` + `T=null` + not hard → `T_fsm=T_last_valid`；`R=false` + null → skip transitions
@@ -96,24 +96,24 @@
   - Persist / reconfirm: trading days +=1；温→热/沸 → `WARM_TO_HOT` only
   - Temperature exit: `T_fsm∈{平,凉,寒,冻}` → `EXIT_RIGHT` / `exit_kind=temperature`
   - Natural-day bump helper for calendar gaps (`fsm_fri_mon`)
-- [ ] Event records: structured list `{event, T, detail}` for persistence layer
-- [ ] Commit（夹具全量在 Task 6）
+- [x] Event records: structured list `{event, T, detail}` for persistence layer
+- [x] Commit（夹具全量在 Task 6）
 
 ### Task 5: Solar linear (§8.2)
 
-- [ ] Add `scripts/metrics/solar.py`:
+- [x] Add `scripts/metrics/solar.py`:
   - `piecewise_linear_clamp(x, knots)` — 禁止端点外推
   - Enter day: force 谷雨, scores 0, **do not** write `v` into peak
   - Ongoing: `g_raw_eff=max(g_raw,0)`, `d_raw`, `v_raw=σ%ile` → weighted raw → peak = max(prev, raw) → `cut(peak)` via `stage_cuts`
   - Exit day: force 立秋；`stage_score`/`raw`=null（不是 0）
   - Not computable (missing P or σ%ile): keep yesterday solar + peak；do not advance
   - Config gate: reject any `require_solar_term_for_entry` if present (`test_C3_reject_solar_entry_gate`)
-- [ ] Wire solar updates from FSM persist path only（进入/结束强制覆盖）
-- [ ] Commit（§8.9 夹具在 Task 6）
+- [x] Wire solar updates from FSM persist path only（进入/结束强制覆盖）
+- [x] Commit（§8.9 夹具在 Task 6）
 
 ### Task 6: Named fixtures → CI (§6.4 + §8.9)
 
-- [ ] Create `fixtures/fsm/` JSON (or yaml) for **every** ID in metrics §6.4:
+- [x] Create `fixtures/fsm/` JSON (or yaml) for **every** ID in metrics §6.4:
 
   | ID | Must assert |
   |----|-------------|
@@ -134,7 +134,7 @@
   | `fsm_untradable_freeze` | 短 null 不立秋、不清 R |
   | `fsm_st_ends_right` | ST → `EXIT_RIGHT` forced + 立秋 + `R=false` + **`tag_warm_to_flat`** |
 
-- [ ] Create `fixtures/solar/` for **every** ID in metrics §8.9:
+- [x] Create `fixtures/solar/` for **every** ID in metrics §8.9:
 
   | ID | Must assert |
   |----|-------------|
@@ -146,26 +146,26 @@
   | `solar_clamp_high` | g 分量 clamp 1.0；无 NaN |
   | `solar_halt_no_advance` | 不可算不前进、不立秋 |
 
-- [ ] `tests/test_fsm_suite.py` + `tests/test_solar_suite.py`: parametrize over fixture dir；CI must fail if any ID missing
-- [ ] Optional: `scripts/metrics/pipeline.py` single-symbol day driver used by fixtures and daily_run
-- [ ] Commit
+- [x] `tests/test_fsm_suite.py` + `tests/test_solar_suite.py`: parametrize over fixture dir；CI must fail if any ID missing
+- [x] Optional: `scripts/metrics/pipeline.py` single-symbol day driver used by fixtures and daily_run
+- [x] Commit
 
 ### Task 7: Persist `daily_*` + `signal_event`
 
-- [ ] Extend `scripts/common/db.py` SCHEMA:
+- [x] Extend `scripts/common/db.py` SCHEMA:
   - `CREATE TABLE IF NOT EXISTS daily_l2` / `daily_l1`：至少含 ops §4 核心列（`trade_date, code, T, S_temp, RS, right_side, tag_warm_to_hot, tag_warm_to_flat, solar_term, members_tradable, members_total`）。**不要求**与个股同构 `hard_frozen` / `stage_score*`（篮子无 ST 语义；节气分数 MVP 可只落 `daily_stock`）
   - `daily_stock` 核对并补齐：`hard_frozen`, `close_qfq`, `float_mv`, tags, `solar_term`，以及 **`stage_score` / `stage_score_raw`**（可空；结束日必须能落 **SQL NULL**，禁止用 0 顶）
-- [ ] **已有库迁移（钉死）：** `CREATE IF NOT EXISTS` **不会**给旧表加列。`init_schema`（或旁路 `migrate_schema`）须对已存在的 `daily_stock` 做幂等 `ALTER TABLE … ADD COLUMN`（缺则加：`stage_score`, `stage_score_raw`，以及历史库若仍缺的 `hard_frozen`/`close_qfq`/`float_mv`）。单测：先建无新列的旧表 → migrate → 可 INSERT NULL score
-- [ ] Helpers:
+- [x] **已有库迁移（钉死）：** `CREATE IF NOT EXISTS` **不会**给旧表加列。`init_schema`（或旁路 `migrate_schema`）须对已存在的 `daily_stock` 做幂等 `ALTER TABLE … ADD COLUMN`（缺则加：`stage_score`, `stage_score_raw`，以及历史库若仍缺的 `hard_frozen`/`close_qfq`/`float_mv`）。单测：先建无新列的旧表 → migrate → 可 INSERT NULL score
+- [x] Helpers:
   - `upsert_daily_stock/l2/l1(conn, rows)` — 重放后的幂等写入（Strategy A 的落库面）
   - `append_signal_events(conn, events)` — insert new ids
   - **Supersede 规则（钉死）：** 仅当同日同标的同 `event` 的 **active** 行（`superseded_by IS NULL`）与新 payload（`T`/`RS`/`detail` 规范化后）**内容不同**时：插入新行并把旧行 `superseded_by=新id`。内容相同 → **不**插新行、不 supersede（避免无意义历史膨胀）
-- [ ] `scripts/metrics/aggregate.py`（MVP）:
+- [x] `scripts/metrics/aggregate.py`（MVP）:
   - Universe subset OK（fixture list or stub map）；`member_set=tradable`
   - Weight by `float_mv` null→1.0 normalize；synthetic series → same **温度/FSM** pipeline as stock（输出写入 L2/L1 核心列；不必强行写 `stage_score`）
   - L1 = member closure once（不嵌套 L2）
-- [ ] Tests: roundtrip UPSERT idempotent content；payload 变 → supersede；payload 同 → 行数不变；active filter `superseded_by IS NULL`；**migrate 旧表加列**
-- [ ] Commit
+- [x] Tests: roundtrip UPSERT idempotent content；payload 变 → supersede；payload 同 → 行数不变；active filter `superseded_by IS NULL`；**migrate 旧表加列**
+- [x] Commit
 
 ### Task 8: Wire metrics cross-section into `daily_run`（extend，不重做 coverage）
 
@@ -173,28 +173,28 @@
 
 **本 Task 目标：** 把 Task 1–7 的引擎接进 `process_day`。
 
-- [ ] Modify `scripts/daily_run.py` `process_day`（Strategy A）:
+- [x] Modify `scripts/daily_run.py` `process_day`（Strategy A）:
   1. 加载 universe（stub YAML OK）与 ≤D bars  
   2. 对每标的 **从历史窗口重放到 D**（内存态；不读不写 engine_state 表）  
   3. `hard_frozen = bool(is_st)`（bars 当日；无显式旗）  
   4. UPSERT `daily_stock`（含 `stage_score`/`stage_score_raw`/`hard_frozen`/`close_qfq`）及可算的 L2/L1  
   5. 按 Task 7 规则 append/supersede `signal_event`  
   6. 调用 **已有** `compute_coverage_from_bars` → `evaluate_ok` → UPSERT `run_meta`（`param_version`/`map_version` 来自 config，离开 `p0-stub`）  
-- [ ] `--stub-coverage` 仅跳过覆盖率统计（仍可跑 metrics 若有 bars）；无 bars 的纯单元测可继续 stub；**文档写清** Actions 关 stub 的前提是全宇宙 sync 齐套（非本 Task 阻塞）
-- [ ] Tests (`tests/test_daily_run_metrics_wire.py`): 合成 bars → `daily_stock.T` 非空；asof 低 limit → `run_meta=partial`；历史日无 limit 仍可 `ok`；`hard_frozen`/`stage_score` 列有写入路径
-- [ ] Data-wiring checklist（状态，非 gate）:
+- [x] `--stub-coverage` 仅跳过覆盖率统计（仍可跑 metrics 若有 bars）；无 bars 的纯单元测可继续 stub；**文档写清** Actions 关 stub 的前提是全宇宙 sync 齐套（非本 Task 阻塞）
+- [x] Tests (`tests/test_daily_run_metrics_wire.py`): 合成 bars → `daily_stock.T` 非空；asof 低 limit → `run_meta=partial`；历史日无 limit 仍可 `ok`；`hard_frozen`/`stage_score` 列有写入路径
+- [x] Data-wiring checklist（状态，非 gate）:
   - [x] ST/`is_st` 可写 bars（BaoStock 路径）
   - [x] `limit_*` API/落库（EM；生产网络另验）
   - [x] `members_tradable` stub builder
   - [ ] Actions 去掉 `--stub-coverage`（等全宇宙 sync；可选 follow-up）
-- [ ] Commit
+- [x] Commit
 
 ### Task 9: Integration smoke + Done-when hardening
 
-- [ ] Offline integration: tiny fixture bars.db (2–3 symbols, ≥252 synthetic sessions) → `daily_run --date … --force-trade-day`（可 `--stub-coverage` 若只测截面）writes `daily_stock` rows with non-null `T` where computable；`signal_event` on enter/exit paths from fixture scenario；重跑同日 payload 不变则 event 行数不涨
-- [ ] Confirm `pytest tests/ -q` includes gold + fsm suite + solar suite + persist + metrics wire
-- [ ] Document in README or plan note: P0.5 does not ship L1 Issues / paper_book；Spearman/`test_C1` 非本 Done when 硬门槛
-- [ ] Commit
+- [x] Offline integration: tiny fixture bars.db (2–3 symbols, ≥252 synthetic sessions) → `daily_run --date … --force-trade-day`（可 `--stub-coverage` 若只测截面）writes `daily_stock` rows with non-null `T` where computable；`signal_event` on enter/exit paths from fixture scenario；重跑同日 payload 不变则 event 行数不涨
+- [x] Confirm `pytest tests/ -q` includes gold + fsm suite + solar suite + persist + metrics wire
+- [x] Document in README or plan note: P0.5 does not ship L1 Issues / paper_book；Spearman/`test_C1` 非本 Done when 硬门槛
+- [x] Commit
 
 ## Out of P0.5
 

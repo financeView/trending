@@ -253,3 +253,86 @@ def test_stub_coverage_still_runs_metrics(tmp_path, monkeypatch):
     ).fetchone()[0]
     assert t is not None
     tconn.close()
+
+
+def test_integration_smoke_enter_exit_and_same_day_rerun(tmp_path, monkeypatch):
+    """Task 9: 2–3 symbols, CLI --date --force-trade-day, events, rerun no growth.
+
+    Replay history is shortened (Task 8 ``vol_hist`` patch), not a 252-day fixture.
+    Walk each weekday so ENTER_RIGHT from an earlier session is persisted; last
+    bar ST on one name yields EXIT_RIGHT on D.
+    """
+    from scripts.daily_run import main, process_day
+
+    enter_code = "000001.SZ"
+    exit_code = "000002.SZ"
+    third = "600519.SH"
+    members = [enter_code, exit_code, third]
+    bars_path = _patch_run(tmp_path, monkeypatch, members)
+    D = date(2024, 1, 10)
+    # vol_hist=40 → first T on bar 40; extra sessions so hysteresis can ENTER then ST EXIT.
+    dates = _weekdays_ending(D, SHORT_N + 8)
+    conn = bars_conn(bars_path)
+    _seed_uptrend(conn, enter_code, dates, start_px=10.0)
+    _seed_uptrend(conn, exit_code, dates, is_st=1, start_px=12.0)
+    _seed_uptrend(conn, third, dates, start_px=8.0)
+    conn.close()
+
+    for d in dates[SHORT_N - 1 :]:
+        process_day(d, D, bars_path=bars_path, stub_coverage=True)
+
+    rc = main(
+        [
+            "--date",
+            D.isoformat(),
+            "--force-trade-day",
+            "--stub-coverage",
+            "--bars-db",
+            bars_path,
+        ]
+    )
+    assert rc == 0
+
+    tconn = get_conn()
+    init_schema(tconn)
+    td = D.isoformat()
+    for ts in members:
+        t = tconn.execute(
+            "SELECT T FROM daily_stock WHERE ts_code=? AND trade_date=?",
+            (ts, td),
+        ).fetchone()
+        assert t is not None and t[0] not in (None, "")
+
+    events = tconn.execute(
+        "SELECT ts_code, trade_date, event FROM signal_event WHERE superseded_by IS NULL"
+    ).fetchall()
+    kinds = {(row[0], row[2]) for row in events}
+    assert (enter_code, "ENTER_RIGHT") in kinds
+    assert (exit_code, "ENTER_RIGHT") in kinds
+    assert (exit_code, "EXIT_RIGHT") in kinds
+    exit_row = tconn.execute(
+        """
+        SELECT trade_date, detail FROM signal_event
+        WHERE ts_code=? AND event='EXIT_RIGHT' AND superseded_by IS NULL
+        """,
+        (exit_code,),
+    ).fetchone()
+    assert exit_row is not None and exit_row[0] == td
+    n_before = tconn.execute("SELECT COUNT(*) FROM signal_event").fetchone()[0]
+    tconn.close()
+
+    rc2 = main(
+        [
+            "--date",
+            D.isoformat(),
+            "--force-trade-day",
+            "--stub-coverage",
+            "--bars-db",
+            bars_path,
+        ]
+    )
+    assert rc2 == 0
+    tconn = get_conn()
+    n_after = tconn.execute("SELECT COUNT(*) FROM signal_event").fetchone()[0]
+    assert n_after == n_before
+    tconn.close()
