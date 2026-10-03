@@ -74,6 +74,13 @@ class MetricsParams:
 def load_params(path: PathLike) -> MetricsParams:
     with open(path, encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
+    if not isinstance(raw, dict):
+        raise ValueError("metrics yaml must be a mapping")
+    if "require_solar_term_for_entry" in raw:
+        raise ValueError(
+            "require_solar_term_for_entry is forbidden (metrics C3 / §8.3); "
+            "solar term must not gate right-side entry"
+        )
     cuts = raw.get("stage_cuts") or []
     return MetricsParams(
         param_version=str(raw["param_version"]),
