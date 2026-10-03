@@ -1,12 +1,18 @@
 """Single-symbol replay: hysteresis + FSM + solar (Strategy A, in-memory only)."""
 from __future__ import annotations
 
+from datetime import date, datetime
+from math import isfinite
 from typing import Any, Mapping, Optional, Sequence
 
+import pandas as pd
+
+from scripts.metrics.features import compute_features
 from scripts.metrics.fsm import EVENT_ENTER, EVENT_EXIT, RightSideFsm
 from scripts.metrics.hysteresis import Hysteresis
 from scripts.metrics.params import MetricsParams
 from scripts.metrics.solar import piecewise_linear_clamp, step_solar, SOLAR_TERMS_ASC, SolarState
+from scripts.metrics.temp_raw import decide_t_raw_from_features
 
 _TERM_ORD = {t: i for i, t in enumerate(SOLAR_TERMS_ASC)}
 
@@ -87,10 +93,12 @@ def replay_days(
                 exit_kind = (e.get("detail") or {}).get("exit_kind")
 
         snap: dict[str, Any] = {
+            "trade_date": day.get("trade_date"),
             "T": fsm.T_fsm,
             "T_raw": t_raw,
             "R": fsm.R,
             "events": names,
+            "event_records": list(events),
             "exit_kind": exit_kind,
             "tag_warm_to_hot": fsm.tag_warm_to_hot,
             "tag_warm_to_flat": fsm.tag_warm_to_flat,
@@ -115,3 +123,99 @@ def replay_days(
         out.append(snap)
         prev_term = fsm.solar_term
     return out
+
+
+def _as_trade_date(value: Any) -> str:
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    return str(value)
+
+
+def _opt_finite(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    try:
+        x = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not isfinite(x):
+        return None
+    return x
+
+
+def _feat_map(row: Mapping[str, Any], close: Optional[float]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for k, v in dict(row).items():
+        if k == "computable":
+            try:
+                out[k] = bool(v) and not (isinstance(v, float) and not isfinite(v))
+            except (TypeError, ValueError):
+                out[k] = False
+        else:
+            out[k] = _opt_finite(v)
+    if close is not None:
+        out["P"] = close
+        out["close_qfq"] = close
+    return out
+
+
+def replay_from_ohlc(
+    params: MetricsParams,
+    records: Sequence[Mapping[str, Any]],
+    *,
+    min_history: Optional[int] = None,
+) -> list[dict[str, Any]]:
+    """Full-day replay from ≤D bars (in-memory). No engine_state.
+
+    ``records`` must be sorted by ``trade_date`` and include ``close_qfq`` plus
+    high/low (``high_qfq``/``low_qfq`` or ``high``/``low``). ``hard_frozen`` for
+    each day is ``bool(is_st)`` on that bar.
+    """
+    if not records:
+        return []
+    df = pd.DataFrame(list(records))
+    df = df.sort_values("trade_date").reset_index(drop=True)
+    feat = compute_features(df, params, min_history=min_history)
+    days: list[dict[str, Any]] = []
+    for i in range(len(df)):
+        bar = df.iloc[i]
+        close = _opt_finite(bar.get("close_qfq", bar.get("close")))
+        feat_row = feat.iloc[i] if i < len(feat) else {}
+        feats = _feat_map(feat_row, close)
+        t_raw = decide_t_raw_from_features(feats, params)
+        hard = bool(int(bar.get("is_st") or 0))
+        days.append(
+            {
+                "trade_date": _as_trade_date(bar["trade_date"]),
+                "T_raw": t_raw,
+                "hard_frozen": hard,
+                "P": close,
+                "sigma_pctile": feats.get("sigma_pctile"),
+                "atr_pct": feats.get("atr_pct"),
+                "close_qfq": close,
+                "float_mv": _opt_finite(bar.get("float_mv")),
+                "amount": _opt_finite(bar.get("amount")),
+                "is_suspended": bool(int(bar.get("is_suspended") or 0)),
+            }
+        )
+    for i, day in enumerate(days[:-1]):
+        d0 = date.fromisoformat(str(day["trade_date"]))
+        d1 = date.fromisoformat(str(days[i + 1]["trade_date"]))
+        bump = (d1 - d0).days - 1
+        if bump > 0:
+            day["natural_bump_after"] = bump
+    snaps = replay_days(params, days)
+    for snap, day in zip(snaps, days):
+        snap["close_qfq"] = day.get("close_qfq")
+        snap["float_mv"] = day.get("float_mv")
+        snap["amount"] = day.get("amount")
+        snap["hard_frozen"] = bool(day.get("hard_frozen"))
+        snap["is_suspended"] = bool(day.get("is_suspended"))
+    return snaps

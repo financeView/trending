@@ -22,4 +22,4 @@ python scripts/daily_run.py --date 2024-01-10 --force-trade-day --offline-calend
 
 - Plan: `docs/superpowers/plans/2026-10-01-p0-daily-pipeline.md`
 - Data contract: `docs/superpowers/specs/2026-10-01-market-data-contract-design.md`
-- Actions: `.github/workflows/daily-trend.yml` (cron 北京 19:00; uses `--stub-coverage` until full sync)
+- Actions: `.github/workflows/daily-trend.yml` (cron 北京 19:00). `--stub-coverage` only skips coverage **stats** (keeps CI green); metrics replay still runs when bars exist. Turn stub off in Actions only after **full-universe sync** is in the workflow (not a P0.5 code blocker).

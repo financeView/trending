@@ -192,7 +192,7 @@ def test_process_day_uses_real_coverage(tmp_path, monkeypatch):
 
     uni = tmp_path / "uni.yaml"
     uni.write_text(
-        "members:\n  - 000001.SZ\n  - 600519.SH\nquarantine: []\n",
+        "map_version: p05-v1\nmembers:\n  - 000001.SZ\n  - 600519.SH\nquarantine: []\n",
         encoding="utf-8",
     )
     monkeypatch.setenv("UNIVERSE_YAML", str(uni))

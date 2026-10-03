@@ -20,20 +20,31 @@ _DEFAULT_UNIVERSE = os.path.join(
 )
 
 
-def load_universe_codes(path: Optional[str] = None) -> List[str]:
-    """加载分类宇宙 ts_code 列表（stub YAML，直至完整 SW 映射）。"""
+def _universe_yaml(path: Optional[str] = None) -> dict:
     p = path or os.environ.get("UNIVERSE_YAML") or _DEFAULT_UNIVERSE
     with open(p, encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
-    members = data.get("members") or []
+    if not isinstance(data, dict):
+        raise ValueError("universe yaml must be a mapping")
+    return data
+
+
+def load_universe_codes(path: Optional[str] = None) -> List[str]:
+    """加载分类宇宙 ts_code 列表（stub YAML，直至完整 SW 映射）。"""
+    members = _universe_yaml(path).get("members") or []
     return [to_ts_code(c) for c in members]
 
 
+def load_map_version(path: Optional[str] = None) -> str:
+    """Taxonomy ``map_version`` from universe YAML (P0.5 stub: p05-v1)."""
+    raw = _universe_yaml(path).get("map_version")
+    if raw is None or str(raw).strip() == "":
+        raise ValueError("universe yaml missing map_version")
+    return str(raw)
+
+
 def load_quarantine_codes(path: Optional[str] = None) -> Set[str]:
-    p = path or os.environ.get("UNIVERSE_YAML") or _DEFAULT_UNIVERSE
-    with open(p, encoding="utf-8") as f:
-        data = yaml.safe_load(f) or {}
-    return {to_ts_code(c) for c in (data.get("quarantine") or [])}
+    return {to_ts_code(c) for c in (_universe_yaml(path).get("quarantine") or [])}
 
 
 def members_tradable(

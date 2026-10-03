@@ -1,5 +1,5 @@
-map_version: p0-stub
-note: "Full SW2021→L1 YAML comes in taxonomy implementation; P0 uses stub map_version only."
+map_version: p05-v1
+note: "Full SW2021→L1 YAML comes in taxonomy implementation; P0.5 uses stub map_version p05-v1."
 l1_ids:
   - l1_health
   - l1_tmt

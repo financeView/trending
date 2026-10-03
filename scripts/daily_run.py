@@ -13,7 +13,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from scripts.common import calendar as cal
-from scripts.common.bars import bars_conn
+from scripts.common.bars import DEFAULT_BARS_DB, bars_conn
 from scripts.common.coverage import (
     CoverageMetrics,
     OK_PREDICATE_VERSION,
@@ -21,13 +21,36 @@ from scripts.common.coverage import (
     evaluate_ok,
 )
 from scripts.common.db import (
+    append_signal_events,
     first_unfinished_trade_date,
     get_conn,
     init_schema,
     last_ok_trade_date,
+    upsert_daily_l1,
+    upsert_daily_l2,
+    upsert_daily_stock,
     upsert_rows,
     write_heartbeat,
 )
+from scripts.common.universe import load_map_version, load_universe_codes
+from scripts.metrics.aggregate import (
+    MEMBER_SET,
+    aggregate_l1,
+    aggregate_l2,
+    taxonomy_for_stock,
+)
+from scripts.metrics.params import MetricsParams, load_params
+from scripts.metrics.pipeline import replay_from_ohlc
+
+_METRICS_YAML = os.path.join(_ROOT, "config", "metrics", "a_share_daily.yaml")
+
+_BARS_SELECT = """
+SELECT trade_date, open_qfq, high_qfq, low_qfq, close_qfq,
+       is_st, is_suspended, float_mv, amount
+FROM bars
+WHERE ts_code=? AND trade_date<=?
+ORDER BY trade_date ASC
+"""
 
 
 def _parse_date(s: str) -> dt.date:
@@ -95,6 +118,155 @@ def _resolve_coverage(
         bconn.close()
 
 
+def _sql_float(value) -> float | None:
+    if value is None:
+        return None
+    try:
+        x = float(value)
+    except (TypeError, ValueError):
+        return None
+    if x != x or x in (float("inf"), float("-inf")):
+        return None
+    return x
+
+
+def _sql_int_bool(value) -> int:
+    return int(bool(value))
+
+
+def load_metrics_params() -> MetricsParams:
+    path = os.environ.get("METRICS_PARAMS_YAML") or _METRICS_YAML
+    return load_params(path)
+
+
+def _metrics_min_history() -> int | None:
+    """Optional test override. Shortening this alone does not cut vol_hist=252."""
+    raw = os.environ.get("METRICS_MIN_HISTORY", "").strip()
+    if raw:
+        return int(raw)
+    return None
+
+
+def _bars_db_path(bars_path: str | None) -> str | None:
+    if bars_path:
+        return bars_path
+    if os.path.exists(DEFAULT_BARS_DB):
+        return DEFAULT_BARS_DB
+    return None
+
+
+def _load_symbol_bars(conn, ts_code: str, D: dt.date) -> list[dict]:
+    rows = conn.execute(_BARS_SELECT, (ts_code, D.isoformat())).fetchall()
+    out = []
+    for r in rows:
+        if r[4] is None or r[2] is None or r[3] is None:
+            continue
+        out.append(
+            {
+                "trade_date": r[0],
+                "open_qfq": r[1],
+                "high_qfq": r[2],
+                "low_qfq": r[3],
+                "close_qfq": r[4],
+                "is_st": r[5],
+                "is_suspended": r[6],
+                "float_mv": r[7],
+                "amount": r[8],
+            }
+        )
+    return out
+
+
+def _snap_to_daily_stock(ts_code: str, snap: dict) -> dict:
+    sw, l1 = taxonomy_for_stock(ts_code)
+    return {
+        "trade_date": snap["trade_date"],
+        "ts_code": ts_code,
+        "sw_l2_code": sw,
+        "l1_id": l1,
+        "T": snap.get("T"),
+        "S_temp": _sql_float(snap.get("S_temp")),
+        "RS": _sql_float(snap.get("RS")),
+        "universe_id": "local_stock",
+        "right_side": _sql_int_bool(snap.get("R")),
+        "right_side_days_natural": snap.get("days_natural"),
+        "right_side_days_trading": snap.get("days_trading"),
+        "tag_warm_to_hot": _sql_int_bool(snap.get("tag_warm_to_hot")),
+        "tag_warm_to_flat": _sql_int_bool(snap.get("tag_warm_to_flat")),
+        "solar_term": snap.get("solar_term"),
+        "hard_frozen": _sql_int_bool(snap.get("hard_frozen")),
+        "amount": _sql_float(snap.get("amount")),
+        "close_qfq": _sql_float(snap.get("close_qfq")),
+        "float_mv": _sql_float(snap.get("float_mv")),
+        "stage_score": _sql_float(snap.get("stage_score")),
+        "stage_score_raw": _sql_float(snap.get("stage_score_raw")),
+    }
+
+
+def replay_metrics_cross_section(
+    D: dt.date,
+    *,
+    bars_path: str | None,
+    params: MetricsParams,
+    universe: list[str],
+) -> tuple[list[dict], list[dict], list[dict], list[dict]]:
+    """Strategy A: replay each symbol from bars ≤D in memory; persist D only."""
+    path = _bars_db_path(bars_path)
+    if path is None:
+        return [], [], [], []
+    bconn = bars_conn(path)
+    try:
+        min_hist = _metrics_min_history()
+        stock_rows: list[dict] = []
+        events: list[dict] = []
+        td = D.isoformat()
+        for ts in universe:
+            records = _load_symbol_bars(bconn, ts, D)
+            if not records:
+                continue
+            snaps = replay_from_ohlc(params, records, min_history=min_hist)
+            asof_snaps = [s for s in snaps if s.get("trade_date") == td]
+            if not asof_snaps:
+                continue
+            snap = asof_snaps[-1]
+            row = _snap_to_daily_stock(ts, snap)
+            row["_is_suspended"] = bool(snap.get("is_suspended"))
+            stock_rows.append(row)
+            sw, l1 = taxonomy_for_stock(ts)
+            for rec in snap.get("event_records") or []:
+                events.append(
+                    {
+                        "trade_date": td,
+                        "ts_code": ts,
+                        "sw_l2_code": sw,
+                        "l1_id": l1,
+                        "event": rec.get("event"),
+                        "T": rec.get("T"),
+                        "RS": None,
+                        "detail": rec.get("detail") or {},
+                    }
+                )
+        tradable = {
+            r["ts_code"]
+            for r in stock_rows
+            if not r.get("hard_frozen") and not r.get("_is_suspended")
+        }
+        tradable_rows = [r for r in stock_rows if r["ts_code"] in tradable]
+        l2_rows = [
+            row
+            for row in aggregate_l2(tradable_rows, td)
+            if row.get("members_tradable")
+        ]
+        l1_rows = [
+            row
+            for row in aggregate_l1(tradable_rows, td)
+            if row.get("members_tradable")
+        ]
+        return stock_rows, l2_rows, l1_rows, events
+    finally:
+        bconn.close()
+
+
 def process_day(
     D: dt.date,
     session_asof: dt.date,
@@ -106,6 +278,22 @@ def process_day(
     conn = get_conn()
     init_schema(conn)
     started = dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    params = load_metrics_params()
+    map_version = load_map_version()
+    universe = load_universe_codes()
+    # Metrics first: --stub-coverage only skips coverage stats, not replay.
+    stock_rows, l2_rows, l1_rows, events = replay_metrics_cross_section(
+        D, bars_path=bars_path, params=params, universe=universe
+    )
+    if stock_rows:
+        upsert_daily_stock(conn, stock_rows, commit=False)
+    if l2_rows:
+        upsert_daily_l2(conn, l2_rows, commit=False)
+    if l1_rows:
+        upsert_daily_l1(conn, l1_rows, commit=False)
+    if events:
+        append_signal_events(conn, events, commit=False)
+    conn.commit()
     metrics = _resolve_coverage(
         D, metrics=metrics, stub_coverage=stub_coverage, bars_path=bars_path
     )
@@ -117,9 +305,9 @@ def process_day(
         [
             {
                 "trade_date": D.isoformat(),
-                "param_version": "p0-stub",
-                "map_version": "p0-stub",
-                "member_set": "tradable",
+                "param_version": params.param_version,
+                "map_version": map_version,
+                "member_set": MEMBER_SET,
                 "universe_size": metrics.universe_size,
                 "unmapped_count": 0,
                 "tradable_count": metrics.tradable_count,
@@ -171,7 +359,10 @@ def main(argv=None) -> int:
     p.add_argument(
         "--stub-coverage",
         action="store_true",
-        help="使用全绿 CoverageMetrics（离线 CI）；默认从 bars.db 统计",
+        help=(
+            "跳过覆盖率统计（全绿 CoverageMetrics）；仍会从 bars 重放 metrics。"
+            "Actions 关掉 stub 的前提是全宇宙 sync 齐套（非本 Task 阻塞）。"
+        ),
     )
     p.add_argument(
         "--bars-db",

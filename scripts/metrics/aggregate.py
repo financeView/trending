@@ -66,6 +66,28 @@ def member_closure(
     return seen
 
 
+def taxonomy_for_stock(
+    ts_code: str,
+    *,
+    l2_members: Mapping[str, Sequence[str]] | None = None,
+    l1_to_l2: Mapping[str, Sequence[str]] | None = None,
+) -> tuple[Optional[str], Optional[str]]:
+    """Return (sw_l2_code, l1_id) from the stub map, or (None, None)."""
+    mapping = l2_members if l2_members is not None else STUB_L2_MEMBERS
+    buckets = l1_to_l2 if l1_to_l2 is not None else STUB_L1_TO_L2
+    sw = None
+    for l2, members in mapping.items():
+        if ts_code in members:
+            sw = l2
+            break
+    if sw is None:
+        return None, None
+    for l1, l2s in buckets.items():
+        if sw in l2s:
+            return sw, l1
+    return sw, None
+
+
 def stub_l1_members(
     l1_to_l2: Mapping[str, Sequence[str]] | None = None,
     l2_members: Mapping[str, Sequence[str]] | None = None,
