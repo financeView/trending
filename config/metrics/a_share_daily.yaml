@@ -1,13 +1,17 @@
-param_version: p0-stub
+param_version: p05-v1
 price_adjust: qfq
 ma_fast: 20
 ma_slow: 60
 slope_n: 5
 slope_eps: 0.001
+slope_scale: 0.02
+band: 0.15
 adx_len: 14
 adx_hot: 25
 adx_warm: 18
 adx_flat: 20
+adx_s_floor: 15
+adx_s_span: 25
 vol_lookback: 20
 vol_hist: 252
 vol_boil: 0.90
@@ -18,6 +22,8 @@ ret_freeze_pctile: 0.05
 hysteresis_up: 2
 hysteresis_down: 1
 max_step: 2
+s_vol_weight: 5
+spearman_min: 0.55
 atr_len: 14
 atr_floor: 0.01
 stage_D0: 60
@@ -25,4 +31,23 @@ w_g: 0.55
 w_d: 0.25
 w_v: 0.20
 stage_cuts: [0.15, 0.35, 0.55, 0.75]
+# §8.2 knots: list of [x, y]
+knots_g:
+  - [0.0, 0.0]
+  - [0.5, 0.25]
+  - [1.5, 0.55]
+  - [3.0, 0.8]
+  - [5.0, 1.0]
+knots_d:
+  - [0.0, 0.0]
+  - [0.25, 0.3]
+  - [0.5, 0.55]
+  - [1.0, 0.85]
+  - [1.5, 1.0]
+knots_v:
+  - [0.0, 0.0]
+  - [0.5, 0.2]
+  - [0.75, 0.5]
+  - [0.9, 0.8]
+  - [1.0, 1.0]
 exit_tags_enabled: false
