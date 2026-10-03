@@ -90,7 +90,7 @@
 
 - [ ] Add `scripts/metrics/fsm.py` implementing metrics §6.3 pseudocode:
   - Inputs: `T`, `hard_frozen`（调用方传入；见 Global / Task 8 映射）, prior **replay** state (`R`, days, `T_last_valid`, `T_prev_valid`, solar peak fields, `P0`, …)
-  - Priority: `hard_frozen` ends R first → `EXIT_RIGHT` / `exit_kind=forced_exit_untradable` / 立秋 / scores null；**同日不再温度进入**
+  - Priority: `hard_frozen` ends R first → `EXIT_RIGHT` / `exit_kind=forced_exit_untradable` / 立秋 / scores null / **`tag_warm_to_flat=true`**（与温度退出同形；§6.0/§6.3）；**同日不再温度进入**
   - Soft null: `R=true` + `T=null` + not hard → `T_fsm=T_last_valid`；`R=false` + null → skip transitions
   - Enter: `R=false` + `T_fsm∈{热,沸}` → `ENTER_RIGHT`, days=0, force 谷雨, `tag_warm_to_hot=true`（**不** emit `WARM_TO_HOT`）
   - Persist / reconfirm: trading days +=1；温→热/沸 → `WARM_TO_HOT` only
@@ -132,7 +132,7 @@
   | `fsm_fri_mon` | 周末 natural +2 |
   | `fsm_bootstrap` | 冷启动不 snap 进入 |
   | `fsm_untradable_freeze` | 短 null 不立秋、不清 R |
-  | `fsm_st_ends_right` | ST → `EXIT_RIGHT` forced + 立秋 + `R=false` |
+  | `fsm_st_ends_right` | ST → `EXIT_RIGHT` forced + 立秋 + `R=false` + **`tag_warm_to_flat`** |
 
 - [ ] Create `fixtures/solar/` for **every** ID in metrics §8.9:
 
@@ -153,17 +153,18 @@
 ### Task 7: Persist `daily_*` + `signal_event`
 
 - [ ] Extend `scripts/common/db.py` SCHEMA:
-  - `CREATE TABLE IF NOT EXISTS daily_l2` / `daily_l1` per ops §4（`trade_date, code, T, S_temp, RS, right_side, …, members_tradable, members_total`）
+  - `CREATE TABLE IF NOT EXISTS daily_l2` / `daily_l1`：至少含 ops §4 核心列（`trade_date, code, T, S_temp, RS, right_side, tag_warm_to_hot, tag_warm_to_flat, solar_term, members_tradable, members_total`）。**不要求**与个股同构 `hard_frozen` / `stage_score*`（篮子无 ST 语义；节气分数 MVP 可只落 `daily_stock`）
   - `daily_stock` 核对并补齐：`hard_frozen`, `close_qfq`, `float_mv`, tags, `solar_term`，以及 **`stage_score` / `stage_score_raw`**（可空；结束日必须能落 **SQL NULL**，禁止用 0 顶）
+- [ ] **已有库迁移（钉死）：** `CREATE IF NOT EXISTS` **不会**给旧表加列。`init_schema`（或旁路 `migrate_schema`）须对已存在的 `daily_stock` 做幂等 `ALTER TABLE … ADD COLUMN`（缺则加：`stage_score`, `stage_score_raw`，以及历史库若仍缺的 `hard_frozen`/`close_qfq`/`float_mv`）。单测：先建无新列的旧表 → migrate → 可 INSERT NULL score
 - [ ] Helpers:
   - `upsert_daily_stock/l2/l1(conn, rows)` — 重放后的幂等写入（Strategy A 的落库面）
   - `append_signal_events(conn, events)` — insert new ids
   - **Supersede 规则（钉死）：** 仅当同日同标的同 `event` 的 **active** 行（`superseded_by IS NULL`）与新 payload（`T`/`RS`/`detail` 规范化后）**内容不同**时：插入新行并把旧行 `superseded_by=新id`。内容相同 → **不**插新行、不 supersede（避免无意义历史膨胀）
 - [ ] `scripts/metrics/aggregate.py`（MVP）:
   - Universe subset OK（fixture list or stub map）；`member_set=tradable`
-  - Weight by `float_mv` null→1.0 normalize；synthetic series → same pipeline as stock
+  - Weight by `float_mv` null→1.0 normalize；synthetic series → same **温度/FSM** pipeline as stock（输出写入 L2/L1 核心列；不必强行写 `stage_score`）
   - L1 = member closure once（不嵌套 L2）
-- [ ] Tests: roundtrip UPSERT idempotent content；payload 变 → supersede；payload 同 → 行数不变；active filter `superseded_by IS NULL`
+- [ ] Tests: roundtrip UPSERT idempotent content；payload 变 → supersede；payload 同 → 行数不变；active filter `superseded_by IS NULL`；**migrate 旧表加列**
 - [ ] Commit
 
 ### Task 8: Wire metrics cross-section into `daily_run`（extend，不重做 coverage）
@@ -209,7 +210,7 @@
 ## Done when（对齐 ops §9 P0.5）
 
 1. `pytest tests/ -q` 离线绿：含 `temp_raw` 金标（≥20）、`test_fsm_suite`（§6.4 全 ID）、`test_solar_suite`（§8.9 全 ID）、persist/supersede（内容变才替）、metrics wire  
-2. 可算宇宙写出 `daily_stock` / `daily_l2` / `daily_l1`（含可空 `stage_score`/`stage_score_raw`）；同日重跑 UPSERT 行内容稳定  
+2. 可算宇宙写出 `daily_stock` / `daily_l2` / `daily_l1`（个股含可空 `stage_score`/`stage_score_raw`；L2/L1 至少 tags+`solar_term`）；同日重跑 UPSERT 行内容稳定；**旧库 migrate 后可写新列**   
 3. `signal_event` 按 §6.0 落库；重跑仅在 payload 变化时 append + `superseded_by`  
 4. `hard_frozen`（MVP=`is_st`）结束右侧夹具绿；软冻不立秋夹具绿  
 5. `process_day` 默认走 **全日重放 + 已有真实 coverage** 写 `run_meta`；stub 仅显式 flag；§7.2 asof/历史规则仍成立  
