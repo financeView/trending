@@ -1,0 +1,25 @@
+{
+  "id": "fsm_exit_boil_to_cool",
+  "days": [
+    {
+      "T": "沸"
+    },
+    {
+      "T": "凉"
+    }
+  ],
+  "expect": {
+    "days": [
+      {
+        "i": 1,
+        "R": false,
+        "tag_warm_to_flat": true,
+        "events": [
+          "EXIT_RIGHT"
+        ],
+        "exit_kind": "temperature",
+        "solar_term": "立秋"
+      }
+    ]
+  }
+}

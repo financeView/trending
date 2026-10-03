@@ -1,0 +1,27 @@
+{
+  "id": "solar_clamp_high",
+  "days": [
+    {
+      "T": "热",
+      "P": 100.0,
+      "sigma_pctile": 0.5,
+      "atr_pct": 0.02
+    },
+    {
+      "T": "温",
+      "P": 200.0,
+      "sigma_pctile": 0.5,
+      "atr_pct": 0.02
+    }
+  ],
+  "expect": {
+    "days": [
+      {
+        "i": 1,
+        "g_clamped": 1.0,
+        "finite": true,
+        "R": true
+      }
+    ]
+  }
+}

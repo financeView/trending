@@ -1,0 +1,31 @@
+{
+  "id": "fsm_untradable_freeze",
+  "days": [
+    {
+      "T": "热"
+    },
+    {
+      "T_raw": null
+    },
+    {
+      "T": "温"
+    }
+  ],
+  "expect": {
+    "days": [
+      {
+        "i": 1,
+        "R": true,
+        "T_filled": true,
+        "events": [],
+        "solar_term": "谷雨",
+        "tag_warm_to_flat": false
+      },
+      {
+        "i": 2,
+        "R": true,
+        "T": "温"
+      }
+    ]
+  }
+}

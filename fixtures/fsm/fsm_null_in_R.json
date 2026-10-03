@@ -1,0 +1,32 @@
+{
+  "id": "fsm_null_in_R",
+  "days": [
+    {
+      "T": "热"
+    },
+    {
+      "T": null
+    },
+    {
+      "T": "温"
+    }
+  ],
+  "expect": {
+    "days": [
+      {
+        "i": 1,
+        "R": true,
+        "T_filled": true,
+        "T": "热",
+        "events": [],
+        "solar_term": "谷雨"
+      },
+      {
+        "i": 2,
+        "R": true,
+        "T": "温",
+        "days_trading": 2
+      }
+    ]
+  }
+}

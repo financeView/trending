@@ -1,0 +1,28 @@
+{
+  "id": "solar_exit_day_liqiu",
+  "days": [
+    {
+      "T": "热",
+      "P": 100.0,
+      "sigma_pctile": 0.3,
+      "atr_pct": 0.02
+    },
+    {
+      "T": "平",
+      "P": 100.0,
+      "sigma_pctile": 0.9,
+      "atr_pct": 0.02
+    }
+  ],
+  "expect": {
+    "days": [
+      {
+        "i": 1,
+        "R": false,
+        "solar_term": "立秋",
+        "stage_score": null,
+        "stage_score_raw": null
+      }
+    ]
+  }
+}

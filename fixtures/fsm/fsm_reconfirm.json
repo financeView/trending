@@ -1,0 +1,27 @@
+{
+  "id": "fsm_reconfirm",
+  "days": [
+    {
+      "T": "热"
+    },
+    {
+      "T": "温"
+    },
+    {
+      "T": "热"
+    }
+  ],
+  "expect": {
+    "days": [
+      {
+        "i": 2,
+        "R": true,
+        "tag_warm_to_hot": true,
+        "events": [
+          "WARM_TO_HOT"
+        ],
+        "days_trading": 2
+      }
+    ]
+  }
+}

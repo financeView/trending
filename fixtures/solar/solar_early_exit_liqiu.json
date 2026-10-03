@@ -1,0 +1,38 @@
+{
+  "id": "solar_early_exit_liqiu",
+  "days": [
+    {
+      "T": "热",
+      "P": 100.0,
+      "sigma_pctile": 0.3,
+      "atr_pct": 0.02
+    },
+    {
+      "T": "温",
+      "P": 100.5,
+      "sigma_pctile": 0.3,
+      "atr_pct": 0.02
+    },
+    {
+      "T": "平",
+      "P": 100.2,
+      "sigma_pctile": 0.3,
+      "atr_pct": 0.02
+    }
+  ],
+  "expect": {
+    "never_terms": [
+      "大暑"
+    ],
+    "days": [
+      {
+        "i": 2,
+        "R": false,
+        "solar_term": "立秋",
+        "events": [
+          "EXIT_RIGHT"
+        ]
+      }
+    ]
+  }
+}

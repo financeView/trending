@@ -1,0 +1,22 @@
+{
+  "id": "fsm_enter_boil",
+  "days": [
+    {
+      "T": "沸"
+    }
+  ],
+  "expect": {
+    "days": [
+      {
+        "i": 0,
+        "T": "沸",
+        "R": true,
+        "events": [
+          "ENTER_RIGHT"
+        ],
+        "tag_warm_to_hot": true,
+        "solar_term": "谷雨"
+      }
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "id": "fsm_bootstrap",
+  "days": [
+    {
+      "T_raw": "热"
+    }
+  ],
+  "expect": {
+    "days": [
+      {
+        "i": 0,
+        "T": "平",
+        "R": false,
+        "events": []
+      }
+    ]
+  }
+}

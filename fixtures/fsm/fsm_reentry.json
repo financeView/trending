@@ -1,0 +1,34 @@
+{
+  "id": "fsm_reentry",
+  "days": [
+    {
+      "T": "热"
+    },
+    {
+      "T": "平"
+    },
+    {
+      "T": "热"
+    }
+  ],
+  "expect": {
+    "days": [
+      {
+        "i": 1,
+        "R": false,
+        "events": [
+          "EXIT_RIGHT"
+        ]
+      },
+      {
+        "i": 2,
+        "R": true,
+        "events": [
+          "ENTER_RIGHT"
+        ],
+        "days_trading": 0,
+        "tag_warm_to_hot": true
+      }
+    ]
+  }
+}

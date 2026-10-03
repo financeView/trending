@@ -1,0 +1,30 @@
+{
+  "id": "fsm_persist_warm",
+  "days": [
+    {
+      "T": "热"
+    },
+    {
+      "T": "温"
+    }
+  ],
+  "expect": {
+    "days": [
+      {
+        "i": 0,
+        "R": true,
+        "days_trading": 0,
+        "events": [
+          "ENTER_RIGHT"
+        ]
+      },
+      {
+        "i": 1,
+        "R": true,
+        "T": "温",
+        "days_trading": 1,
+        "events": []
+      }
+    ]
+  }
+}

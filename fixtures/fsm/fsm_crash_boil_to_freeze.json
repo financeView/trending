@@ -1,0 +1,31 @@
+{
+  "id": "fsm_crash_boil_to_freeze",
+  "days": [
+    {
+      "T": "沸"
+    },
+    {
+      "T_raw": "冻"
+    }
+  ],
+  "expect": {
+    "days": [
+      {
+        "i": 0,
+        "R": true,
+        "T": "沸"
+      },
+      {
+        "i": 1,
+        "T": "平",
+        "R": false,
+        "events": [
+          "EXIT_RIGHT"
+        ],
+        "exit_kind": "temperature",
+        "tag_warm_to_flat": true,
+        "solar_term": "立秋"
+      }
+    ]
+  }
+}

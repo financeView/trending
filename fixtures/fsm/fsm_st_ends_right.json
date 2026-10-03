@@ -1,0 +1,28 @@
+{
+  "id": "fsm_st_ends_right",
+  "days": [
+    {
+      "T": "热"
+    },
+    {
+      "T": "热",
+      "hard_frozen": true
+    }
+  ],
+  "expect": {
+    "days": [
+      {
+        "i": 1,
+        "R": false,
+        "events": [
+          "EXIT_RIGHT"
+        ],
+        "exit_kind": "forced_exit_untradable",
+        "tag_warm_to_flat": true,
+        "solar_term": "立秋",
+        "stage_score": null,
+        "stage_score_raw": null
+      }
+    ]
+  }
+}

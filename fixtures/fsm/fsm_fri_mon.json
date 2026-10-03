@@ -1,0 +1,31 @@
+{
+  "id": "fsm_fri_mon",
+  "days": [
+    {
+      "T": "热",
+      "natural_bump_after": 2
+    },
+    {
+      "T": "温",
+      "natural_bump_after": 1
+    }
+  ],
+  "expect": {
+    "days": [
+      {
+        "i": 0,
+        "R": true,
+        "days_trading": 0,
+        "days_natural": 0,
+        "days_natural_after_bump": 2
+      },
+      {
+        "i": 1,
+        "R": true,
+        "days_trading": 1,
+        "days_natural": 2,
+        "days_natural_after_bump": 3
+      }
+    ]
+  }
+}

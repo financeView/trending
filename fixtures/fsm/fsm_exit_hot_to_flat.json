@@ -1,0 +1,25 @@
+{
+  "id": "fsm_exit_hot_to_flat",
+  "days": [
+    {
+      "T": "热"
+    },
+    {
+      "T": "平"
+    }
+  ],
+  "expect": {
+    "days": [
+      {
+        "i": 1,
+        "R": false,
+        "tag_warm_to_flat": true,
+        "events": [
+          "EXIT_RIGHT"
+        ],
+        "exit_kind": "temperature",
+        "solar_term": "立秋"
+      }
+    ]
+  }
+}

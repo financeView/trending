@@ -1,0 +1,41 @@
+{
+  "id": "solar_halt_no_advance",
+  "days": [
+    {
+      "T": "热",
+      "P": 100.0,
+      "sigma_pctile": 0.5,
+      "atr_pct": 0.02
+    },
+    {
+      "T": "温"
+    },
+    {
+      "T": "温",
+      "P": 101.0,
+      "sigma_pctile": 0.5,
+      "atr_pct": 0.02
+    }
+  ],
+  "expect": {
+    "days": [
+      {
+        "i": 0,
+        "solar_term": "谷雨",
+        "stage_score_peak": 0
+      },
+      {
+        "i": 1,
+        "R": true,
+        "solar_term": "谷雨",
+        "stage_score_peak": 0,
+        "events": [],
+        "tag_warm_to_flat": false
+      },
+      {
+        "i": 2,
+        "R": true
+      }
+    ]
+  }
+}

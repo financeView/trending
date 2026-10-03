@@ -1,0 +1,31 @@
+{
+  "id": "fsm_enter_hyst",
+  "days": [
+    {
+      "T_raw": "热"
+    },
+    {
+      "T_raw": "热"
+    }
+  ],
+  "expect": {
+    "days": [
+      {
+        "i": 0,
+        "T": "平",
+        "R": false,
+        "events": []
+      },
+      {
+        "i": 1,
+        "T": "热",
+        "R": true,
+        "events": [
+          "ENTER_RIGHT"
+        ],
+        "tag_warm_to_hot": true,
+        "solar_term": "谷雨"
+      }
+    ]
+  }
+}

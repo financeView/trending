@@ -1,0 +1,24 @@
+{
+  "id": "solar_entry_grain_rain",
+  "days": [
+    {
+      "T": "热",
+      "P": 100.0,
+      "sigma_pctile": 0.95,
+      "atr_pct": 0.02
+    }
+  ],
+  "expect": {
+    "days": [
+      {
+        "i": 0,
+        "R": true,
+        "solar_term": "谷雨",
+        "stage_score": 0,
+        "stage_score_raw": 0,
+        "stage_score_peak": 0,
+        "v_raw": null
+      }
+    ]
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "id": "fsm_exit_warm_to_flat",
+  "days": [
+    {
+      "T": "热"
+    },
+    {
+      "T": "温"
+    },
+    {
+      "T": "平"
+    },
+    {
+      "T": "温"
+    }
+  ],
+  "expect": {
+    "days": [
+      {
+        "i": 2,
+        "R": false,
+        "events": [
+          "EXIT_RIGHT"
+        ],
+        "exit_kind": "temperature",
+        "tag_warm_to_flat": true,
+        "solar_term": "立秋",
+        "days_trading": 0,
+        "stage_score": null,
+        "stage_score_raw": null
+      },
+      {
+        "i": 3,
+        "R": false,
+        "solar_term": null,
+        "events": []
+      }
+    ]
+  }
+}

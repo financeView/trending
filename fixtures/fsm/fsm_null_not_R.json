@@ -1,0 +1,29 @@
+{
+  "id": "fsm_null_not_R",
+  "init": {
+    "T_last_valid": "热"
+  },
+  "days": [
+    {
+      "T": null
+    },
+    {
+      "T": "温"
+    }
+  ],
+  "expect": {
+    "all": {
+      "R": false
+    },
+    "days": [
+      {
+        "i": 0,
+        "events": []
+      },
+      {
+        "i": 1,
+        "events": []
+      }
+    ]
+  }
+}
