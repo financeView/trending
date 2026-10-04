@@ -4,11 +4,13 @@ import pytest
 
 from scripts.fund_industry import (
     ReportUnavailableError,
+    aggregate_all_report,
     aggregate_report,
     build_classification_asof,
     fetch_latest_report,
     load_taxonomy,
     parse_report_date,
+    render_markdown,
     resolve_l1,
     resolve_l2,
 )
@@ -97,6 +99,59 @@ def test_aggregate_market_value_proportions_and_coverage(taxonomy):
     assert result["coverage"]["unmapped_a_share_count"] == 1
     assert result["coverage"]["out_of_repository_scope_security_count"] == 2
     assert "基金净资产" in result["interpretation"][0]
+
+
+def test_aggregate_all_industries_covers_the_full_tree_and_labels_top_ten_limit(taxonomy):
+    records = [
+        {"股票代码": "000001", "报告期": "2026-03-31", "持股总市值": 10000},
+        {"股票代码": "600000", "报告期": "2026-03-31", "持股总市值": 30000},
+    ]
+    classification = {
+        "000001": {"l2_code": "370100", "l1_id": "l1_health"},
+        "600000": {"l2_code": "480300", "l1_id": "l1_finance"},
+    }
+    summary = aggregate_all_report(
+        records, classification, taxonomy, report_date="20260331"
+    )
+    assert summary["all_industries"] is True
+    assert len(summary["industries"]) == 14
+    assert sum(len(item["level2"]) for item in summary["industries"]) == 134
+    assert sum(item["market_value_亿元"] for item in summary["industries"]) == 4.0
+    finance = next(item for item in summary["industries"] if item["l1_id"] == "l1_finance")
+    assert finance["market_value_亿元"] == 3.0
+    bank = next(item for item in finance["level2"] if item["code"] == "480300")
+    assert bank["market_value_亿元"] == 3.0
+    markdown = render_markdown(summary)
+    assert "前十名" in markdown
+    assert "全行业" in markdown
+
+
+def test_manual_cli_requires_a_valid_l1_l2_pair_before_network(monkeypatch, capsys):
+    from scripts import run_fund_industry
+
+    monkeypatch.setattr(
+        run_fund_industry,
+        "fetch_latest_report",
+        lambda **_kwargs: pytest.fail("source must not be called for an invalid input pair"),
+    )
+    result = run_fund_industry.main(["--industry-l1", "l1_health"])
+    assert result == 1
+    assert "must be provided together" in capsys.readouterr().err
+
+
+def test_manual_cli_rejects_wrong_l2_parent_before_network(monkeypatch, capsys):
+    from scripts import run_fund_industry
+
+    monkeypatch.setattr(
+        run_fund_industry,
+        "fetch_latest_report",
+        lambda **_kwargs: pytest.fail("source must not be called for a mismatched hierarchy"),
+    )
+    result = run_fund_industry.main([
+        "--industry-l1", "l1_health", "--industry-l2", "480300"
+    ])
+    assert result == 1
+    assert "belongs to" in capsys.readouterr().err
 
 
 def test_latest_report_skips_not_yet_published_quarter():

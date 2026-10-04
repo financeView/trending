@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
@@ -21,8 +22,6 @@ from zoneinfo import ZoneInfo
 
 import yaml
 
-from scripts.common.http import RateLimiter, call_with_retry
-
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TAXONOMY = ROOT / "config" / "taxonomy" / "sw2021_repository_tree.yaml"
 MIN_REPORT_DATE = date(2021, 9, 30)  # first full quarter after SW2021 took effect
@@ -32,6 +31,41 @@ A_SHARE_PREFIXES = (
     "600", "601", "603", "605", "688", "689",
 )
 WAN_TO_YI = Decimal("10000")  # 10,000 x 万元 = 1 亿元
+
+
+class _RateLimiter:
+    """Module-local limiter; fund jobs do not depend on trend utilities."""
+
+    def __init__(self, per_second: float = 2.0) -> None:
+        self.min_interval = 1.0 / per_second
+        self._last = 0.0
+
+    def wait(self) -> None:
+        now = time.monotonic()
+        delta = now - self._last
+        if delta < self.min_interval:
+            time.sleep(self.min_interval - delta)
+        self._last = time.monotonic()
+
+
+def _call_with_retry(
+    fn: Callable[[], Any],
+    *,
+    limiter: _RateLimiter,
+    attempts: int = 3,
+    backoffs: Sequence[float] = (2, 5),
+    desc: str,
+) -> Any:
+    last_error: Exception | None = None
+    for attempt in range(attempts):
+        limiter.wait()
+        try:
+            return fn()
+        except Exception as exc:  # network/source errors fail closed
+            last_error = exc
+            if attempt < attempts - 1:
+                time.sleep(backoffs[min(attempt, len(backoffs) - 1)])
+    raise RuntimeError(f"call failed after {attempts} attempts: {desc}: {last_error}")
 
 
 class FundIndustryError(RuntimeError):
@@ -200,9 +234,9 @@ def fetch_cninfo_report(report_date: date) -> list[dict[str, Any]]:
                 return []
             raise
 
-    frame = call_with_retry(
+    frame = _call_with_retry(
         call,
-        limiter=RateLimiter(per_second=2.0),
+        limiter=_RateLimiter(per_second=2.0),
         attempts=3,
         backoffs=(2, 5),
         desc=f"CNINFO fund report holdings {date_token}",
@@ -375,9 +409,9 @@ def fetch_sw_classification_history() -> Any:
     """Download SW's public historical stock-classification file via AkShare."""
     import akshare as ak
 
-    return call_with_retry(
+    return _call_with_retry(
         ak.stock_industry_clf_hist_sw,
-        limiter=RateLimiter(per_second=1.0),
+        limiter=_RateLimiter(per_second=1.0),
         attempts=3,
         backoffs=(2, 5),
         desc="SW2021 stock-industry history",
@@ -562,8 +596,111 @@ def aggregate_report(
     }
 
 
+def aggregate_all_report(
+    records: Iterable[Mapping[str, Any]],
+    classification: Mapping[str, Mapping[str, str]],
+    taxonomy: Taxonomy,
+    *,
+    report_date: str | date,
+) -> dict[str, Any]:
+    """Create one compact snapshot covering every L1 and L2 in the taxonomy."""
+    rows = list(records)
+    industries: list[dict[str, Any]] = []
+    base: dict[str, Any] | None = None
+    for l1_id, l1 in taxonomy.l1_by_id.items():
+        l2_rows: list[dict[str, Any]] = []
+        l1_value = 0.0
+        l1_share = 0.0
+        for code, l2 in taxonomy.l2_by_code.items():
+            if l2["l1_id"] != l1_id:
+                continue
+            detail = aggregate_report(
+                rows,
+                classification,
+                taxonomy,
+                l1_id=l1_id,
+                l2_code=code,
+                report_date=report_date,
+            )
+            if base is None:
+                base = detail
+            values = detail["market_value_亿元"]
+            shares = detail["proportion_pct"]
+            l1_value = values["selected_l1"]
+            l1_share = shares["selected_l1_of_mapped_a_share_holdings"]
+            l2_rows.append({
+                "code": code,
+                "name": l2["name"],
+                "market_value_亿元": values["selected_l2"],
+                "proportion_pct_of_mapped_a_shares": shares["selected_l2_of_mapped_a_share_holdings"],
+                "proportion_pct_within_l1": shares["selected_l2_within_selected_l1"],
+            })
+        industries.append({
+            "l1_id": l1_id,
+            "l1_name": l1["name"],
+            "market_value_亿元": l1_value,
+            "proportion_pct_of_mapped_a_shares": l1_share,
+            "level2": l2_rows,
+        })
+    if base is None:
+        raise FundIndustryError("taxonomy contains no industry pairs")
+    base["all_industries"] = True
+    base["selection"] = {
+        "l1_id": "ALL",
+        "l1_name": "全部一级行业",
+        "l2_code": "ALL",
+        "l2_name": "全部二级行业",
+    }
+    base["market_value_亿元"].pop("selected_l1", None)
+    base["market_value_亿元"].pop("selected_l2", None)
+    base["proportion_pct"].pop("selected_l1_of_mapped_a_share_holdings", None)
+    base["proportion_pct"].pop("selected_l2_of_mapped_a_share_holdings", None)
+    base["proportion_pct"].pop("selected_l2_within_selected_l1", None)
+    base["industries"] = industries
+    return base
+
+
 def render_markdown(summary: Mapping[str, Any]) -> str:
     """Create a concise, auditable run report for the Actions summary/artifact."""
+    if summary.get("all_industries"):
+        values = summary["market_value_亿元"]
+        coverage = summary["coverage"]
+        source = summary["data_source"]
+        lines = [
+            f"# 公募基金全行业持仓快照（{summary['report_date']}）",
+            "",
+            f"- 数据源：[{source['provider']} {source['dataset']}]({source['url']})，经 {source['wrapper']} {source['wrapper_version']} 获取。",
+            f"- 报告类型：`{summary['disclosure']['report_type']}`。",
+            f"- 分类历史按报告期 `{summary['taxonomy']['stock_classification_as_of']}` 生效记录映射。",
+            "",
+            "## 总体覆盖",
+            "",
+            f"- 映射沪深A股持仓市值：**{values['sw2021_mapped_a_shares']:,.2f} 亿元**。",
+            f"- 源表 {coverage['source_record_count']:,} 行、{coverage['distinct_source_security_count']:,} 只不同证券；映射金额覆盖源表总额 {coverage['mapped_value_pct_of_all_source_rows']:.4f}%。",
+            "",
+            "## 两级行业明细",
+            "",
+            "| 一级行业 | 二级行业 | 持仓市值（亿元） | 占映射沪深A股持仓 | 占一级行业持仓 |",
+            "|---|---|---:|---:|---:|",
+        ]
+        for l1 in summary["industries"]:
+            lines.append(
+                f"| **{l1['l1_name']}** | **一级合计** | **{l1['market_value_亿元']:,.2f}** | **{l1['proportion_pct_of_mapped_a_shares']:.4f}%** | 100.0000% |"
+            )
+            for l2 in l1["level2"]:
+                lines.append(
+                    f"| {l1['l1_name']} | {l2['name']} (`{l2['code']}`) | {l2['market_value_亿元']:,.2f} | {l2['proportion_pct_of_mapped_a_shares']:.4f}% | {l2['proportion_pct_within_l1']:.4f}% |"
+                )
+        lines.extend([
+            "",
+            "**解释限制：**",
+            *[f"- {note}" for note in summary["interpretation"]],
+            "",
+            "持仓明细按 CNINFO 的市场汇总数据处理；不保存逐只基金持仓或原始行。",
+            "",
+        ])
+        return "\n".join(lines)
+
     selection = summary["selection"]
     values = summary["market_value_亿元"]
     shares = summary["proportion_pct"]

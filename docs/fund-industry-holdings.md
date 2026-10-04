@@ -1,6 +1,6 @@
 # 公募基金行业持仓追踪
 
-本流程按一个报告期、一个行业组合，汇总公开公募基金股票持仓市值。行业树采用仓库正式设计 `docs/superpowers/specs/2026-09-28-industry-taxonomy-design.md`：申万 2021 二级行业代码映射至仓库 14 个一级桶；完整 14/134 映射固化在 `config/taxonomy/sw2021_repository_tree.yaml`。
+本流程按一个报告期汇总公开公募基金股票持仓市值。定时任务保存覆盖完整行业树的快照；手动任务可以指定一个一级/二级行业组合。行业树采用仓库正式设计 `docs/superpowers/specs/2026-09-28-industry-taxonomy-design.md`：申万 2021 二级行业代码映射至仓库 14 个一级桶；完整 14/134 映射固化在 `config/taxonomy/sw2021_repository_tree.yaml`，本功能不改变其分类。
 
 ## 数据来源与处理
 
@@ -8,7 +8,7 @@
 
 行业映射使用 [申万宏源个股行业分类变动历史](https://akshare.akfamily.xyz/data/stock/stock.html) 经 AkShare `stock_industry_clf_hist_sw` 获取。程序选择报告期当日已经生效的最新分类；来源记录若为申万三级代码，则归并到其申万二级父行业。再按照仓库的自定义一级映射计算一级汇总。未匹配的股票不会被塞入相似行业，而是进入未映射覆盖统计。
 
-执行路径只需持仓源的一次全市场查询和分类历史的一次下载，不会逐只基金抓取。原始接口结果仅在作业内存中处理；持仓明细不会写入 SQLite 或提交到仓库。版本化输出只包含所选一级/二级行业的汇总 JSON 与 Markdown，文件保存在 `reports/fund-industry/`，同一报告期与行业组合重复运行会更新同一文件。
+执行路径只需持仓源的一次全市场查询和分类历史的一次下载，不会逐只基金抓取。原始接口结果仅在作业内存中处理；持仓明细不会写入 SQLite 或提交到仓库。版本化输出只包含汇总 JSON 与 Markdown，文件保存在 `reports/fund-industry/`；同一报告期和范围重复运行会更新同一文件。定时快照一次列出全部 14 个一级、134 个二级行业；手动输出仅含用户所选组合。
 
 ## 口径
 
@@ -24,12 +24,16 @@
 
 ## GitHub Actions 运行
 
-合并后进入 **Actions → fund-industry-holdings → Run workflow**：
+进入 **Actions → fund-industry-holdings → Run workflow** 可手动运行：
 
 1. 在一级行业静态下拉项中选仓库一级桶。
 2. 在二级行业字段中输入该桶下的申万 2021 二级行业代码或精确名称，例如 `370100` 或 `化学制药`。
 3. 报告期留空时，工作流按时间倒序查找最近已有披露数据的季度；也可填写 `YYYYMMDD` 固定报告期。
 
-GitHub Actions 的 `workflow_dispatch` 只提供静态 `choice` 选项，不能依据第一个答案动态过滤第二个下拉项（见 [GitHub 工作流语法](https://docs.github.com/actions/reference/workflow-syntax-for-github-actions)）。因此这里使用一级静态选择、二级文本输入，并在联网请求前校验一级/二级的父子关系；无效组合会立即失败，不会抓取或写入结果。每季度报告披露完成后人工运行即可，未加入固定 schedule，以避免替用户决定每季度追踪哪个行业组合。
+GitHub Actions 的 `workflow_dispatch` 只提供静态 `choice` 选项，不能依据第一个答案动态过滤第二个下拉项（见 [GitHub 工作流语法](https://docs.github.com/actions/reference/workflow-syntax-for-github-actions)）。因此这里使用一级静态选择、二级文本输入，并在联网请求前校验一级/二级的父子关系；无效组合会立即失败，不会抓取或写入结果。
 
-成功运行后，摘要显示在 Actions run summary，JSON/Markdown 同时作为 90 天 artifact 上传，并提交到 `reports/fund-industry/`，便于跨季度留存少量汇总快照；不建数据库，也不保存所有基金逐只持仓。运行时使用当前可用的 CNINFO 报告期。尚未披露的新季度会被跳过；若指定了尚未披露的报告期则明确失败，不会悄悄回退。
+独立定时工作流按 UTC cron `0 3 1 4,5,9,11 *` 执行，即北京时间 4、5、9、11 月 1 日 11:00；这些日期分别留出年报、一季报、中报、三季报的披露期限。定时运行自动处理全部行业，不依赖手动输入；如果当期尚未披露，程序回退到 CNINFO 已发布的最近一个报告期，并在快照中标明实际报告期。手动运行保留 L1 下拉选择和 L2 代码/精确名称输入，且必须成对通过父子关系校验。
+
+**重要：** GitHub 的 `schedule` 事件只会运行默认分支上存在的工作流（[官方说明](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)）。因此在本独立特性分支上，季度 cron 已定义但不会触发；按用户要求不合并或改动主分支，只有工作流进入默认分支后定时触发才会生效。此限制不影响从特性分支手动运行。
+
+成功运行后，摘要显示在 Actions run summary，JSON/Markdown 同时作为 90 天 artifact 上传，并提交到 `reports/fund-industry/`，便于跨季度留存少量汇总快照；不建数据库，也不保存所有基金逐只持仓。自动选择时使用最近已披露的 CNINFO 报告期；手动指定了尚未披露的报告期则明确失败，不会悄悄回退。

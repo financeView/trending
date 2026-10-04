@@ -1,6 +1,10 @@
 name: fund-industry-holdings
 
 on:
+  # 11:00 Beijing on Apr/May/Sep/Nov 1: after annual, Q1, semiannual, and Q3 disclosure windows.
+  # GitHub only schedules workflows present on the default branch; this branch-only workflow stays dormant until then.
+  schedule:
+    - cron: '0 3 1 4,5,9,11 *'
   workflow_dispatch:
     inputs:
       industry_l1:
@@ -57,21 +61,25 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: requirements.txt
+          cache-dependency-path: requirements-fund-industry.txt
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements-fund-industry.txt
 
       - name: Unit tests
-        run: python -m pytest tests/ -q
+        run: python -m pytest tests/test_fund_industry.py -q
 
       - name: Aggregate latest public holdings
         id: report
-        run: >-
-          python scripts/run_fund_industry.py
-          --industry-l1 "$INDUSTRY_L1"
-          --industry-l2 "$INDUSTRY_L2"
-          --report-date "$REPORT_DATE"
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+            python scripts/run_fund_industry.py --all-industries --report-date "$REPORT_DATE"
+          else
+            python scripts/run_fund_industry.py \
+              --industry-l1 "$INDUSTRY_L1" \
+              --industry-l2 "$INDUSTRY_L2" \
+              --report-date "$REPORT_DATE"
+          fi
 
       - name: Add report to run summary
         run: cat "${{ steps.report.outputs.report_markdown }}" >> "$GITHUB_STEP_SUMMARY"
