@@ -2,7 +2,7 @@ name: fund-industry-holdings
 
 on:
   # 11:00 Beijing on Apr/May/Sep/Nov 1: after annual, Q1, semiannual, and Q3 disclosure windows.
-  # GitHub only schedules workflows present on the default branch; this branch-only workflow stays dormant until then.
+  # GitHub requires schedule/workflow_dispatch files on the default branch; this branch-only workflow stays inactive until then.
   schedule:
     - cron: '0 3 1 4,5,9,11 *'
   workflow_dispatch:

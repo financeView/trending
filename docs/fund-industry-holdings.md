@@ -24,7 +24,7 @@
 
 ## GitHub Actions 运行
 
-进入 **Actions → fund-industry-holdings → Run workflow** 可手动运行：
+该工作流配置了手动运行入口，参数如下；但要在 GitHub 上触发，需先满足默认分支与仓库权限要求：
 
 1. 在一级行业静态下拉项中选仓库一级桶。
 2. 在二级行业字段中输入该桶下的申万 2021 二级行业代码或精确名称，例如 `370100` 或 `化学制药`。
@@ -34,6 +34,6 @@ GitHub Actions 的 `workflow_dispatch` 只提供静态 `choice` 选项，不能�
 
 独立定时工作流按 UTC cron `0 3 1 4,5,9,11 *` 执行，即北京时间 4、5、9、11 月 1 日 11:00；这些日期分别留出年报、一季报、中报、三季报的披露期限。定时运行自动处理全部行业，不依赖手动输入；如果当期尚未披露，程序回退到 CNINFO 已发布的最近一个报告期，并在快照中标明实际报告期。手动运行保留 L1 下拉选择和 L2 代码/精确名称输入，且必须成对通过父子关系校验。
 
-**重要：** GitHub 的 `schedule` 事件只会运行默认分支上存在的工作流（[官方说明](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)）。因此在本独立特性分支上，季度 cron 已定义但不会触发；按用户要求不合并或改动主分支，只有工作流进入默认分支后定时触发才会生效。此限制不影响从特性分支手动运行。
+**重要：** GitHub 要求 `schedule` 和 `workflow_dispatch` 工作流文件都存在于默认分支；手动派发还要求执行者具有仓库写权限（[定时事件说明](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)、[手动运行说明](https://docs.github.com/actions/managing-workflow-runs/manually-running-a-workflow)）。因此在本独立特性分支上，季度 cron 不会触发，手动入口也不会对该分支生效。按用户要求不合并或改动主分支，所以这里仅完成工作流定义，当前不能在 GitHub Actions 中执行；要启用任一触发器，未来需由用户另行授权让该工作流进入默认分支。
 
 成功运行后，摘要显示在 Actions run summary，JSON/Markdown 同时作为 90 天 artifact 上传，并提交到 `reports/fund-industry/`，便于跨季度留存少量汇总快照；不建数据库，也不保存所有基金逐只持仓。自动选择时使用最近已披露的 CNINFO 报告期；手动指定了尚未披露的报告期则明确失败，不会悄悄回退。
