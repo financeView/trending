@@ -6,8 +6,7 @@
       "natural_bump_after": 2
     },
     {
-      "T": "温",
-      "natural_bump_after": 1
+      "T": "温"
     }
   ],
   "expect": {
@@ -17,14 +16,14 @@
         "R": true,
         "days_trading": 0,
         "days_natural": 0,
-        "days_natural_after_bump": 2
+        "days_natural_after_bump": 3
       },
       {
         "i": 1,
         "R": true,
         "days_trading": 1,
-        "days_natural": 2,
-        "days_natural_after_bump": 3
+        "days_natural": 3,
+        "days_natural_after_bump": 4
       }
     ]
   }

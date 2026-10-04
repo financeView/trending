@@ -189,7 +189,9 @@ def _snap_to_daily_stock(ts_code: str, snap: dict) -> dict:
         "RS": _sql_float(snap.get("RS")),
         "universe_id": "local_stock",
         "right_side": _sql_int_bool(snap.get("R")),
-        "right_side_days_natural": snap.get("days_natural"),
+        "right_side_days_natural": snap.get(
+            "days_natural_after_bump", snap.get("days_natural")
+        ),
         "right_side_days_trading": snap.get("days_trading"),
         "tag_warm_to_hot": _sql_int_bool(snap.get("tag_warm_to_hot")),
         "tag_warm_to_flat": _sql_int_bool(snap.get("tag_warm_to_flat")),

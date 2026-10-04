@@ -67,9 +67,44 @@ def test_hysteresis_null_t_raw_does_not_advance():
     assert h.pending_count == 1
 
 
+def test_hysteresis_null_while_flat_rebootstrap_from_ping():
+    """§5.3.1: R=false null stretch clears T_prev; next non-null anchors 平."""
+    h = Hysteresis(PARAMS)
+    assert h.step("热", R=False) == "平"
+    assert h.step("热", R=False) == "热"
+    assert h.step(None, R=False) is None
+    assert h.T_prev is None
+    # Would snap to 热 if old T_prev kept; must re-bootstrap via 平
+    assert h.step("热", R=False) == "平"
+    assert h.pending_target == "热"
+    assert h.pending_count == 1
+
+
 def test_inv_rank_matches_signed_rank():
     for name in ("沸", "热", "温", "平", "凉", "寒", "冻"):
         assert inv_rank(rank(name)) == name
     assert same_side("热", "沸")
     assert same_side("寒", "冻")
     assert not same_side("热", "寒")
+
+
+def test_pipeline_trade_day_natural_increments():
+    """Consecutive weekdays each get natural +1 (not only calendar gaps)."""
+    from scripts.metrics.pipeline import replay_days
+
+    snaps = replay_days(
+        PARAMS,
+        [
+            {"trade_date": "2024-01-05", "T": "热"},  # Fri enter
+            {"trade_date": "2024-01-08", "T": "温", "natural_bump_after": 0},  # Mon
+            {"trade_date": "2024-01-09", "T": "温"},  # Tue
+        ],
+    )
+    # Fri: 0 → after Fri EOD + weekend gap we only set gap on day0 via OHLC path;
+    # here natural_bump_after defaults 0, so Fri after = 1 (trade day only).
+    assert snaps[0]["days_natural"] == 0
+    assert snaps[0]["days_natural_after_bump"] == 1
+    assert snaps[1]["days_natural"] == 1
+    assert snaps[1]["days_natural_after_bump"] == 2
+    assert snaps[2]["days_natural"] == 2
+    assert snaps[2]["days_natural_after_bump"] == 3

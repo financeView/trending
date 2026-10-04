@@ -115,7 +115,7 @@ class RightSideFsm:
         return list(self.events)
 
     def bump_natural_days(self, n: int = 1) -> None:
-        """Calendar-gap helper (fsm_fri_mon): each natural day EOD, if still R."""
+        """§6.3: add natural days while R (trade-day EOD and/or calendar gaps)."""
         if n < 0:
             raise ValueError(f"n must be >= 0, got {n}")
         if self.R and not self.just_exited_today:

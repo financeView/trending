@@ -38,8 +38,17 @@ class Hysteresis:
         self.pending_count: int = 0
 
     def step(self, t_raw: Optional[str], *, R: bool = False) -> Optional[str]:
-        """One trade-day close. ``t_raw=None`` does not advance state; returns None."""
+        """One trade-day close. ``t_raw=None`` does not advance state; returns None.
+
+        §5.3.1: after a null stretch with ``R=false``, ``T_prev`` is unavailable so
+        the next non-null day re-bootstraps from synthetic 平. While ``R=true``,
+        null keeps ``T_prev`` (FSM soft-fill path).
+        """
         if t_raw is None:
+            if not R:
+                self.T_prev = None
+                self.pending_target = None
+                self.pending_count = 0
             return None
 
         if self.T_prev is None:

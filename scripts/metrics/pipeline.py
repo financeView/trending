@@ -107,6 +107,7 @@ def replay_days(
             "stage_score_raw": fsm.stage_score_raw,
             "stage_score_peak": fsm.stage_score_peak,
             "days_trading": fsm.right_side_days_trading,
+            # Pre-EOD value (enter day still 0); persist uses days_natural_after_bump.
             "days_natural": fsm.right_side_days_natural,
             "T_filled": fsm.T_filled,
             "g_raw": solar.g_raw,
@@ -116,9 +117,11 @@ def replay_days(
             "term_jump": term_jump,
             "hard_frozen": hard,
         }
-        bump = int(day.get("natural_bump_after", 0) or 0)
-        if bump:
-            fsm.bump_natural_days(bump)
+        # §6.3: every natural day EOD while R (incl. this trade day), then calendar gaps.
+        fsm.bump_natural_days(1)
+        gap = int(day.get("natural_bump_after", 0) or 0)
+        if gap:
+            fsm.bump_natural_days(gap)
         snap["days_natural_after_bump"] = fsm.right_side_days_natural
         out.append(snap)
         prev_term = fsm.solar_term

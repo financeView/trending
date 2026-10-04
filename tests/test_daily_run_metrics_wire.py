@@ -210,7 +210,8 @@ def test_hard_frozen_and_stage_score_write_path(tmp_path, monkeypatch):
 
     bars_path = _patch_run(tmp_path, monkeypatch, ["000001.SZ"])
     D = date(2024, 1, 10)
-    dates = _weekdays_ending(D, SHORT_N)
+    # Extra sessions so ENTER can fire before asof ST → EXIT + null scores.
+    dates = _weekdays_ending(D, SHORT_N + 8)
     conn = bars_conn(bars_path)
     _seed_uptrend(conn, "000001.SZ", dates, is_st=1, with_limits=True)
     conn.close()
@@ -228,9 +229,17 @@ def test_hard_frozen_and_stage_score_write_path(tmp_path, monkeypatch):
     hard, t, score, score_raw, close_qfq = row
     assert hard == 1
     assert close_qfq is not None
-    # ST ends R: scores must be SQL NULL when not on the right (or after forced exit).
-    assert score is None or isinstance(score, (int, float))
-    assert score_raw is None or isinstance(score_raw, (int, float))
+    # ST on asof → forced EXIT_RIGHT: scores SQL NULL (not 0).
+    assert score is None
+    assert score_raw is None
+    assert tconn.execute(
+        """
+        SELECT COUNT(*) FROM signal_event
+        WHERE ts_code='000001.SZ' AND trade_date=? AND event='EXIT_RIGHT'
+          AND superseded_by IS NULL
+        """,
+        (D.isoformat(),),
+    ).fetchone()[0] >= 1
     tconn.close()
 
 
@@ -253,6 +262,44 @@ def test_stub_coverage_still_runs_metrics(tmp_path, monkeypatch):
     ).fetchone()[0]
     assert t is not None
     tconn.close()
+
+
+def test_persist_right_side_days_natural_uses_after_bump(tmp_path, monkeypatch):
+    """Wire: daily_stock.right_side_days_natural == snap days_natural_after_bump."""
+    from scripts.daily_run import _load_symbol_bars, process_day
+    from scripts.metrics.pipeline import replay_from_ohlc
+
+    bars_path = _patch_run(tmp_path, monkeypatch, ["000001.SZ"])
+    D = date(2024, 1, 10)
+    dates = _weekdays_ending(D, SHORT_N + 8)
+    conn = bars_conn(bars_path)
+    _seed_uptrend(conn, "000001.SZ", dates, with_limits=False)
+    records = _load_symbol_bars(conn, "000001.SZ", D)
+    conn.close()
+
+    snaps = replay_from_ohlc(_short_params(), records, min_history=SHORT_N)
+    asof = [s for s in snaps if s.get("trade_date") == D.isoformat()]
+    assert asof and asof[-1].get("R") is True
+    expect_natural = asof[-1]["days_natural_after_bump"]
+    assert expect_natural >= 1
+    # Pre-EOD days_natural undercounts vs after_bump (enter day: 0 vs 1).
+    assert asof[-1]["days_natural"] < expect_natural
+
+    st = process_day(D, D, bars_path=bars_path, stub_coverage=True)
+    assert st == "ok"
+    tconn = get_conn()
+    row = tconn.execute(
+        """
+        SELECT right_side, right_side_days_natural
+        FROM daily_stock WHERE ts_code='000001.SZ' AND trade_date=?
+        """,
+        (D.isoformat(),),
+    ).fetchone()
+    tconn.close()
+    assert row is not None
+    right_side, natural = row
+    assert right_side == 1
+    assert natural == expect_natural
 
 
 def test_integration_smoke_enter_exit_and_same_day_rerun(tmp_path, monkeypatch):

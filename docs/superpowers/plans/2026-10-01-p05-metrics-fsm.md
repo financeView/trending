@@ -162,7 +162,8 @@
   - **Supersede 规则（钉死）：** 仅当同日同标的同 `event` 的 **active** 行（`superseded_by IS NULL`）与新 payload（`T`/`RS`/`detail` 规范化后）**内容不同**时：插入新行并把旧行 `superseded_by=新id`。内容相同 → **不**插新行、不 supersede（避免无意义历史膨胀）
 - [x] `scripts/metrics/aggregate.py`（MVP）:
   - Universe subset OK（fixture list or stub map）；`member_set=tradable`
-  - Weight by `float_mv` null→1.0 normalize；synthetic series → same **温度/FSM** pipeline as stock（输出写入 L2/L1 核心列；不必强行写 `stage_score`）
+  - Weight by `float_mv` null→1.0 normalize；**加权多数票** `T` / tag-any / heaviest `solar_term`（interim；**同引擎**成分收益合成 → 共用纯函数属 **P1**，见 Out of P0.5）
+  - 输出写入 L2/L1 核心列；不必强行写 `stage_score`
   - L1 = member closure once（不嵌套 L2）
 - [x] Tests: roundtrip UPSERT idempotent content；payload 变 → supersede；payload 同 → 行数不变；active filter `superseded_by IS NULL`；**migrate 旧表加列**
 - [x] Commit
@@ -201,6 +202,7 @@
 - L1 Issues / radar digests（ops **P1**）
 - `paper_book` / `live_shadow` / `paper_fill` 消费（ops **P2**；L 仍须 `run_meta=ok`）
 - Full taxonomy SW2021→L1 YAML load（MVP：universe subset + stub `map_version` OK）
+- **L2/L1 同引擎合成**（metrics §10 / `test_C5_same_engine_on_synthetic`）：P0.5 篮子行为加权多数票 interim；正式「成分收益合成序列 → 共用纯函数」属 **P1**
 - Relative strength full peer regression / 量价混合 RS v1.1（可用 null/`RS` stub on daily_* if column required；正式 RS 可跟 P1）
 - Exit tags §11（`exit_tags_enabled` 保持 false）
 - Neural / non-linear solar scorer；solar KPI calibration campaigns beyond fixture suite

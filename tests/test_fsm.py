@@ -126,13 +126,14 @@ def test_fsm_fri_mon_natural_day_bump():
     fsm = RightSideFsm()
     fsm.step_trade_day("热")  # Friday enter
     assert fsm.right_side_days_trading == 0
+    fsm.bump_natural_days(1)  # Fri EOD (§6.3)
     fsm.bump_natural_days(2)  # Sat + Sun
-    assert fsm.right_side_days_natural == 2
+    assert fsm.right_side_days_natural == 3
     fsm.step_trade_day("温")  # Monday persist
     assert fsm.R is True
     assert fsm.right_side_days_trading == 1
-    fsm.bump_natural_days(1)
-    assert fsm.right_side_days_natural == 3
+    fsm.bump_natural_days(1)  # Mon EOD
+    assert fsm.right_side_days_natural == 4
 
 
 def test_bump_skipped_after_exit():
