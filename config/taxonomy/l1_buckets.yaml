@@ -1,7 +1,19 @@
-map_version: p05-v1
-note: "Full SW2021→L1 YAML comes in taxonomy implementation; P0.5 uses stub map_version p05-v1."
+map_version: sw2021-repo-v1
+note: Complete SW2021 L2 → repository L1 map; generated from the canonical taxonomy
+  spec.
+source_spec: docs/superpowers/specs/2026-09-28-industry-taxonomy-design.md §3–4
 l1_ids:
-  - l1_health
-  - l1_tmt
-  - l1_consumer
-  - l1_cycle
+- l1_health
+- l1_tech_hw
+- l1_internet_media
+- l1_agri
+- l1_staples
+- l1_discretionary
+- l1_manufacturing
+- l1_power_equip
+- l1_transport_env
+- l1_energy_util
+- l1_materials
+- l1_property_infra
+- l1_finance
+- l1_diversified

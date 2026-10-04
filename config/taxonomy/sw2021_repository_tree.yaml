@@ -1,0 +1,328 @@
+map_version: sw2021-repo-v1
+industry_standard: 申万2021二级行业 → 仓库自定义一级行业
+source_spec: docs/superpowers/specs/2026-09-28-industry-taxonomy-design.md §3–4
+l1:
+- sort_order: 10
+  id: l1_health
+  name: 医药健康
+  level2:
+  - code: '370100'
+    name: 化学制药
+  - code: '370200'
+    name: 中药Ⅱ
+  - code: '370300'
+    name: 生物制品
+  - code: '370400'
+    name: 医药商业
+  - code: '370500'
+    name: 医疗器械
+  - code: '370600'
+    name: 医疗服务
+- sort_order: 20
+  id: l1_tech_hw
+  name: 科技硬件
+  level2:
+  - code: '270100'
+    name: 半导体
+  - code: '270200'
+    name: 元件
+  - code: '270300'
+    name: 光学光电子
+  - code: '270400'
+    name: 其他电子Ⅱ
+  - code: '270500'
+    name: 消费电子
+  - code: '270600'
+    name: 电子化学品Ⅱ
+  - code: '730200'
+    name: 通信设备
+  - code: '710100'
+    name: 计算机设备
+- sort_order: 30
+  id: l1_internet_media
+  name: 互联网与传媒
+  level2:
+  - code: '710300'
+    name: IT服务Ⅱ
+  - code: '710400'
+    name: 软件开发
+  - code: '720400'
+    name: 游戏Ⅱ
+  - code: '720500'
+    name: 广告营销
+  - code: '720600'
+    name: 影视院线
+  - code: '720700'
+    name: 数字媒体
+  - code: '720800'
+    name: 社交Ⅱ
+  - code: '720900'
+    name: 出版
+  - code: '721000'
+    name: 电视广播Ⅱ
+  - code: '730100'
+    name: 通信服务
+  - code: '450600'
+    name: 互联网电商
+- sort_order: 40
+  id: l1_agri
+  name: 农林
+  level2:
+  - code: '110100'
+    name: 种植业
+  - code: '110200'
+    name: 渔业
+  - code: '110300'
+    name: 林业Ⅱ
+  - code: '110400'
+    name: 饲料
+  - code: '110500'
+    name: 农产品加工
+  - code: '110700'
+    name: 养殖业
+  - code: '110800'
+    name: 动物保健Ⅱ
+  - code: '110900'
+    name: 农业综合Ⅱ
+- sort_order: 50
+  id: l1_staples
+  name: 食品饮料
+  level2:
+  - code: '340400'
+    name: 食品加工
+  - code: '340500'
+    name: 白酒Ⅱ
+  - code: '340600'
+    name: 非白酒
+  - code: '340700'
+    name: 饮料乳品
+  - code: '340800'
+    name: 休闲食品
+  - code: '340900'
+    name: 调味发酵品Ⅱ
+- sort_order: 60
+  id: l1_discretionary
+  name: 可选消费
+  level2:
+  - code: '350100'
+    name: 纺织制造
+  - code: '350200'
+    name: 服装家纺
+  - code: '350300'
+    name: 饰品
+  - code: '330100'
+    name: 白色家电
+  - code: '330200'
+    name: 黑色家电
+  - code: '330300'
+    name: 小家电
+  - code: '330400'
+    name: 厨卫电器
+  - code: '330500'
+    name: 照明设备Ⅱ
+  - code: '330600'
+    name: 家电零部件Ⅱ
+  - code: '330700'
+    name: 其他家电Ⅱ
+  - code: '360300'
+    name: 家居用品
+  - code: '360500'
+    name: 文娱用品
+  - code: '450200'
+    name: 贸易Ⅱ
+  - code: '450300'
+    name: 一般零售
+  - code: '450400'
+    name: 专业连锁Ⅱ
+  - code: '450700'
+    name: 旅游零售Ⅱ
+  - code: '460600'
+    name: 体育Ⅱ
+  - code: '460700'
+    name: 本地生活服务Ⅱ
+  - code: '460900'
+    name: 酒店餐饮
+  - code: '461000'
+    name: 旅游及景区
+  - code: '461100'
+    name: 教育
+  - code: '770100'
+    name: 个护用品
+  - code: '770200'
+    name: 化妆品
+  - code: '770300'
+    name: 医疗美容
+- sort_order: 70
+  id: l1_manufacturing
+  name: 制造与军工
+  level2:
+  - code: '280200'
+    name: 汽车零部件
+  - code: '280300'
+    name: 汽车服务
+  - code: '280400'
+    name: 摩托车及其他
+  - code: '280500'
+    name: 乘用车
+  - code: '280600'
+    name: 商用车
+  - code: '640100'
+    name: 通用设备
+  - code: '640200'
+    name: 专用设备
+  - code: '640500'
+    name: 轨交设备Ⅱ
+  - code: '640600'
+    name: 工程机械
+  - code: '640700'
+    name: 自动化设备
+  - code: '650100'
+    name: 航天装备Ⅱ
+  - code: '650200'
+    name: 航空装备Ⅱ
+  - code: '650300'
+    name: 地面兵装Ⅱ
+  - code: '650400'
+    name: 航海装备Ⅱ
+  - code: '650500'
+    name: 军工电子Ⅱ
+- sort_order: 80
+  id: l1_power_equip
+  name: 电新设备
+  level2:
+  - code: '630100'
+    name: 电机Ⅱ
+  - code: '630300'
+    name: 其他电源设备Ⅱ
+  - code: '630500'
+    name: 光伏设备
+  - code: '630600'
+    name: 风电设备
+  - code: '630700'
+    name: 电池
+  - code: '630800'
+    name: 电网设备
+- sort_order: 90
+  id: l1_transport_env
+  name: 交运与环保
+  level2:
+  - code: '420800'
+    name: 物流
+  - code: '420900'
+    name: 铁路公路
+  - code: '421000'
+    name: 航空机场
+  - code: '421100'
+    name: 航运港口
+  - code: '760100'
+    name: 环境治理
+  - code: '760200'
+    name: 环保设备Ⅱ
+- sort_order: 100
+  id: l1_energy_util
+  name: 能源与公用事业
+  level2:
+  - code: '740100'
+    name: 煤炭开采
+  - code: '740200'
+    name: 焦炭Ⅱ
+  - code: '750100'
+    name: 油气开采Ⅱ
+  - code: '750200'
+    name: 油服工程
+  - code: '750300'
+    name: 炼化及贸易
+  - code: '410100'
+    name: 电力
+  - code: '410300'
+    name: 燃气Ⅱ
+- sort_order: 110
+  id: l1_materials
+  name: 材料与资源
+  level2:
+  - code: '220200'
+    name: 化学原料
+  - code: '220300'
+    name: 化学制品
+  - code: '220400'
+    name: 化学纤维
+  - code: '220500'
+    name: 塑料
+  - code: '220600'
+    name: 橡胶
+  - code: '220800'
+    name: 农化制品
+  - code: '220900'
+    name: 非金属材料Ⅱ
+  - code: '230300'
+    name: 冶钢原料
+  - code: '230400'
+    name: 普钢
+  - code: '230500'
+    name: 特钢Ⅱ
+  - code: '240200'
+    name: 金属新材料
+  - code: '240300'
+    name: 工业金属
+  - code: '240400'
+    name: 贵金属
+  - code: '240500'
+    name: 小金属
+  - code: '240600'
+    name: 能源金属
+  - code: '360100'
+    name: 造纸
+  - code: '360200'
+    name: 包装印刷
+- sort_order: 120
+  id: l1_property_infra
+  name: 地产基建
+  level2:
+  - code: '430100'
+    name: 房地产开发
+  - code: '430300'
+    name: 房地产服务
+  - code: '610100'
+    name: 水泥
+  - code: '610200'
+    name: 玻璃玻纤
+  - code: '610300'
+    name: 装修建材
+  - code: '620100'
+    name: 房屋建设Ⅱ
+  - code: '620200'
+    name: 装修装饰Ⅱ
+  - code: '620300'
+    name: 基础建设
+  - code: '620400'
+    name: 专业工程
+- sort_order: 130
+  id: l1_finance
+  name: 金融
+  level2:
+  - code: '480200'
+    name: 国有大型银行Ⅱ
+  - code: '480300'
+    name: 股份制银行Ⅱ
+  - code: '480400'
+    name: 城商行Ⅱ
+  - code: '480500'
+    name: 农商行Ⅱ
+  - code: '480600'
+    name: 其他银行Ⅱ
+  - code: '490100'
+    name: 证券Ⅱ
+  - code: '490200'
+    name: 保险Ⅱ
+  - code: '490300'
+    name: 多元金融
+- sort_order: 140
+  id: l1_diversified
+  name: 综合与商业服务
+  level2:
+  - code: '510100'
+    name: 综合Ⅱ
+  - code: '620600'
+    name: 工程咨询服务Ⅱ
+  - code: '460800'
+    name: 专业服务

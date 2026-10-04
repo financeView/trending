@@ -2,6 +2,10 @@
 
 A-share trend metrics / ops / paper eval (specs under `docs/superpowers/specs/`).
 
+## Public-fund holdings by industry
+
+A manually dispatched quarterly workflow aggregates CNINFO public-fund stock holdings using the repository's SW2021 L2 → custom L1 taxonomy. See [`docs/fund-industry-holdings.md`](docs/fund-industry-holdings.md) for source coverage, denominator, limitations, and run instructions. Workflow: `.github/workflows/fund-industry-holdings.yml`.
+
 ## P0 / P0.5 data wiring
 
 ```bash
@@ -25,4 +29,4 @@ python scripts/daily_run.py --date 2024-01-10 --force-trade-day --offline-calend
 - Data contract: `docs/superpowers/specs/2026-10-01-market-data-contract-design.md`
 - Actions: `.github/workflows/daily-trend.yml` (cron 北京 19:00). `--stub-coverage` only skips coverage **stats** (keeps CI green); metrics replay still runs when bars exist. Turn stub off in Actions only after **full-universe sync** is in the workflow (not a P0.5 code blocker).
 
-**P0.5 Done-when (not in this ship):** L1 Issues / radar digests, `paper_book` / `live_shadow` consumption, full industry YAML, and Spearman / `test_C1` are **not** hard gates. The engine writes `daily_stock` / `daily_l2` / `daily_l1` + `signal_event` (enter/exit/reconfirm) with same-day rerun supersede (identical payload does not grow rows).
+**Daily-trend P0.5 follow-ups (separate from fund holdings):** L1 Issues / radar digests, `paper_book` / `live_shadow` consumption, the full-universe mapping for daily metrics, and Spearman / `test_C1` remain **not** hard gates for that pipeline. The SW2021 tree above is used by the fund-holdings workflow only.
