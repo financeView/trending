@@ -91,6 +91,8 @@ jobs:
           path: |
             ${{ steps.report.outputs.report_json }}
             ${{ steps.report.outputs.report_markdown }}
+            ${{ steps.report.outputs.report_history }}
+            ${{ steps.report.outputs.report_chart }}
           if-no-files-found: error
           retention-days: 90
 
@@ -99,6 +101,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "${{ steps.report.outputs.report_json }}" "${{ steps.report.outputs.report_markdown }}"
+          if [ -n "${{ steps.report.outputs.report_history }}" ]; then
+            git add "${{ steps.report.outputs.report_history }}" "${{ steps.report.outputs.report_chart }}"
+          fi
           if git diff --staged --quiet; then
             echo "aggregate snapshot unchanged"
           else

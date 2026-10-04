@@ -1,3 +1,4 @@
+import json
 from datetime import date
 
 import pytest
@@ -13,6 +14,7 @@ from scripts.fund_industry import (
     render_markdown,
     resolve_l1,
     resolve_l2,
+    write_report_files,
 )
 
 
@@ -183,3 +185,65 @@ def test_unexpected_report_period_fails_closed():
             report_date="20260630",
             fetcher=lambda _period: [{"报告期": "2026-03-31", "股票代码": "000001", "持股总市值": 100}],
         )
+
+
+def _all_industry_summary(taxonomy, report_date, health_value, bank_value):
+    records = [
+        {"股票代码": "000001", "报告期": report_date, "持股总市值": health_value},
+        {"股票代码": "600000", "报告期": report_date, "持股总市值": bank_value},
+    ]
+    classification = {
+        "000001": {"l2_code": "370100", "l1_id": "l1_health"},
+        "600000": {"l2_code": "480300", "l1_id": "l1_finance"},
+    }
+    return aggregate_all_report(
+        records, classification, taxonomy, report_date=report_date
+    )
+
+
+def test_quarter_history_upserts_every_l2_and_renders_comparable_trends(taxonomy, tmp_path):
+    output_dir = tmp_path / "reports"
+    first = _all_industry_summary(taxonomy, "2026-03-31", 20_000, 30_000)
+    write_report_files(first, output_dir)
+
+    second = _all_industry_summary(taxonomy, "2026-06-30", 40_000, 20_000)
+    _json_path, markdown_path = write_report_files(second, output_dir)
+    history_path = output_dir / "history.json"
+    chart_path = output_dir / "trend.html"
+
+    history = json.loads(history_path.read_text(encoding="utf-8"))
+    assert history["proportion_denominator"] == first["proportion_pct"]["denominator"]
+    assert [period["report_date"] for period in history["periods"]] == [
+        "2026-03-31", "2026-06-30"
+    ]
+    for period in history["periods"]:
+        assert len(period["industries"]) == 134
+        assert len({item["code"] for item in period["industries"]}) == 134
+    health = next(
+        item for item in history["periods"][-1]["industries"]
+        if item["code"] == "370100"
+    )
+    assert health["market_value_亿元"] == 4.0
+    assert health["proportion_pct_of_mapped_a_shares"] == 66.6667
+
+    chart = chart_path.read_text(encoding="utf-8")
+    assert "2026-03-31" in chart and "2026-06-30" in chart
+    assert chart.count("<option value=") == 134
+    assert 'value="370100"' in chart
+    assert "持仓市值（亿元）" in chart
+    assert "不是基金净资产" in chart
+    report = markdown_path.read_text(encoding="utf-8")
+    assert "与上一已留存报告期比较" in report
+    assert "2026-03-31" in report and "2026-06-30" in report
+    assert "+2.00" in report
+    assert "+26.6667" in report
+
+    corrected = _all_industry_summary(taxonomy, "2026-06-30", 45_000, 20_000)
+    write_report_files(corrected, output_dir)
+    history = json.loads(history_path.read_text(encoding="utf-8"))
+    assert len(history["periods"]) == 2
+    health = next(
+        item for item in history["periods"][-1]["industries"]
+        if item["code"] == "370100"
+    )
+    assert health["market_value_亿元"] == 4.5

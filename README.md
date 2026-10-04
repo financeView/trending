@@ -4,7 +4,7 @@ A-share trend metrics / ops / paper eval (specs under `docs/superpowers/specs/`)
 
 ## Public-fund holdings by industry
 
-A separate quarterly workflow snapshots CNINFO public-fund stock holdings across the repository's SW2021 L2 → custom L1 taxonomy; manual runs accept a validated L1/L2 pair. GitHub requires both scheduled and manual workflows to exist on the default branch, so neither trigger is available while this feature is confined to its independent branch. See [`docs/fund-industry-holdings.md`](docs/fund-industry-holdings.md) for source coverage, denominator, limitations, and run instructions. Workflow: `.github/workflows/fund-industry-holdings.yml`.
+A separate quarterly workflow snapshots CNINFO public-fund stock holdings across the repository's SW2021 L2 → custom L1 taxonomy; each full snapshot persists quarter-stamped values and proportions for all 134 L2 industries, compares against the prior saved report, and updates a selectable, offline `trend.html` chart. Manual runs accept a validated L1/L2 pair. GitHub requires both scheduled and manual workflows to exist on the default branch, so neither trigger is available while this feature is confined to its independent branch. See [`docs/fund-industry-holdings.md`](docs/fund-industry-holdings.md) for history storage, source coverage, denominator, limitations, and run instructions. Workflow: `.github/workflows/fund-industry-holdings.yml`.
 
 ## P0 / P0.5 data wiring
 

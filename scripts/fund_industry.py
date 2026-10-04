@@ -6,6 +6,7 @@ for arithmetic and rendered in 100m CNY (亿元).
 """
 from __future__ import annotations
 
+import html
 import json
 import os
 import re
@@ -31,6 +32,10 @@ A_SHARE_PREFIXES = (
     "600", "601", "603", "605", "688", "689",
 )
 WAN_TO_YI = Decimal("10000")  # 10,000 x 万元 = 1 亿元
+HISTORY_DENOMINATOR = (
+    "all SW2021-mapped Shanghai/Shenzhen A-share stock positions in this CNINFO "
+    "report period across funds"
+)
 
 
 class _RateLimiter:
@@ -572,7 +577,7 @@ def aggregate_report(
             "selected_l2": _yi(l2_total),
         },
         "proportion_pct": {
-            "denominator": "all SW2021-mapped Shanghai/Shenzhen A-share stock positions in this CNINFO report period across funds",
+            "denominator": HISTORY_DENOMINATOR,
             "selected_l1_of_mapped_a_share_holdings": _percentage(l1_total, mapped_total),
             "selected_l2_of_mapped_a_share_holdings": _percentage(l2_total, mapped_total),
             "selected_l2_within_selected_l1": _percentage(l2_total, l1_total),
@@ -660,7 +665,9 @@ def aggregate_all_report(
     return base
 
 
-def render_markdown(summary: Mapping[str, Any]) -> str:
+def render_markdown(
+    summary: Mapping[str, Any], history: Mapping[str, Any] | None = None
+) -> str:
     """Create a concise, auditable run report for the Actions summary/artifact."""
     if summary.get("all_industries"):
         values = summary["market_value_亿元"]
@@ -691,6 +698,7 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
                 lines.append(
                     f"| {l1['l1_name']} | {l2['name']} (`{l2['code']}`) | {l2['market_value_亿元']:,.2f} | {l2['proportion_pct_of_mapped_a_shares']:.4f}% | {l2['proportion_pct_within_l1']:.4f}% |"
                 )
+        _append_history_comparison(lines, summary, history)
         lines.extend([
             "",
             "**解释限制：**",
@@ -736,8 +744,236 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+HISTORY_SCHEMA_VERSION = 1
+def _history_period(summary: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep only aggregate, auditable per-quarter data; never fund-level rows."""
+    if not summary.get("all_industries"):
+        raise ValueError("quarter history can only be updated by a full-industry snapshot")
+    l2_rows = [
+        {
+            "l1_id": l1["l1_id"],
+            "l1_name": l1["l1_name"],
+            "code": l2["code"],
+            "name": l2["name"],
+            "market_value_亿元": l2["market_value_亿元"],
+            "proportion_pct_of_mapped_a_shares": l2[
+                "proportion_pct_of_mapped_a_shares"
+            ],
+            "proportion_pct_within_l1": l2["proportion_pct_within_l1"],
+        }
+        for l1 in summary["industries"]
+        for l2 in l1["level2"]
+    ]
+    codes = [row["code"] for row in l2_rows]
+    if len(l2_rows) != 134 or len(set(codes)) != 134:
+        raise ValueError(
+            f"full-industry history requires 134 unique L2 rows; found {len(set(codes))}"
+        )
+    values = summary["market_value_亿元"]
+    coverage = summary["coverage"]
+    return {
+        "report_date": parse_report_date(summary["report_date"]).isoformat(),
+        "generated_at_utc": summary["generated_at_utc"],
+        "report_type": summary["disclosure"]["report_type"],
+        "disclosure_note": summary["disclosure"]["coverage_note"],
+        "market_value_亿元": {
+            "all_source_reported_stock_positions": values[
+                "all_source_reported_stock_positions"
+            ],
+            "repository_scope_a_shares": values["repository_scope_a_shares"],
+            "sw2021_mapped_a_shares": values["sw2021_mapped_a_shares"],
+            "unmapped_repository_scope_a_shares": values[
+                "unmapped_repository_scope_a_shares"
+            ],
+            "out_of_repository_scope_securities": values[
+                "out_of_repository_scope_securities"
+            ],
+        },
+        "coverage": dict(coverage),
+        "industries": l2_rows,
+    }
+
+
+def build_quarter_history(
+    summary: Mapping[str, Any], history_path: str | Path
+) -> dict[str, Any]:
+    """Upsert a complete quarterly snapshot, replacing corrections idempotently."""
+    taxonomy = summary["taxonomy"]
+    if history_path and Path(history_path).exists():
+        previous = json.loads(Path(history_path).read_text(encoding="utf-8"))
+        if previous.get("schema_version") != HISTORY_SCHEMA_VERSION:
+            raise ValueError("unsupported fund-industry history schema version")
+        if previous.get("taxonomy", {}).get("map_version") != taxonomy["map_version"]:
+            raise ValueError("history taxonomy version differs; refusing to mix industry maps")
+        if previous.get("proportion_denominator") != HISTORY_DENOMINATOR:
+            raise ValueError("history proportion denominator differs; refusing to mix metrics")
+        periods = previous.get("periods")
+        if not isinstance(periods, list):
+            raise ValueError("history periods must be a list")
+        seen_dates: set[str] = set()
+        expected_codes: set[str] | None = None
+        for period in periods:
+            period_date = parse_report_date(period.get("report_date", "")).isoformat()
+            if period_date in seen_dates:
+                raise ValueError(f"history contains duplicate report date {period_date}")
+            seen_dates.add(period_date)
+            rows = period.get("industries")
+            if not isinstance(rows, list) or len(rows) != 134:
+                raise ValueError("existing history period must contain all 134 L2 industries")
+            codes = {row.get("code") for row in rows}
+            if len(codes) != 134:
+                raise ValueError("existing history period contains duplicate L2 codes")
+            if expected_codes is None:
+                expected_codes = codes
+            elif codes != expected_codes:
+                raise ValueError("history periods contain different L2 code sets")
+        history = previous
+    else:
+        history = {
+            "schema_version": HISTORY_SCHEMA_VERSION,
+            "taxonomy": {
+                "map_version": taxonomy["map_version"],
+                "standard": taxonomy["standard"],
+            },
+            "units": {"market_value": "亿元", "proportion": "%"},
+            "proportion_denominator": HISTORY_DENOMINATOR,
+            "periods": [],
+        }
+
+    current = _history_period(summary)
+    current_codes = {row["code"] for row in current["industries"]}
+    if history["periods"] and current_codes != {
+        row["code"] for row in history["periods"][0]["industries"]
+    }:
+        raise ValueError("current snapshot L2 code set differs from saved history")
+    keyed = {period["report_date"]: period for period in history["periods"]}
+    keyed[current["report_date"]] = current
+    history["periods"] = [keyed[period] for period in sorted(keyed)]
+    return history
+
+
+def _append_history_comparison(
+    lines: list[str],
+    summary: Mapping[str, Any],
+    history: Mapping[str, Any] | None,
+) -> None:
+    if history is None:
+        return
+    current_date = summary["report_date"]
+    prior = next(
+        (
+            period
+            for period in reversed(history["periods"])
+            if period["report_date"] < current_date
+        ),
+        None,
+    )
+    lines.extend(["", "## 与上一已留存报告期比较", ""])
+    if prior is None:
+        lines.extend([
+            "这是历史库中的首个报告期，目前没有更早季度可供比较。",
+            "",
+        ])
+        return
+    prior_rows = {row["code"]: row for row in prior["industries"]}
+    lines.extend([
+        f"本期 `{current_date}` 对比上一已留存报告期 `{prior['report_date']}`；若中间有季度未成功披露或运行，前后两期不一定是相邻日历季度。",
+        "",
+        "| 一级行业 | 二级行业 | 本期市值（亿元） | 上期市值（亿元） | 市值变化（亿元） | 本期占比 | 上期占比 | 占比变化（百分点） |",
+        "|---|---|---:|---:|---:|---:|---:|---:|",
+    ])
+    for l1 in summary["industries"]:
+        for l2 in l1["level2"]:
+            previous = prior_rows[l2["code"]]
+            value_delta = l2["market_value_亿元"] - previous["market_value_亿元"]
+            share_delta = (
+                l2["proportion_pct_of_mapped_a_shares"]
+                - previous["proportion_pct_of_mapped_a_shares"]
+            )
+            lines.append(
+                f"| {l1['l1_name']} | {l2['name']} (`{l2['code']}`) | "
+                f"{l2['market_value_亿元']:,.2f} | {previous['market_value_亿元']:,.2f} | "
+                f"{value_delta:+,.2f} | {l2['proportion_pct_of_mapped_a_shares']:.4f}% | "
+                f"{previous['proportion_pct_of_mapped_a_shares']:.4f}% | {share_delta:+.4f} |"
+            )
+    lines.append("")
+
+
+def render_trend_html(history: Mapping[str, Any]) -> str:
+    """Render a dependency-free dashboard with selectable L2 value/share charts."""
+    periods = history["periods"]
+    if not periods:
+        raise ValueError("cannot render a trend chart without saved report periods")
+    latest = periods[-1]
+    groups: dict[tuple[str, str], list[dict[str, str]]] = {}
+    for item in latest["industries"]:
+        groups.setdefault((item["l1_id"], item["l1_name"]), []).append(item)
+    options = []
+    for (_l1_id, l1_name), items in groups.items():
+        options.append(f'<optgroup label="{html.escape(l1_name, quote=True)}">')
+        for item in items:
+            label = f"{item['name']} ({item['code']})"
+            options.append(
+                f'<option value="{html.escape(item["code"], quote=True)}">'
+                f"{html.escape(label)}</option>"
+            )
+        options.append("</optgroup>")
+    serialized = json.dumps(history, ensure_ascii=False, separators=(",", ":"))
+    serialized = serialized.replace("</", "<\\/").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+    date_list = "、".join(html.escape(period["report_date"]) for period in periods)
+    return f'''<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>公募基金二级行业持仓趋势</title>
+<style>
+body{{font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;color:#172033;max-width:1120px;margin:24px auto;padding:0 18px;background:#f7f9fc}}
+h1{{margin-bottom:4px}} .muted{{color:#526174}} .notice{{padding:12px 16px;background:#fff6dc;border-left:4px solid #d39b18;margin:18px 0}}
+.panel{{background:white;border:1px solid #dce3ed;border-radius:10px;padding:16px;margin:16px 0;box-shadow:0 2px 7px #14213d0a}}
+label{{font-weight:650}} select{{font:inherit;padding:8px 10px;max-width:100%;margin-left:8px}} svg{{width:100%;height:auto;display:block}} .chart-title{{font-size:18px;font-weight:700}}
+table{{width:100%;border-collapse:collapse;font-size:14px}} th,td{{text-align:left;padding:8px;border-bottom:1px solid #e5eaf1}} th{{background:#f1f5fa;position:sticky;top:0}}
+.table-wrap{{overflow:auto;max-height:520px}} .legend{{color:#526174;font-size:14px}} code{{white-space:nowrap}}
+</style></head><body>
+<h1>公募基金二级行业持仓趋势</h1>
+<p id="period-summary" class="muted"></p>
+<details class="panel"><summary>已保存的全部报告期</summary><p>{date_list}</p></details>
+<div class="notice"><strong>披露与口径提示：</strong>一季度、三季度报告通常只列每只基金股票投资的前十名；行业值是 CNINFO 已公开持仓明细的合计，不代表全部股票仓位。占比以当期已映射到申万2021二级行业的沪深A股持仓市值总和为分母，不是基金净资产、基金总资产或全部资产类别；北交所、B股、仓库外及未映射证券不进入该分母。下表逐期展示映射覆盖率和披露类型，判断趋势时请一并查看。</div>
+<section class="panel"><label for="industry">选择二级行业：</label><select id="industry">{''.join(options)}</select>
+<p id="selected-label" class="muted"></p>
+<h2 class="chart-title">持仓市值（亿元）</h2><svg id="value-chart" role="img" aria-label="所选二级行业持仓市值时间序列图"></svg>
+<h2 class="chart-title">占映射沪深A股持仓比例（%）</h2><svg id="share-chart" role="img" aria-label="所选二级行业持仓比例时间序列图"></svg>
+<p class="legend">两个指标分图绘制、各自使用纵轴；悬停数据点可查看完整报告期日期。</p></section>
+<section class="panel"><h2>逐期数据与覆盖情况</h2><div class="table-wrap"><table><thead><tr><th>报告期</th><th>持仓市值（亿元）</th><th>占映射持仓</th><th>占一级行业</th><th>报告类型</th><th>源表映射覆盖率</th><th>披露说明</th></tr></thead><tbody id="history-rows"></tbody></table></div></section>
+<script>
+const HISTORY = {serialized};
+const SVG_NS = "http://www.w3.org/2000/svg";
+const rowsFor = code => HISTORY.periods.map(period => ({{period, item: period.industries.find(row => row.code === code)}}));
+function svgNode(tag, attributes={{}}) {{ const node=document.createElementNS(SVG_NS,tag); for (const [key,value] of Object.entries(attributes)) node.setAttribute(key,String(value)); return node; }}
+function drawChart(id, points, key, color, unit) {{
+  const svg=document.getElementById(id); svg.replaceChildren(); svg.setAttribute("viewBox","0 0 960 330");
+  const W=960,H=330,m={{left:76,right:20,top:20,bottom:54}},pw=W-m.left-m.right,ph=H-m.top-m.bottom;
+  const vals=points.map(p=>Number(p.item[key])); const topRaw=Math.max(...vals,0); const top=topRaw===0?1:Math.ceil(topRaw*1.12/4)*4;
+  for(let i=0;i<=4;i++) {{ const y=m.top+ph*i/4, val=top*(4-i)/4; svg.append(svgNode("line",{{x1:m.left,y1:y,x2:W-m.right,y2:y,stroke:"#e3e9f1"}})); const t=svgNode("text",{{x:m.left-10,y:y+5,"text-anchor":"end",fill:"#526174","font-size":12}}); t.textContent=val.toFixed(unit==="%"?2:1); svg.append(t); }}
+  const x=i=>m.left+(points.length<2?pw/2:i*pw/(points.length-1)); const y=v=>m.top+ph-(v/top)*ph;
+  const path=svgNode("path",{{d:vals.map((v,i)=>`${{i===0?"M":"L"}}${{x(i).toFixed(1)}} ${{y(v).toFixed(1)}}`).join(" "),fill:"none",stroke:color,"stroke-width":3,"stroke-linejoin":"round","stroke-linecap":"round"}}); svg.append(path);
+  const labelIndexes=new Set([0,points.length-1]); for(let i=0;i<points.length;i+=Math.max(1,Math.ceil(points.length/7))) labelIndexes.add(i);
+  points.forEach((p,i)=>{{ const c=svgNode("circle",{{cx:x(i),cy:y(vals[i]),r:4,fill:color,stroke:"white","stroke-width":1.5}}); const title=svgNode("title"); title.textContent=`${{p.period.report_date}}: ${{vals[i].toFixed(unit==="%"?4:2)}} ${{unit}}`; c.append(title); svg.append(c); if(labelIndexes.has(i)){{const t=svgNode("text",{{x:x(i),y:H-22,"text-anchor":"middle",fill:"#526174","font-size":11}});t.textContent=p.period.report_date.slice(0,7);svg.append(t);}} }});
+  const yLabel=svgNode("text",{{x:18,y:m.top+ph/2,transform:`rotate(-90 18 ${{m.top+ph/2}})`,fill:"#526174","font-size":12,"text-anchor":"middle"}}); yLabel.textContent=unit; svg.append(yLabel);
+}}
+function render() {{
+  const code=document.getElementById("industry").value, points=rowsFor(code), latest=points[points.length-1];
+  document.getElementById("selected-label").textContent=`${{latest.item.l1_name}} · ${{latest.item.name}}（申万代码 ${{code}}）`;
+  drawChart("value-chart",points,"market_value_亿元","#2463eb","亿元");
+  drawChart("share-chart",points,"proportion_pct_of_mapped_a_shares","#c2410c","%");
+  const body=document.getElementById("history-rows"); body.replaceChildren();
+  points.forEach(({{period,item}})=>{{const tr=document.createElement("tr"); const values=[period.report_date,Number(item.market_value_亿元).toFixed(2),Number(item.proportion_pct_of_mapped_a_shares).toFixed(4)+"%",Number(item.proportion_pct_within_l1).toFixed(4)+"%",period.report_type,Number(period.coverage.mapped_value_pct_of_all_source_rows).toFixed(4)+"%",period.disclosure_note]; for(const value of values){{const td=document.createElement("td");td.textContent=value;tr.append(td);}}body.append(tr);}});
+}}
+const first=HISTORY.periods[0], last=HISTORY.periods[HISTORY.periods.length-1];
+document.getElementById("period-summary").textContent=`最新报告期：${{last.report_date}}；历史范围：${{first.report_date}} 至 ${{last.report_date}}，共 ${{HISTORY.periods.length}} 个已保存报告期。`;
+document.getElementById("industry").addEventListener("change",render); render();
+</script></body></html>'''
+
+
 def write_report_files(summary: Mapping[str, Any], output_dir: str | Path) -> tuple[Path, Path]:
-    """Persist only the small aggregate snapshot and its Markdown explanation."""
+    """Persist aggregate output; full snapshots also update history and trend chart."""
     target = Path(output_dir)
     target.mkdir(parents=True, exist_ok=True)
     selection = summary["selection"]
@@ -747,10 +983,25 @@ def write_report_files(summary: Mapping[str, Any], output_dir: str | Path) -> tu
     )
     json_path = target / f"{report_key}.json"
     markdown_path = target / f"{report_key}.md"
+    history_path: Path | None = None
+    chart_path: Path | None = None
+    history: dict[str, Any] | None = None
+    if summary.get("all_industries"):
+        history_path = target / "history.json"
+        chart_path = target / "trend.html"
+        history = build_quarter_history(summary, history_path)
+        history_tmp = history_path.with_suffix(".json.tmp")
+        chart_tmp = chart_path.with_suffix(".html.tmp")
+        history_tmp.write_text(
+            json.dumps(history, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        chart_tmp.write_text(render_trend_html(history), encoding="utf-8")
+        os.replace(history_tmp, history_path)
+        os.replace(chart_tmp, chart_path)
     json_tmp = json_path.with_suffix(".json.tmp")
     md_tmp = markdown_path.with_suffix(".md.tmp")
     json_tmp.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    md_tmp.write_text(render_markdown(summary), encoding="utf-8")
+    md_tmp.write_text(render_markdown(summary, history), encoding="utf-8")
     os.replace(json_tmp, json_path)
     os.replace(md_tmp, markdown_path)
     github_output = os.environ.get("GITHUB_OUTPUT")
@@ -758,4 +1009,7 @@ def write_report_files(summary: Mapping[str, Any], output_dir: str | Path) -> tu
         with open(github_output, "a", encoding="utf-8") as handle:
             handle.write(f"report_json={json_path.as_posix()}\n")
             handle.write(f"report_markdown={markdown_path.as_posix()}\n")
+            if history_path and chart_path:
+                handle.write(f"report_history={history_path.as_posix()}\n")
+                handle.write(f"report_chart={chart_path.as_posix()}\n")
     return json_path, markdown_path

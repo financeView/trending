@@ -12,7 +12,6 @@ from scripts.fund_industry import (
     fetch_latest_report,
     fetch_sw_classification_history,
     load_taxonomy,
-    render_markdown,
     resolve_l1,
     resolve_l2,
     write_report_files,
@@ -72,8 +71,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"fund-industry failed; no report was published: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
 
-    print(render_markdown(summary))
+    print(Path(markdown_path).read_text(encoding="utf-8"))
     print(f"\nJSON: {Path(json_path).as_posix()}\nMarkdown: {Path(markdown_path).as_posix()}")
+    if args.all_industries:
+        output_dir = Path(args.output_dir)
+        print(
+            f"History: {(output_dir / 'history.json').as_posix()}\n"
+            f"Trend chart: {(output_dir / 'trend.html').as_posix()}"
+        )
     return 0
 
 
