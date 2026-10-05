@@ -6,7 +6,7 @@
 
 持仓主数据使用巨潮资讯数据中心的“基金重仓股”报告期汇总，经 [AkShare 的 `fund_report_stock_cninfo`](https://akshare.akfamily.xyz/data/fund/fund_public.html) 获取。该接口一次返回指定报告期按股票汇总的基金持股家数、总股数和持股总市值；当前实现只传报告日期，不需要个人 API token、账号或密钥。AkShare 调用 CNINFO 的公开网页接口，因此源站或其网页协议变化仍可能导致抓取失败；遇到网络、证书或字段错误时工作流会失败，不会生成旧数据冒充最新结果。
 
-行业映射使用 [申万宏源个股行业分类变动历史](https://akshare.akfamily.xyz/data/stock/stock.html) 经 AkShare `stock_industry_clf_hist_sw` 获取。程序选择报告期当日已经生效的最新分类；来源记录若为申万三级代码，则归并到其申万二级父行业。再按照仓库的自定义一级映射计算一级汇总。未匹配的股票不会被塞入相似行业，而是进入未映射覆盖统计。
+行业映射使用 [申万宏源个股行业分类变动历史](https://akshare.akfamily.xyz/data/stock/stock.html) 对应的官方 XLS 文件。程序以 Requests 下载并按 AkShare 相同字段口径解析。申万站点当前未发送完整 TLS 证书链，因此请求会把仓库固定的 DigiCert 中间证书临时附加到活动 CA bundle；中间证书 SHA-256 固定校验，OpenSSL 必须继续链到原 bundle 已信任的根证书，并照常验证主机名。不会关闭验证、修改机器信任库或把该中间证书当作新的根。来源 URL、指纹、离线链验证和到期轮换策略见 [`certs/README.md`](../certs/README.md)。程序选择报告期当日已经生效的最新分类；来源记录若为申万三级代码，则归并到其申万二级父行业。再按照仓库的自定义一级映射计算一级汇总。未匹配的股票不会被塞入相似行业，而是进入未映射覆盖统计。
 
 执行路径只需持仓源的一次全市场查询和分类历史的一次下载，不会逐只基金抓取。原始接口结果仅在作业内存中处理；持仓明细不会写入数据库或提交到仓库。版本化输出包含汇总 JSON 与 Markdown，文件保存在 `reports/fund-industry/`；同一报告期和范围重复运行会更新同一文件。定时快照一次列出全部 14 个一级、134 个二级行业；手动输出仅含用户所选组合。
 
@@ -29,6 +29,17 @@
 同一目录的 `trend.html` 是无需安装额外组件、可离线打开的交互式趋势图：在行业选择框中选择任一二级行业，分别查看按亿元计的持仓市值曲线和按百分比计的行业占比曲线；下方表格逐期列出精确报告日期、数值、占比、报告类型、源表映射覆盖率和披露说明。页面也明确列出最新报告期、历史范围和已保存的全部报告日期。全行业 Markdown 报告另附本期与上一已留存报告期对比表，覆盖全部 134 个二级行业并同时列出市值变化和占比百分点变化；若中间缺期，会标明比较的是上一已保存期而非必然相邻的日历季度。
 
 本功能目前没有已提交的历史持仓数据，因此第一份成功的全行业快照会初始化历史库，之后每次成功的全行业运行再形成季度序列；不会伪造或静默回填缺失季度。全行业运行在本机默认输出目录直接生成 `reports/fund-industry/trend.html`；全行业 GitHub Actions 运行成功后，可从该次运行的 **Artifacts** 下载包含 `history.json` 和 `trend.html` 的工件，也可在功能分支查看已提交的历史文件。手动单行业运行只生成所选行业报告，不更新全行业历史或图表。图表的每个季度值仍受前述披露范围与映射覆盖限制，不能解释为基金全部资产或完整股票仓位。
+
+## 本地运行
+
+在仓库根目录运行时，使用 Python 模块入口（不要直接执行 `python scripts/run_fund_industry.py`，该写法不会把仓库根目录加入包导入路径）：
+
+```bash
+python -m scripts.run_fund_industry --all-industries --report-date 20260630
+python -m scripts.run_fund_industry --industry-l1 l1_health --industry-l2 370100 --report-date 20260630
+```
+
+默认输出目录为 `reports/fund-industry/`；可用 `--output-dir /tmp/fund-industry-smoke` 指定临时目录做端到端冒烟测试，避免改动已留存的报告或历史库。此入口也由 Actions 工作流和子进程回归测试使用。
 
 ## GitHub Actions 运行
 

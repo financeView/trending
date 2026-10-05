@@ -7,6 +7,7 @@ for arithmetic and rendered in 100m CNY (亿元).
 from __future__ import annotations
 
 import html
+import io
 import json
 import os
 import re
@@ -21,7 +22,11 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 from zoneinfo import ZoneInfo
 
+import pandas as pd
+import requests
 import yaml
+
+from scripts.common.sws_tls import verified_sws_ca_bundle
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TAXONOMY = ROOT / "config" / "taxonomy" / "sw2021_repository_tree.yaml"
@@ -411,11 +416,49 @@ def build_classification_asof(
 
 
 def fetch_sw_classification_history() -> Any:
-    """Download SW's public historical stock-classification file via AkShare."""
-    import akshare as ak
+    """Download SW's public history XLS with a verified, pinned chain supplement."""
+    url = "https://www.swsresearch.com/swindex/pdf/SwClass2021/StockClassifyUse_stock.xls"
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+        )
+    }
+
+    def call() -> Any:
+        from urllib.parse import urlsplit
+
+        with verified_sws_ca_bundle() as ca_bundle:
+            response = requests.get(
+                url,
+                headers=headers,
+                timeout=(10, 60),
+                verify=str(ca_bundle),
+            )
+        parsed_url = urlsplit(response.url)
+        if parsed_url.scheme != "https" or parsed_url.hostname != "www.swsresearch.com":
+            raise FundIndustryError(
+                f"unexpected redirect target for SW classification: {response.url}"
+            )
+        response.raise_for_status()
+        frame = pd.read_excel(
+            io.BytesIO(response.content), dtype={"股票代码": "str", "行业代码": "str"}
+        )
+        frame.rename(
+            columns={
+                "股票代码": "symbol",
+                "计入日期": "start_date",
+                "行业代码": "industry_code",
+                "更新日期": "update_time",
+            },
+            inplace=True,
+        )
+        frame["start_date"] = pd.to_datetime(frame["start_date"], errors="coerce").dt.date
+        frame["update_time"] = pd.to_datetime(frame["update_time"], errors="coerce").dt.date
+        return frame
 
     return _call_with_retry(
-        ak.stock_industry_clf_hist_sw,
+        call,
         limiter=_RateLimiter(per_second=1.0),
         attempts=3,
         backoffs=(2, 5),

@@ -67,15 +67,15 @@ jobs:
         run: pip install -r requirements-fund-industry.txt
 
       - name: Unit tests
-        run: python -m pytest tests/test_fund_industry.py -q
+        run: python -m pytest tests/test_fund_industry.py tests/test_fund_industry_tls.py -q
 
       - name: Aggregate latest public holdings
         id: report
         run: |
           if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
-            python scripts/run_fund_industry.py --all-industries --report-date "$REPORT_DATE"
+            python -m scripts.run_fund_industry --all-industries --report-date "$REPORT_DATE"
           else
-            python scripts/run_fund_industry.py \
+            python -m scripts.run_fund_industry \
               --industry-l1 "$INDUSTRY_L1" \
               --industry-l2 "$INDUSTRY_L2" \
               --report-date "$REPORT_DATE"
