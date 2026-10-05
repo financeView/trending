@@ -2,27 +2,36 @@
 
 A-share trend metrics / ops / paper eval (specs under `docs/superpowers/specs/`).
 
-## P0 / P0.5 data wiring
+## Local loop
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 python -m pytest tests/ -q
+# offline metrics wire (stub coverage stats only):
 python scripts/daily_run.py --date 2024-01-10 --force-trade-day --offline-calendar --stub-coverage
 ```
 
-Optional network sample sync (sina OHLC + BaoStock flags; EM limits optional):
+Network sync of classification-universe stub, then **real** coverage:
 
 ```bash
-python scripts/sync_bars_sample.py --codes 000001.SZ,600519.SH --end 2024-01-10
-python scripts/sync_bars_sample.py --codes 000001.SZ,600519.SH --end 2024-01-10 --with-limits
-# then real coverage (no --stub-coverage):
+python scripts/sync_bars_sample.py \
+  --from-universe config/taxonomy/universe_stub.yaml \
+  --end 2024-01-10 --with-limits
 python scripts/daily_run.py --date 2024-01-10 --force-trade-day --offline-calendar
 ```
 
-- Plan: `docs/superpowers/plans/2026-10-01-p0-daily-pipeline.md`
-- P0.5 metrics FSM: `docs/superpowers/plans/2026-10-01-p05-metrics-fsm.md`
-- Data contract: `docs/superpowers/specs/2026-10-01-market-data-contract-design.md`
-- Actions: `.github/workflows/daily-trend.yml` (cron 北京 19:00). `--stub-coverage` only skips coverage **stats** (keeps CI green); metrics replay still runs when bars exist. Turn stub off in Actions only after **full-universe sync** is in the workflow (not a P0.5 code blocker).
+## P1 L1 / Radar Issues
 
-**P0.5 Done-when (not in this ship):** L1 Issues / radar digests, `paper_book` / `live_shadow` consumption, full industry YAML, and Spearman / `test_C1` are **not** hard gates. The engine writes `daily_stock` / `daily_l2` / `daily_l1` + `signal_event` (enter/exit/reconfirm) with same-day rerun supersede (identical payload does not grow rows).
+```bash
+# dry-run markdown (14 L1 + radar) from trend.db
+python scripts/issues/update_l1_issues.py --date 2024-01-10 --dry-run --out-dir output/issues
+# live upsert (needs GITHUB_TOKEN + GITHUB_REPOSITORY)
+python scripts/issues/update_l1_issues.py --date 2024-01-10 --live
+```
+
+- Plans: `docs/superpowers/plans/2026-10-01-p0-daily-pipeline.md`, `2026-10-01-p05-metrics-fsm.md`, `2026-10-04-p1-l1-issues-radar.md`
+- Data contract: `docs/superpowers/specs/2026-10-01-market-data-contract-design.md`
+- Actions (cron 北京 19:00): syncs **stub universe** → `daily_run` **without** `--stub-coverage` → upserts L1/Radar Issues → commits `trend.db`. Coverage U is the stub member set, not full A-share.
+
+**Still out of ship:** full SW2021 YAML / full-A sync, same-engine L2/L1 (§10 C5), `paper_book` / `live_shadow`, Spearman / `test_C1`.

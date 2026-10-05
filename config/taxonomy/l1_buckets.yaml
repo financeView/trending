@@ -1,7 +1,20 @@
 map_version: p05-v1
-note: "Full SW2021→L1 YAML comes in taxonomy implementation; P0.5 uses stub map_version p05-v1."
-l1_ids:
-  - l1_health
-  - l1_tmt
-  - l1_consumer
-  - l1_cycle
+note: >
+  Canonical 14 L1 theme buckets (taxonomy §3.3). Member closure still comes from
+  stub SW map in aggregate.py until full SW2021 YAML lands; Issues still open
+  all 14 shells.
+l1:
+  - {sort: 10, l1_id: l1_health, name_zh: 医药健康}
+  - {sort: 20, l1_id: l1_tech_hw, name_zh: 科技硬件}
+  - {sort: 30, l1_id: l1_internet_media, name_zh: 互联网与传媒}
+  - {sort: 40, l1_id: l1_agri, name_zh: 农林}
+  - {sort: 50, l1_id: l1_staples, name_zh: 食品饮料}
+  - {sort: 60, l1_id: l1_discretionary, name_zh: 可选消费}
+  - {sort: 70, l1_id: l1_manufacturing, name_zh: 制造与军工}
+  - {sort: 80, l1_id: l1_power_equip, name_zh: 电新设备}
+  - {sort: 90, l1_id: l1_transport_env, name_zh: 交运与环保}
+  - {sort: 100, l1_id: l1_energy_util, name_zh: 能源与公用事业}
+  - {sort: 110, l1_id: l1_materials, name_zh: 材料与资源}
+  - {sort: 120, l1_id: l1_property_infra, name_zh: 地产基建}
+  - {sort: 130, l1_id: l1_finance, name_zh: 金融}
+  - {sort: 140, l1_id: l1_diversified, name_zh: 综合与商业服务}

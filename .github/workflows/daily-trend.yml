@@ -17,9 +17,15 @@ on:
         required: false
         type: string
         default: ""
+      skip_issue_update:
+        description: "跳过 L1/Radar Issue 更新"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
+  issues: write
 
 concurrency:
   group: daily-trend
@@ -52,6 +58,20 @@ jobs:
       - name: Unit tests
         run: python -m pytest tests/ -q
 
+      - name: Sync stub-universe bars
+        timeout-minutes: 60
+        run: |
+          DATE="${{ github.event.inputs.date }}"
+          END_ARGS=()
+          if [ -n "$DATE" ]; then
+            END_ARGS=(--end "$DATE")
+          fi
+          # Real coverage denominator = universe_stub members (not full A-share).
+          python scripts/sync_bars_sample.py \
+            --from-universe config/taxonomy/universe_stub.yaml \
+            --with-limits \
+            "${END_ARGS[@]}"
+
       - name: daily_run
         timeout-minutes: 120
         run: |
@@ -60,9 +80,8 @@ jobs:
           if [ "${{ github.event.inputs.force_trade_day }}" = "true" ]; then
             FORCE="--force-trade-day"
           fi
-          # P0.5: real coverage from bars when present; stub keeps Actions green
-          # until full-universe sync lands in this workflow.
-          python scripts/daily_run.py ${DATE:+--date $DATE} $FORCE --stub-coverage
+          # P1: real coverage over synced stub universe (no --stub-coverage).
+          python scripts/daily_run.py ${DATE:+--date $DATE} $FORCE
 
       - name: Commit trend.db + heartbeat
         run: |
@@ -75,4 +94,19 @@ jobs:
             git commit -m "chore: daily trend.db $(date -u +%Y-%m-%d)"
             git pull --rebase --autostash
             git push
+          fi
+
+      - name: Update L1 / Radar Issues
+        if: ${{ github.event.inputs.skip_issue_update != 'true' }}
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          # After commit: Issues are a view. Failures must not drop trend.db.
+          DATE="${{ github.event.inputs.date }}"
+          if [ -n "$DATE" ]; then
+            python scripts/issues/update_l1_issues.py --date "$DATE" --live
+          else
+            python scripts/issues/update_l1_issues.py --from-heartbeat --live
           fi

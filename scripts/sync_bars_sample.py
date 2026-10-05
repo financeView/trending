@@ -21,11 +21,22 @@ from scripts.common.bars import (
     sync_symbol_bars,
 )
 from scripts.common.http import RateLimiter
+from scripts.common.universe import load_universe_codes
+
+
+def codes_from_universe(path: str) -> list[str]:
+    """Members from classification universe YAML (quarantine excluded)."""
+    return load_universe_codes(path)
 
 
 def main(argv=None) -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--codes", default="000001.SZ,600519.SH")
+    p.add_argument(
+        "--from-universe",
+        default="",
+        help="Read member codes from universe YAML (overrides --codes)",
+    )
     p.add_argument("--end", default="")
     p.add_argument(
         "--with-limits",
@@ -48,7 +59,10 @@ def main(argv=None) -> int:
         if args.end
         else dt.date.today()
     )
-    codes = [c.strip() for c in args.codes.split(",") if c.strip()]
+    if args.from_universe:
+        codes = codes_from_universe(args.from_universe)
+    else:
+        codes = [c.strip() for c in args.codes.split(",") if c.strip()]
     conn = bars_conn()
     lim = RateLimiter(2.0)
     for code in codes:
