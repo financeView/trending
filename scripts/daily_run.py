@@ -57,6 +57,26 @@ def _parse_date(s: str) -> dt.date:
     return dt.datetime.strptime(s, "%Y-%m-%d").date()
 
 
+def resolve_session(
+    date_arg: str,
+    only_date: bool,
+    asof_arg: str,
+    asof_day: dt.date,
+):
+    """session_asof is asof_day / --asof; --date is replay start, not asof."""
+    if only_date and not date_arg:
+        raise ValueError("--only-date requires --date")
+    session_asof = _parse_date(asof_arg) if asof_arg else asof_day
+    if not date_arg:
+        return session_asof, None
+    start = _parse_date(date_arg)
+    if start > session_asof:
+        raise ValueError("date %s > asof %s" % (start, session_asof))
+    if only_date:
+        return session_asof, [start]
+    return session_asof, cal.trading_days_inclusive(start, session_asof)
+
+
 def build_queue(session_asof: dt.date) -> list[dt.date]:
     """从续跑起点到 asof 的交易日队列。
 
@@ -91,6 +111,8 @@ def _stub_coverage(universe_size: int = 100) -> CoverageMetrics:
         open_raw_coverage_asof=1.0,
         tradable_count=universe_size,
         universe_size=universe_size,
+        mapped_size=universe_size,
+        mapped_sync_coverage=1.0,
     )
 
 
@@ -317,6 +339,8 @@ def process_day(
                 "computable_coverage": metrics.computable_coverage,
                 "limit_coverage_asof": metrics.limit_coverage_asof,
                 "open_raw_coverage_asof": metrics.open_raw_coverage_asof,
+                "mapped_size": metrics.mapped_size,
+                "mapped_sync_coverage": metrics.mapped_sync_coverage,
                 "ok_predicate_version": OK_PREDICATE_VERSION,
                 "git_sha": os.environ.get("GITHUB_SHA", ""),
                 "started_at": started,
@@ -347,7 +371,21 @@ def process_day(
 
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="trending P0.5 daily_run")
-    p.add_argument("--date", default="", help="YYYY-MM-DD session asof（默认最近交易日）")
+    p.add_argument(
+        "--date",
+        default="",
+        help="重跑起点 YYYY-MM-DD（不是 session asof；默认从 last_ok 续跑）",
+    )
+    p.add_argument(
+        "--only-date",
+        action="store_true",
+        help="与 --date 联用：只跑该日",
+    )
+    p.add_argument(
+        "--asof",
+        default="",
+        help="覆盖 session_asof（默认 latest_trade_day）",
+    )
     p.add_argument(
         "--force-trade-day",
         action="store_true",
@@ -386,21 +424,29 @@ def main(argv=None) -> int:
         with open(path, encoding="utf-8") as f:
             cal.load_trade_dates_from_list(json.load(f))
 
-    if args.date:
-        session_asof = _parse_date(args.date)
-    else:
-        session_asof = cal.latest_trade_day()
+    asof_day = _parse_date(args.asof) if args.asof else cal.latest_trade_day()
+    try:
+        session_asof, queue_override = resolve_session(
+            args.date,
+            args.only_date,
+            args.asof,
+            asof_day,
+        )
+    except ValueError as e:
+        print("[daily_run] %s" % e)
+        return 2
 
-    if not args.force_trade_day and not cal.is_trade_day(session_asof):
-        print("[skip] non-trading-day %s" % session_asof)
-        write_heartbeat({"job": "daily_run", "status": "skip", "date": str(session_asof)})
+    gate_day = _parse_date(args.date) if args.date else session_asof
+    if not args.force_trade_day and not cal.is_trade_day(gate_day):
+        print("[skip] non-trading-day %s" % gate_day)
+        write_heartbeat({"job": "daily_run", "status": "skip", "date": str(gate_day)})
         return 0
 
-    if not args.force_trade_day and args.date and not cal.is_trade_day(session_asof):
-        print("[skip] non-trading-day %s" % session_asof)
+    if args.date and not args.force_trade_day and not cal.is_trade_day(session_asof):
+        print("[skip] non-trading-day asof %s" % session_asof)
         return 0
 
-    queue = build_queue(session_asof)
+    queue = queue_override if queue_override is not None else build_queue(session_asof)
     if not queue:
         # ensure at least process asof when cold or already ok through asof
         if args.force_trade_day or cal.is_trade_day(session_asof):

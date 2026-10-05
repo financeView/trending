@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS run_meta (
   computable_coverage REAL,
   limit_coverage_asof REAL,
   open_raw_coverage_asof REAL,
+  mapped_size INTEGER,
+  mapped_sync_coverage REAL,
   ok_predicate_version TEXT,
   git_sha TEXT,
   started_at TEXT,
@@ -132,7 +134,11 @@ CREATE TABLE IF NOT EXISTS shadow_book_state (
 );
 """
 
-# CREATE IF NOT EXISTS does not add columns to existing tables.
+RUN_META_ALTER_COLUMNS: Tuple[Tuple[str, str], ...] = (
+    ("mapped_size", "INTEGER"),
+    ("mapped_sync_coverage", "REAL"),
+)
+
 DAILY_STOCK_ALTER_COLUMNS: Tuple[Tuple[str, str], ...] = (
     ("hard_frozen", "INTEGER"),
     ("close_qfq", "REAL"),
@@ -274,6 +280,7 @@ def _ensure_columns(
 def migrate_schema(conn: sqlite3.Connection) -> None:
     """Idempotent: create missing tables, ALTER-add missing daily_* columns."""
     conn.executescript(SCHEMA)
+    _ensure_columns(conn, "run_meta", RUN_META_ALTER_COLUMNS)
     _ensure_columns(conn, "daily_stock", DAILY_STOCK_ALTER_COLUMNS)
     _ensure_columns(conn, "daily_l2", DAILY_BASKET_ALTER_COLUMNS)
     _ensure_columns(conn, "daily_l1", DAILY_BASKET_ALTER_COLUMNS)

@@ -9,17 +9,27 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 python -m pytest tests/ -q
 # offline metrics wire (stub coverage stats only):
-python scripts/daily_run.py --date 2024-01-10 --force-trade-day --offline-calendar --stub-coverage
+python scripts/daily_run.py --asof 2024-01-10 --force-trade-day --offline-calendar --stub-coverage
 ```
 
-Network sync of classification-universe stub, then **real** coverage:
+Mapped-universe sync (Git `stock_sw_l2.yaml`), then **real** coverage:
 
 ```bash
-python scripts/sync_bars_sample.py \
-  --from-universe config/taxonomy/universe_stub.yaml \
-  --end 2024-01-10 --with-limits
-python scripts/daily_run.py --date 2024-01-10 --force-trade-day --offline-calendar
+python scripts/sync_bars_sample.py --end 2026-09-30
+python scripts/daily_run.py --date 2026-09-30 --only-date
 ```
+
+`--date D` is replay **start**, not session asof (`latest_trade_day()` unless `--asof`). `--only-date` requires `--date`.
+
+Actions `workflow_dispatch`:
+
+| 模式 | inputs | daily_run |
+|------|--------|-----------|
+| cron / 日更 | 不填 date | 无 `--date` |
+| 单日补洞 | date=D, only_date=true | `--date D --only-date` |
+| 从 D 追赶 | date=D | `--date D` |
+
+Incomplete sync (`sync_complete=false`) skips daily_run / L / trend.db commit. Sync >200 min → `run_deferred` (skip daily_run this job).
 
 ## P1 L1 / Radar Issues
 
@@ -32,7 +42,7 @@ python scripts/issues/update_l1_issues.py --date 2024-01-10 --live
 
 - Plans: `docs/superpowers/plans/2026-10-01-p0-daily-pipeline.md`, `2026-10-01-p05-metrics-fsm.md`, `2026-10-04-p1-l1-issues-radar.md`
 - Data contract: `docs/superpowers/specs/2026-10-01-market-data-contract-design.md`
-- Actions (cron 北京 19:00): sync stub universe → `daily_run` (no `--stub-coverage`) → `live_shadow_step --from-heartbeat` (no-op unless `run_meta=ok` and bars usable) → **one** commit of `trend.db`+heartbeat → L1/Radar Issues (`continue-on-error`). Coverage U is the stub member set, not full A-share.
+- Actions (cron 北京 19:00): sync **mapped SW YAML** universe → `daily_run` (no `--stub-coverage`) → `live_shadow_step --from-heartbeat` → **one** commit of `trend.db`+heartbeat → L1/Radar Issues (`continue-on-error`). Coverage denominator includes `mapped_sync_coverage` over the mapped set.
 
 ## P2 paper / live shadow
 
@@ -45,4 +55,4 @@ python scripts/eval/paper_book.py --from 2024-01-05 --to 2024-01-08 \
   --signals-json /tmp/signals.json --out output/eval --run-id audit-fri-mon
 ```
 
-**Still out of ship:** full SW2021 YAML / full-A sync, same-engine L2/L1 (§10 C5), causal H / walk-forward gates, Spearman / `test_C1`.
+**Still out of ship:** unmapped 全A sync, same-engine L2/L1 (§10 C5), causal H / walk-forward gates, Spearman / `test_C1`.

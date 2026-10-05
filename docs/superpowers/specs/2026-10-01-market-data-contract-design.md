@@ -196,11 +196,11 @@ w_i     = w_i_raw / sum(w_j_raw for j in M)
 
 ### 7.2 `run_meta.status=ok` 谓词（续跑硬闸）
 
-**Session `asof`**：本轮 Actions / `workflow_dispatch` 要收尾的**最新已收盘交易日**（19:00 日更通常即「今天」对应交易日；手动 `--date` 时即为该参数日）。  
+**Session `asof`**：本轮要收尾的**最新已收盘交易日**（cron 通常即上海「今天」对应交易日）。**不是** `daily_run --date`：`--date D` 只表示从 D 起重跑；`session_asof` 仍为 `latest_trade_day()`（测试可用 `--asof` 覆盖）。见 [`2026-10-05-sw-yaml-universe-design.md`](2026-10-05-sw-yaml-universe-design.md) §3。  
 缺口队列里的中间日记为 `D`；**仅当 `D == asof` 时**施加「asof 专用」门槛；**`D < asof` 的历史/追赶日不要求当日 `limit_*` 覆盖率**。
 
 分母 \(U\) **权威定义** = metrics **§3.2** 的 `members_tradable`（分类宇宙 ∧ 非 quarantine ∧ 非 ST/\*ST ∧ 非停牌）。taxonomy 节点上的 `members_tradable` 计数是同集合的局部视图；覆盖率分母用**全局**该集合，不以单 L2 成员数代替。  
-下列写入该日 `run_meta`：`bar_coverage`, `computable_coverage`, `limit_coverage_asof`, `open_raw_coverage_asof`, `ok_predicate_version=v1`。  
+下列写入该日 `run_meta`：`bar_coverage`, `computable_coverage`, `limit_coverage_asof`, `open_raw_coverage_asof`, `mapped_size`, `mapped_sync_coverage`, `ok_predicate_version=v1.1`。  
 （历史日仍可填 `limit_coverage_asof` 作监控，**不参与**该日 ok 判定。）
 
 #### 所有日 `D` 均须满足（含历史追赶）
@@ -208,8 +208,9 @@ w_i     = w_i_raw / sum(w_j_raw for j in M)
 | 条件 | 初阈 | 说明 |
 |------|------|------|
 | `D` 为交易日且该日流水线无致命错 | — | |
-| `bar_coverage` | ≥ **0.90** | \(U\) 中具备当日 raw+qfq OHLC 及 `is_suspended`/`is_st` 的比例（已含 `open_raw`） |
-| `computable_coverage` | ≥ **0.50**（冷启动可配置更低，正式评估前须达标） | \(U\) 中历史长度已够 metrics 门禁（§3.3）的比例 |
+| `mapped_sync_coverage` | ≥ **0.90** | 映射宇宙（`load_universe_codes()`，**不因缺 bar 缩小**）中当日有 bar 且 `flag_source` 非空的比例。防止只 sync 5 只就把 \(U\) 缩到 5 只后 `ok`。见 sw-yaml-universe spec §1.1 |
+| `bar_coverage` | ≥ **0.90** | \(U\)=`members_tradable` 中具备当日 raw+qfq OHLC 及 `is_suspended`/`is_st` 的比例（已含 `open_raw`） |
+| `computable_coverage` | ≥ **0.50**（冷启动可配置更低，正式评估前须达标） | **\(U\)** 中历史长度已够 metrics 门禁（§3.3，252 交易日）的比例。新股/次新不够 252 是预期，不要求映射全集每只都满 252 |
 
 #### 仅当 `D == asof` 额外满足
 
@@ -288,3 +289,4 @@ for D in 待跑:
 | 2026-10-01 | review 修补：ok 覆盖率谓词；float_mv as-of/禁回刷；qfq 三句；limit 只对 open_raw；limit 覆盖并入 ok；cron UTC 11:00 |
 | 2026-10-01 | 澄清 session asof：仅 asof 日卡 limit 覆盖率；历史追赶日不要求 limit；fail/partial；冷启动不进 last_ok |
 | 2026-10-01 | 跨 spec：scrub「空则等权」措辞；\(U\)=metrics §3.2 `members_tradable` |
+| 2026-10-05 | `--date` 不是 session asof；`mapped_sync_coverage` 入所有日 ok；`ok_predicate_version=v1.1` |

@@ -15,22 +15,25 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from scripts.metrics.hysteresis import inv_rank
 from scripts.metrics.temp_raw import RANK
+from scripts.common.universe import l1_to_l2_map, l2_members_map, load_l2_to_l1, load_stock_sw_l2
 
 MEMBER_SET = "tradable"
 
-# Stub SW L2 → stocks until full taxonomy YAML lands.
-STUB_L2_MEMBERS: Dict[str, List[str]] = {
-    "801780": ["000001.SZ", "600000.SH", "601318.SH"],
-    "801180": ["000002.SZ"],
-    "801120": ["600519.SH"],
-}
+_TAX_BY_TS: Optional[Dict[str, tuple]] = None
 
-# L1 → L2 codes; members = union of those L2 lists (closure once).
-STUB_L1_TO_L2: Dict[str, List[str]] = {
-    "l1_finance": ["801780"],
-    "l1_property_infra": ["801180"],
-    "l1_staples": ["801120"],
-}
+
+def _taxonomy_index() -> Dict[str, tuple]:
+    global _TAX_BY_TS
+    if _TAX_BY_TS is None:
+        l1_of = {r["code"]: r["l1_id"] for r in load_l2_to_l1()}
+        idx: Dict[str, tuple] = {}
+        for row in load_stock_sw_l2():
+            code = row["sw_l2_code"]
+            if not code:
+                continue
+            idx[row["ts_code"]] = (code, l1_of.get(code))
+        _TAX_BY_TS = idx
+    return _TAX_BY_TS
 
 
 def weight_raw(float_mv: Optional[float]) -> float:
@@ -60,7 +63,7 @@ def member_closure(
     l2_members: Mapping[str, Sequence[str]] | None = None,
 ) -> List[str]:
     """L1 members = ∪ stocks of mapped L2 (no nested L2 aggregation)."""
-    mapping = l2_members if l2_members is not None else STUB_L2_MEMBERS
+    mapping = l2_members if l2_members is not None else l2_members_map()
     seen: List[str] = []
     have = set()
     for l2 in l2_codes:
@@ -77,9 +80,11 @@ def taxonomy_for_stock(
     l2_members: Mapping[str, Sequence[str]] | None = None,
     l1_to_l2: Mapping[str, Sequence[str]] | None = None,
 ) -> tuple[Optional[str], Optional[str]]:
-    """Return (sw_l2_code, l1_id) from the stub map, or (None, None)."""
-    mapping = l2_members if l2_members is not None else STUB_L2_MEMBERS
-    buckets = l1_to_l2 if l1_to_l2 is not None else STUB_L1_TO_L2
+    """Return (sw_l2_code, l1_id) from the YAML map, or (None, None)."""
+    if l2_members is None and l1_to_l2 is None:
+        return _taxonomy_index().get(ts_code, (None, None))
+    mapping = l2_members if l2_members is not None else l2_members_map()
+    buckets = l1_to_l2 if l1_to_l2 is not None else l1_to_l2_map()
     sw = None
     for l2, members in mapping.items():
         if ts_code in members:
@@ -97,7 +102,7 @@ def stub_l1_members(
     l1_to_l2: Mapping[str, Sequence[str]] | None = None,
     l2_members: Mapping[str, Sequence[str]] | None = None,
 ) -> Dict[str, List[str]]:
-    buckets = l1_to_l2 if l1_to_l2 is not None else STUB_L1_TO_L2
+    buckets = l1_to_l2 if l1_to_l2 is not None else l1_to_l2_map()
     return {l1: member_closure(l2s, l2_members) for l1, l2s in buckets.items()}
 
 
@@ -206,7 +211,7 @@ def aggregate_l2(
     *,
     l2_members: Mapping[str, Sequence[str]] | None = None,
 ) -> List[Dict[str, Any]]:
-    mapping = l2_members if l2_members is not None else STUB_L2_MEMBERS
+    mapping = l2_members if l2_members is not None else l2_members_map()
     return [
         aggregate_members(stock_rows, members, trade_date=trade_date, code=code)
         for code, members in mapping.items()

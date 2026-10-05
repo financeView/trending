@@ -208,7 +208,17 @@ def test_aggregate_mvp_null_mv_and_l1_closure_once():
     assert abs(w[0] - 0.25) < 1e-12
     assert abs(w[1] - 0.75) < 1e-12
 
-    closed = member_closure(["801780", "801180"])
+    l2_members = {
+        "801780": ["000001.SZ", "600000.SH", "601318.SH"],
+        "801180": ["000002.SZ"],
+        "801120": ["600519.SH"],
+    }
+    l1_to_l2 = {
+        "l1_finance": ["801780"],
+        "l1_property_infra": ["801180"],
+        "l1_staples": ["801120"],
+    }
+    closed = member_closure(["801780", "801180"], l2_members)
     assert closed == ["000001.SZ", "600000.SH", "601318.SH", "000002.SZ"]
 
     stocks = [
@@ -231,11 +241,16 @@ def test_aggregate_mvp_null_mv_and_l1_closure_once():
             "solar_term": "立夏",
         },
     ]
-    l2 = {r["code"]: r for r in aggregate_l2(stocks, "2024-01-05")}
+    l2 = {r["code"]: r for r in aggregate_l2(stocks, "2024-01-05", l2_members=l2_members)}
     assert l2["801780"]["members_tradable"] == 2
     assert l2["801780"]["members_total"] == 3
     assert "stage_score" not in l2["801780"]
-    l1 = {r["code"]: r for r in aggregate_l1(stocks, "2024-01-05")}
+    l1 = {
+        r["code"]: r
+        for r in aggregate_l1(
+            stocks, "2024-01-05", l1_to_l2=l1_to_l2, l2_members=l2_members
+        )
+    }
     assert set(l1) == {"l1_finance", "l1_property_infra", "l1_staples"}
     assert l1["l1_finance"]["members_total"] == 3
     assert l1["l1_finance"]["members_tradable"] == 2

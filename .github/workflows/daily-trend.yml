@@ -13,10 +13,15 @@ on:
         type: boolean
         default: false
       date:
-        description: "指定交易日 YYYY-MM-DD（留空=最近交易日）"
+        description: "重跑起点 YYYY-MM-DD（空=cron：asof=最近交易日，无 --date）"
         required: false
         type: string
         default: ""
+      only_date:
+        description: "与 date 联用：只跑该日（单日补洞）"
+        required: false
+        type: boolean
+        default: false
       skip_issue_update:
         description: "跳过 L1/Radar Issue 更新"
         required: false
@@ -34,7 +39,7 @@ concurrency:
 jobs:
   trend:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 360
     env:
       BARS_SOURCE: sina
       PYTHONUNBUFFERED: "1"
@@ -58,42 +63,60 @@ jobs:
       - name: Unit tests
         run: python -m pytest tests/ -q
 
-      - name: Sync stub-universe bars
-        timeout-minutes: 60
+      - name: Sync mapped-universe bars
+        id: sync
+        timeout-minutes: 330
         run: |
           DATE="${{ github.event.inputs.date }}"
-          END_ARGS=()
+          ONLY="${{ github.event.inputs.only_date }}"
+          if [ "$ONLY" = "true" ] && [ -z "$DATE" ]; then
+            echo "[sync] only_date requires date" >&2
+            exit 1
+          fi
+          ASOF=$(python -c "from scripts.common.calendar import latest_trade_day; print(latest_trade_day().isoformat())")
+          END="$ASOF"
           LIMIT_ARGS=(--with-limits)
-          if [ -n "$DATE" ]; then
-            END_ARGS=(--end "$DATE")
-            TODAY=$(TZ=Asia/Shanghai date +%Y-%m-%d)
-            # EM f51/f52 is a live snapshot — do not spot-backfill historical --date.
-            if [ "$DATE" != "$TODAY" ]; then
+          BUDGET=200
+          if [ -n "$DATE" ] && [ "$ONLY" = "true" ]; then
+            END="$DATE"
+            BUDGET=300
+            if [ "$DATE" != "$ASOF" ]; then
               LIMIT_ARGS=()
-              echo "[sync] skip --with-limits (date=$DATE != asof $TODAY)"
+              echo "[sync] skip --with-limits (only_date=$DATE != asof $ASOF)"
             fi
+          elif [ -n "$DATE" ]; then
+            echo "[sync] catch-up from $DATE end=$ASOF"
+          else
+            echo "[sync] cron end=$ASOF"
           fi
           python scripts/sync_bars_sample.py \
-            --from-universe config/taxonomy/universe_stub.yaml \
-            "${LIMIT_ARGS[@]}" \
-            "${END_ARGS[@]}"
+            --end "$END" \
+            --time-budget-min "$BUDGET" \
+            "${LIMIT_ARGS[@]}"
 
       - name: daily_run
+        if: ${{ success() && steps.sync.outputs.sync_complete == 'true' && steps.sync.outputs.run_deferred != 'true' }}
         timeout-minutes: 120
         run: |
           DATE="${{ github.event.inputs.date }}"
+          ONLY="${{ github.event.inputs.only_date }}"
           FORCE=""
           if [ "${{ github.event.inputs.force_trade_day }}" = "true" ]; then
             FORCE="--force-trade-day"
           fi
-          # P1: real coverage over synced stub universe (no --stub-coverage).
-          python scripts/daily_run.py ${DATE:+--date $DATE} $FORCE
+          ONLY_ARG=""
+          if [ "$ONLY" = "true" ] && [ -n "$DATE" ]; then
+            ONLY_ARG="--only-date"
+          fi
+          python scripts/daily_run.py ${DATE:+--date $DATE} $ONLY_ARG $FORCE
 
       - name: live_shadow
+        if: ${{ success() && steps.sync.outputs.sync_complete == 'true' && steps.sync.outputs.run_deferred != 'true' }}
         run: |
           python scripts/eval/live_shadow_step.py --from-heartbeat
 
       - name: Commit trend.db + heartbeat
+        if: ${{ success() && steps.sync.outputs.sync_complete == 'true' && steps.sync.outputs.run_deferred != 'true' }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -107,15 +130,16 @@ jobs:
           fi
 
       - name: Update L1 / Radar Issues
-        if: ${{ github.event.inputs.skip_issue_update != 'true' }}
+        if: ${{ github.event.inputs.skip_issue_update != 'true' && success() && steps.sync.outputs.sync_complete == 'true' && steps.sync.outputs.run_deferred != 'true' }}
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
-          # After commit: Issues are a view. Failures must not drop trend.db.
           DATE="${{ github.event.inputs.date }}"
-          if [ -n "$DATE" ]; then
+          ONLY="${{ github.event.inputs.only_date }}"
+          # only_date: publish that day. Catch-up / cron: last processed day in heartbeat.
+          if [ "$ONLY" = "true" ] && [ -n "$DATE" ]; then
             python scripts/issues/update_l1_issues.py --date "$DATE" --live
           else
             python scripts/issues/update_l1_issues.py --from-heartbeat --live

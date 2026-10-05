@@ -330,7 +330,7 @@ def test_integration_smoke_enter_exit_and_same_day_rerun(tmp_path, monkeypatch):
 
     rc = main(
         [
-            "--date",
+            "--asof",
             D.isoformat(),
             "--force-trade-day",
             "--stub-coverage",
@@ -370,7 +370,7 @@ def test_integration_smoke_enter_exit_and_same_day_rerun(tmp_path, monkeypatch):
 
     rc2 = main(
         [
-            "--date",
+            "--asof",
             D.isoformat(),
             "--force-trade-day",
             "--stub-coverage",

@@ -36,6 +36,7 @@ def test_ok_history_without_limits():
         bar_coverage=0.95,
         computable_coverage=0.6,
         limit_coverage_asof=0.0,  # history may lack vendor limits
+        mapped_sync_coverage=1.0,
     )
     d = evaluate_ok(D, asof, m)
     assert d.ok
@@ -49,6 +50,7 @@ def test_ok_asof_requires_limits():
         bar_coverage=0.95,
         computable_coverage=0.6,
         limit_coverage_asof=0.5,
+        mapped_sync_coverage=1.0,
     )
     d = evaluate_ok(asof, asof, m)
     assert not d.ok
@@ -62,6 +64,7 @@ def test_ok_asof_with_limits():
         bar_coverage=0.95,
         computable_coverage=0.6,
         limit_coverage_asof=0.85,
+        mapped_sync_coverage=1.0,
     )
     d = evaluate_ok(asof, asof, m)
     assert d.ok
@@ -125,6 +128,12 @@ def test_queue_stops_and_resume_from_gap(tmp_path, monkeypatch):
     from scripts.daily_run import build_queue, process_day
 
     monkeypatch.setenv("TREND_DB", str(tmp_path / "trend.db"))
+    uni = tmp_path / "uni.yaml"
+    uni.write_text(
+        "map_version: p05-v1\nmembers:\n  - 000001.SZ\nquarantine: []\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UNIVERSE_YAML", str(uni))
     cal.clear_trade_date_cache()
     cal.load_trade_dates_from_list(
         ["2024-01-05", "2024-01-08", "2024-01-09", "2024-01-10"]
@@ -134,11 +143,13 @@ def test_queue_stops_and_resume_from_gap(tmp_path, monkeypatch):
         bar_coverage=0.95,
         computable_coverage=0.6,
         limit_coverage_asof=0.9,
+        mapped_sync_coverage=1.0,
     )
     bad_asof = CoverageMetrics(
         bar_coverage=0.95,
         computable_coverage=0.6,
         limit_coverage_asof=0.1,  # fails only when D==asof
+        mapped_sync_coverage=1.0,
     )
 
     assert process_day(date(2024, 1, 5), asof, metrics=good) == "ok"

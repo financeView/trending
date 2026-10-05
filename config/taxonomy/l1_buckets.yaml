@@ -1,8 +1,7 @@
-map_version: p05-v1
+map_version: sw2021-v1
 note: >
-  Canonical 14 L1 theme buckets (taxonomy §3.3). Member closure still comes from
-  stub SW map in aggregate.py until full SW2021 YAML lands; Issues still open
-  all 14 shells.
+  Canonical 14 L1 theme buckets (taxonomy §3.3). L2 membership comes from
+  config/taxonomy/sw_l2_to_l1.yaml + stock_sw_l2.yaml (map_version sw2021-v1).
 l1:
   - {sort: 10, l1_id: l1_health, name_zh: 医药健康}
   - {sort: 20, l1_id: l1_tech_hw, name_zh: 科技硬件}

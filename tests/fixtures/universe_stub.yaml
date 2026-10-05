@@ -1,0 +1,10 @@
+map_version: p05-v1
+note: >
+  Test-only stub universe. Production default is stock_sw_l2.yaml.
+members:
+  - 000001.SZ
+  - 000002.SZ
+  - 600000.SH
+  - 600519.SH
+  - 601318.SH
+quarantine: []

@@ -1,5 +1,10 @@
 from pathlib import Path
 
+_GATE = (
+    "success() && steps.sync.outputs.sync_complete == 'true' "
+    "&& steps.sync.outputs.run_deferred != 'true'"
+)
+
 
 def test_actions_live_shadow_before_single_db_commit():
     text = Path(".github/workflows/daily-trend.yml").read_text(encoding="utf-8")
@@ -10,5 +15,24 @@ def test_actions_live_shadow_before_single_db_commit():
     assert daily < shadow < commit < issues
     between = text[daily:commit]
     assert "continue-on-error" not in between
+    assert "id: sync" in text
+    assert "--from-universe" not in text
+    assert "timeout-minutes: 360" in text
+    assert "only_date requires date" in text
     assert text.count("git commit -m") == 1
     assert "continue-on-error: true" in text.split("Update L1 / Radar Issues", 1)[1]
+    # All four post-sync steps must restatement success + sync_complete + !run_deferred
+    for marker in (
+        "name: daily_run",
+        "name: live_shadow",
+        "name: Commit trend.db",
+        "name: Update L1 / Radar Issues",
+    ):
+        idx = text.index(marker)
+        chunk = text[idx : idx + 400]
+        assert _GATE in chunk, marker
+    # Catch-up / cron: Issues from heartbeat; only_date may still pass --date
+    issues_chunk = text[text.index("name: Update L1 / Radar Issues") :]
+    assert "--from-heartbeat" in issues_chunk
+    assert 'ONLY" = "true"' in issues_chunk
+    assert "--date" in issues_chunk

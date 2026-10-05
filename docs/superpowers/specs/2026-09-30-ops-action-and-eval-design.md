@@ -26,8 +26,8 @@ GitHub Actions (cron 工作日 北京 19:00 + workflow_dispatch)
   └─ checkout（含 data/trend.db）
   └─ cache 恢复 data/cache/bars.db（gitignore，不 commit）
   └─ 交易日历门禁：非交易日 exit 0，不写库、不改 Issue
-  └─ 断点续跑：待跑交易日 = next_trade_date(last_ok) … asof（见 market-data-contract §7）
-  └─ scripts/daily_run.py --date YYYY-MM-DD   # 可对缺口队列逐日调用
+  └─ 断点续跑：待跑交易日 = next_trade_date(last_ok) … session_asof（asof=最近交易日，不是 --date）
+  └─ scripts/daily_run.py [--date D [--only-date]]   # --date=重跑起点；cron 不传
         ├─ sync bars（可算宇宙；须含当日 open_raw 等成交字段）
         ├─ upsert stock_sw_l2 / 合成 L2·L1
         ├─ metrics engine → 截面 + 事件
@@ -74,24 +74,32 @@ trending/
 
 ### 3.1 Workflow
 
+权威输入与三种跑法见 [`2026-10-05-sw-yaml-universe-design.md`](2026-10-05-sw-yaml-universe-design.md) §3.1。实现用 `date`（不是旧稿 `trade_date`）+ `only_date`：
+
 ```yaml
 on:
   schedule:
-    - cron: '0 11 * * 1-5'   # 北京 19:00（UTC 11:00）；对齐 BaoStock 日K/复权入库，见 market-data-contract
+    - cron: '0 11 * * 1-5'   # 北京 19:00（UTC 11:00）
   workflow_dispatch:
     inputs:
-      trade_date:            # YYYY-MM-DD；空=推断上一交易日
+      date:                 # 重跑起点 YYYY-MM-DD；空=cron 语义（asof=最近交易日，无 --date）
         required: false
-      force_trade_day:       # 测试用，跳过日历
+      only_date:
+        type: boolean       # true=只跑 D；false=从 D 追到 asof
+        default: false
+      force_trade_day:
         type: boolean
         default: false
 concurrency:
   group: daily-trend
   cancel-in-progress: false
-permissions:
-  contents: write
-  issues: write
 ```
+
+- cron：不传 `date`；sync `--end`=`latest_trade_day()`；`--with-limits`；`daily_run` 无 `--date`。
+- `date=D` + `only_date`：sync `--end D`；`daily_run --date D --only-date`。
+- `date=D` 无 only_date：sync `--end`=最近交易日；`daily_run --date D`。
+- `sync_complete` 必须进 `GITHUB_OUTPUT`（不能只靠日志）。false 则 **跳过** daily_run / L / commit trend.db。
+- 上海「今日」一律 `latest_trade_day()`，不是民用日历 `date`。
 
 ### 3.2 交易日门禁
 
@@ -127,7 +135,9 @@ run_meta (
   computable_coverage REAL,
   limit_coverage_asof REAL,
   open_raw_coverage_asof REAL,
-  ok_predicate_version TEXT,   -- e.g. v1
+  mapped_size INTEGER,         -- |load_universe_codes()|
+  mapped_sync_coverage REAL,   -- 映射宇宙当日 bar+flag / mapped_size
+  ok_predicate_version TEXT,   -- v1.1+
   git_sha, started_at, finished_at, status, warn TEXT
 )
 
@@ -239,7 +249,7 @@ meta: param=… map=… run=…
 
 **P0**
 
-1. 本地 `--date <最近交易日>` 跑通；`run_meta` 有当日行与覆盖率字段；bars schema/sync 骨架可用。  
+1. 本地默认 asof（`latest_trade_day()`，不传 `--date`）跑通；`run_meta` 有当日行与覆盖率字段；bars schema/sync 骨架可用。历史补洞用 `--date D --only-date`。  
 2. **不要求**完整 `daily_stock` T/FSM 列（可为缺省/stub 或仅写 `run_meta`）；正式截面属 P0.5。  
 3. 假日 workflow 一次：跳过且无空 commit。  
 4. `workflow_dispatch` 指定历史某日可覆盖重算（至少 `run_meta`）。  
@@ -271,3 +281,4 @@ meta: param=… map=… run=…
 | 2026-10-01 | cron 改为 UTC 11:00；run_meta 覆盖率字段；daily_stock.float_mv |
 | 2026-10-01 | 跨 spec：P0 对齐 plan（FSM→P0.5）；`close_qfq`/`hard_frozen`；事件枚举指 metrics §6.0 |
 | 2026-10-01 | P0.5 落库事件；§9 按期验收；L 闸 `run_meta=ok` |
+| 2026-10-05 | `--date` 是重跑起点不是 session asof；见 sw-yaml-universe spec |

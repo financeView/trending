@@ -369,6 +369,7 @@ ST 判定：优先用数据商 **ST 标记字段**；无字段时再用证券简
 config/taxonomy/
   l1_buckets.yaml          # l1_id, name, sort_order, enabled
   sw_l2_to_l1.yaml         # map_version 元数据 + 每行 sw_l2_code → l1_id, sort_order
+  stock_sw_l2.yaml         # check-in 快照：ts_code → §4 二级码（本阶段不每日 vendor 拉）
   display_groups.yaml      # 可选；MVP 至少提供银行折叠示例
 ```
 
@@ -495,3 +496,5 @@ stock_sw_l2
 - 实现计划：`docs/superpowers/plans/`（本 spec 通过后）  
 - 指标：`docs/趋势交易核心理念与指标体系.md` + 另开指标聚合公式 spec  
 - ETF / 多资产树：另开 `asset-taxonomy` spec  
+
+**2026-10-05：** 成分权威仍是 Git；本阶段 `stock_sw_l2.yaml` 为 **check-in 快照**（生成脚本一次性归一到 §4 二级码），不在每日 cron 拉成分。每日 vendor 同步个股行业留待后续 map_version。`sw_l2_code` 不得使用 801xxx 指数码。  

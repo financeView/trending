@@ -212,6 +212,12 @@ def test_stub_coverage_flag(tmp_path, monkeypatch):
     from scripts.daily_run import process_day
 
     monkeypatch.setenv("TREND_DB", str(tmp_path / "trend.db"))
+    uni = tmp_path / "uni.yaml"
+    uni.write_text(
+        "map_version: p05-v1\nmembers:\n  - 000001.SZ\nquarantine: []\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UNIVERSE_YAML", str(uni))
     st = process_day(date(2024, 1, 10), date(2024, 1, 10), stub_coverage=True)
     assert st == "ok"
 
