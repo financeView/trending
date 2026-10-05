@@ -77,6 +77,34 @@ def bars_conn(path: Optional[str] = None) -> sqlite3.Connection:
     return conn
 
 
+def load_ohlc_limits(bars_path: str, trade_date: str, codes: Sequence[str]) -> Dict[str, dict]:
+    """open_raw / close_raw / limits / is_suspended for fill_day. Empty if db missing."""
+    if not os.path.exists(bars_path) or not codes:
+        return {}
+    conn = bars_conn(bars_path)
+    out: Dict[str, dict] = {}
+    try:
+        for ts in codes:
+            row = conn.execute(
+                """
+                SELECT open_raw, close_raw, limit_up, limit_down, is_suspended
+                FROM bars WHERE ts_code=? AND trade_date=?
+                """,
+                (ts, trade_date),
+            ).fetchone()
+            if row:
+                out[ts] = {
+                    "open_raw": row[0],
+                    "close_raw": row[1],
+                    "limit_up": row[2],
+                    "limit_down": row[3],
+                    "is_suspended": row[4],
+                }
+    finally:
+        conn.close()
+    return out
+
+
 def _utc_now() -> str:
     return datetime.utcnow().isoformat(timespec="seconds") + "Z"
 

@@ -89,6 +89,10 @@ jobs:
           # P1: real coverage over synced stub universe (no --stub-coverage).
           python scripts/daily_run.py ${DATE:+--date $DATE} $FORCE
 
+      - name: live_shadow
+        run: |
+          python scripts/eval/live_shadow_step.py --from-heartbeat
+
       - name: Commit trend.db + heartbeat
         run: |
           git config user.name "github-actions[bot]"

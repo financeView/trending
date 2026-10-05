@@ -121,6 +121,15 @@ CREATE TABLE IF NOT EXISTS paper_fill (
   reject_reason TEXT,
   run_id TEXT
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS paper_fill_event_side_date
+  ON paper_fill(signal_event_id, side, fill_date)
+  WHERE signal_event_id IS NOT NULL AND IFNULL(track, 'L') = 'L';
+
+CREATE TABLE IF NOT EXISTS shadow_book_state (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  payload TEXT NOT NULL
+);
 """
 
 # CREATE IF NOT EXISTS does not add columns to existing tables.
@@ -211,6 +220,28 @@ SIGNAL_EVENT_COLS = (
     "RS",
     "detail",
     "superseded_by",
+)
+
+PAPER_FILL_COLS = (
+    "fill_id",
+    "track",
+    "rule_id",
+    "cost_version",
+    "param_version",
+    "map_version",
+    "signal_event_id",
+    "signal_date",
+    "intent_date",
+    "fill_date",
+    "ts_code",
+    "side",
+    "exit_kind",
+    "qty",
+    "px",
+    "costs",
+    "status",
+    "reject_reason",
+    "run_id",
 )
 
 
@@ -428,6 +459,71 @@ def append_signal_events(
     if commit:
         conn.commit()
     return inserted
+
+
+def insert_paper_fills(
+    conn: sqlite3.Connection, rows: Iterable[Dict[str, Any]], commit: bool = True
+) -> int:
+    """Append-only. Duplicate fill_id or (signal_event_id, side, fill_date) is skipped."""
+    n = 0
+    for row in rows:
+        fid = row.get("fill_id")
+        if not fid:
+            raise ValueError("paper_fill requires fill_id")
+        existing = conn.execute(
+            "SELECT fill_id FROM paper_fill WHERE fill_id=?",
+            (fid,),
+        ).fetchone()
+        if existing is not None:
+            continue
+        sid = row.get("signal_event_id")
+        side = row.get("side")
+        fill_date = row.get("fill_date")
+        track = row.get("track") or "L"
+        if track == "L" and sid is not None and side and fill_date:
+            clash = conn.execute(
+                """
+                SELECT fill_id FROM paper_fill
+                WHERE signal_event_id=? AND side=? AND fill_date=?
+                  AND IFNULL(track, 'L') = 'L'
+                """,
+                (int(sid), str(side), str(fill_date)),
+            ).fetchone()
+            if clash is not None:
+                continue
+        cols = [c for c in PAPER_FILL_COLS if c in row]
+        sql = "INSERT INTO paper_fill (%s) VALUES (%s)" % (
+            ",".join(cols),
+            ",".join(["?"] * len(cols)),
+        )
+        conn.execute(sql, [row.get(c) for c in cols])
+        n += 1
+    if commit:
+        conn.commit()
+    return n
+
+
+def consumed_signal_sides(conn: sqlite3.Connection) -> set:
+    """Pairs (signal_event_id, side) that already have a terminal paper_fill row."""
+    rows = conn.execute(
+        """
+        SELECT signal_event_id, side FROM paper_fill
+        WHERE signal_event_id IS NOT NULL AND IFNULL(track, 'L') = 'L'
+        """
+    ).fetchall()
+    return {(int(a), str(b)) for a, b in rows if a is not None}
+
+
+def paper_fill_keys_on_date(conn: sqlite3.Connection, fill_date: str) -> set:
+    """(signal_event_id, side, fill_date) already written for L on this session."""
+    rows = conn.execute(
+        """
+        SELECT signal_event_id, side FROM paper_fill
+        WHERE fill_date=? AND signal_event_id IS NOT NULL AND IFNULL(track, 'L') = 'L'
+        """,
+        (fill_date,),
+    ).fetchall()
+    return {(int(a), str(b), fill_date) for a, b in rows if a is not None}
 
 
 def upsert_rows(conn, table: str, rows: List[Dict[str, Any]], commit: bool = True) -> int:
