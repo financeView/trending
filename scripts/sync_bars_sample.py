@@ -21,12 +21,13 @@ from scripts.common.bars import (
     sync_symbol_bars,
 )
 from scripts.common.http import RateLimiter
-from scripts.common.universe import load_universe_codes
+from scripts.common.universe import load_quarantine_codes, load_universe_codes
 
 
 def codes_from_universe(path: str) -> list[str]:
-    """Members from classification universe YAML (quarantine excluded)."""
-    return load_universe_codes(path)
+    """Universe YAML members minus quarantine."""
+    qua = load_quarantine_codes(path)
+    return [c for c in load_universe_codes(path) if c not in qua]
 
 
 def main(argv=None) -> int:

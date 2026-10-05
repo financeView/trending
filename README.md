@@ -32,6 +32,6 @@ python scripts/issues/update_l1_issues.py --date 2024-01-10 --live
 
 - Plans: `docs/superpowers/plans/2026-10-01-p0-daily-pipeline.md`, `2026-10-01-p05-metrics-fsm.md`, `2026-10-04-p1-l1-issues-radar.md`
 - Data contract: `docs/superpowers/specs/2026-10-01-market-data-contract-design.md`
-- Actions (cron 北京 19:00): syncs **stub universe** → `daily_run` **without** `--stub-coverage` → upserts L1/Radar Issues → commits `trend.db`. Coverage U is the stub member set, not full A-share.
+- Actions (cron 北京 19:00): syncs **stub universe** → `daily_run` **without** `--stub-coverage` → commits `trend.db` → upserts L1/Radar Issues (`continue-on-error`). Coverage U is the stub member set, not full A-share.
 
 **Still out of ship:** full SW2021 YAML / full-A sync, same-engine L2/L1 (§10 C5), `paper_book` / `live_shadow`, Spearman / `test_C1`.

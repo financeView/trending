@@ -46,10 +46,25 @@ def test_date_live_skips_when_heartbeat_skip_same_day(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "scripts.issues.update_l1_issues.DEFAULT_DB", str(tmp_path / "trend.db")
     )
+    conn = get_conn()
+    init_schema(conn)
+    conn.execute(
+        """
+        INSERT INTO run_meta (
+          trade_date, status, param_version, map_version,
+          bar_coverage, computable_coverage, limit_coverage_asof, tradable_count
+        ) VALUES (?,?,?,?,?,?,?,?)
+        """,
+        ("2024-01-06", "ok", "p05-v1", "p05-v1", 1.0, 1.0, 1.0, 1),
+    )
+    conn.commit()
     (tmp_path / "heartbeat.json").write_text(
         json.dumps({"status": "skip", "date": "2024-01-06"}),
         encoding="utf-8",
     )
+    ok, why = live_publish_allowed(conn, "2024-01-06")
+    assert ok is False and why == "skip"
+    conn.close()
     published = []
     monkeypatch.setattr(
         "scripts.issues.update_l1_issues.publish_live",

@@ -105,6 +105,43 @@ def test_empty_l1_still_has_skeleton(tmp_path, monkeypatch):
     conn.close()
 
 
+def test_l2_scan_uses_daily_stock_not_stub_map(tmp_path, monkeypatch):
+    """L2 codes come from that day's daily_stock.sw_l2_code, not STUB_L1_TO_L2."""
+    conn, td = _seed(tmp_path, monkeypatch)
+    upsert_daily_stock(
+        conn,
+        [
+            {
+                "trade_date": td,
+                "ts_code": "000999.SZ",
+                "sw_l2_code": "801150",
+                "l1_id": "l1_health",
+                "T": "温",
+                "right_side": 0,
+                "amount": 1.0,
+            }
+        ],
+    )
+    upsert_daily_l2(
+        conn,
+        [
+            {
+                "trade_date": td,
+                "code": "801150",
+                "T": "温",
+                "S_temp": 0.2,
+                "right_side": 0,
+                "solar_term": "惊蛰",
+                "members_tradable": 1,
+                "members_total": 1,
+            }
+        ],
+    )
+    body = render_l1_issue(conn, td, "l1_health", name_zh="医药健康")
+    assert "801150" in body
+    conn.close()
+
+
 def test_radar_overview(tmp_path, monkeypatch):
     conn, td = _seed(tmp_path, monkeypatch)
     body = render_radar_issue(conn, td, load_l1_buckets())

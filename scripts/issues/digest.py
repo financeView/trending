@@ -6,7 +6,6 @@ import sqlite3
 from typing import Any, Iterable, Optional, Sequence
 
 from scripts.common.taxonomy_meta import L1Bucket, load_l1_buckets
-from scripts.metrics.aggregate import STUB_L1_TO_L2
 from scripts.metrics.temp_raw import rank
 
 
@@ -60,8 +59,17 @@ def _meta_header(conn: sqlite3.Connection, trade_date: str, title: str) -> list[
     ]
 
 
-def _l2_codes_for_l1(l1_id: str) -> list[str]:
-    return list(STUB_L1_TO_L2.get(l1_id, ()))
+def _l2_codes_for_l1(conn: sqlite3.Connection, trade_date: str, l1_id: str) -> list[str]:
+    rows = conn.execute(
+        """
+        SELECT DISTINCT sw_l2_code
+        FROM daily_stock
+        WHERE trade_date=? AND l1_id=?
+          AND sw_l2_code IS NOT NULL AND TRIM(sw_l2_code) != ''
+        """,
+        (trade_date, l1_id),
+    ).fetchall()
+    return [str(r[0]) for r in rows]
 
 
 def _sort_l2_key(row: tuple) -> tuple:
@@ -108,7 +116,7 @@ def render_l1_issue(
     td = _td(trade_date)
     lines = _meta_header(conn, td, name_zh)
 
-    l2_codes = _l2_codes_for_l1(l1_id)
+    l2_codes = _l2_codes_for_l1(conn, td, l1_id)
     l2_rows: list[tuple] = []
     if l2_codes:
         qmarks = ",".join("?" * len(l2_codes))

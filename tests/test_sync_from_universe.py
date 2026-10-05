@@ -9,3 +9,12 @@ def test_codes_from_universe_stub():
     assert "000001.SZ" in codes
     assert "600519.SH" in codes
     assert len(codes) >= 5
+
+
+def test_codes_from_universe_drops_quarantine(tmp_path):
+    p = tmp_path / "uni.yaml"
+    p.write_text(
+        "map_version: t\nmembers:\n  - 000001.SZ\n  - 000002.SZ\nquarantine:\n  - 000002.SZ\n",
+        encoding="utf-8",
+    )
+    assert codes_from_universe(str(p)) == ["000001.SZ"]
