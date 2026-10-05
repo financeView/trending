@@ -74,8 +74,11 @@ def main(argv=None) -> int:
             nf = sync_baostock_flags(conn, code, end, limiter=lim)
             print("[sync_bars] flags %s rows=%d" % (code, nf))
     if args.with_limits:
-        nl = sync_em_limits_asof(conn, end, ts_codes=codes, limiter=lim)
-        print("[sync_bars] limits asof=%s rows=%d" % (end, nl))
+        try:
+            nl = sync_em_limits_asof(conn, end, ts_codes=codes, limiter=lim)
+            print("[sync_bars] limits asof=%s rows=%d" % (end, nl))
+        except Exception as e:  # noqa: BLE001 — EM is best-effort; OHLC/flags already persisted
+            print("[sync_bars] warn: limits skipped: %s" % e, file=sys.stderr)
     conn.close()
     return 0
 

@@ -18,3 +18,20 @@ def test_codes_from_universe_drops_quarantine(tmp_path):
         encoding="utf-8",
     )
     assert codes_from_universe(str(p)) == ["000001.SZ"]
+
+
+def test_with_limits_em_failure_exits_zero(monkeypatch):
+    class _Conn:
+        def close(self):
+            return None
+
+    monkeypatch.setattr("scripts.sync_bars_sample.bars_conn", lambda: _Conn())
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("em_f51f52: clist 全部 host 失败")
+
+    monkeypatch.setattr("scripts.sync_bars_sample.sync_em_limits_asof", _boom)
+    from scripts.sync_bars_sample import main
+
+    rc = main(["--skip-ohlc", "--skip-flags", "--with-limits", "--codes", "000001.SZ"])
+    assert rc == 0

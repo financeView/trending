@@ -63,13 +63,19 @@ jobs:
         run: |
           DATE="${{ github.event.inputs.date }}"
           END_ARGS=()
+          LIMIT_ARGS=(--with-limits)
           if [ -n "$DATE" ]; then
             END_ARGS=(--end "$DATE")
+            TODAY=$(TZ=Asia/Shanghai date +%Y-%m-%d)
+            # EM f51/f52 is a live snapshot — do not spot-backfill historical --date.
+            if [ "$DATE" != "$TODAY" ]; then
+              LIMIT_ARGS=()
+              echo "[sync] skip --with-limits (date=$DATE != asof $TODAY)"
+            fi
           fi
-          # Real coverage denominator = universe_stub members (not full A-share).
           python scripts/sync_bars_sample.py \
             --from-universe config/taxonomy/universe_stub.yaml \
-            --with-limits \
+            "${LIMIT_ARGS[@]}" \
             "${END_ARGS[@]}"
 
       - name: daily_run
