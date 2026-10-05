@@ -183,3 +183,66 @@ def test_with_limits_skipped_when_end_not_asof(tmp_path, monkeypatch):
     )
     assert rc == 0
     assert called == []
+
+
+def test_vendor_ohlc_error_continues_to_next_code(tmp_path, monkeypatch, capsys):
+    """Delisted/empty sina must not abort the whole sync job (Actions 37334793429)."""
+    from scripts.sync_bars_sample import main
+
+    calls = []
+
+    def _ohlc(_conn, code, end, limiter=None):
+        calls.append(code)
+        if code == "000003.SZ":
+            raise RuntimeError("call failed after 3 attempts: sina_raw_sz000003: No value to decode")
+        return 1
+
+    monkeypatch.setattr("scripts.sync_bars_sample.sync_symbol_bars", _ohlc)
+    monkeypatch.setattr("scripts.sync_bars_sample.sync_baostock_flags", lambda *a, **k: 0)
+    monkeypatch.setattr(
+        "scripts.sync_bars_sample.bars_conn",
+        lambda: bars_conn(str(tmp_path / "bars.db")),
+    )
+    monkeypatch.setattr(
+        "scripts.sync_bars_sample.latest_trade_day",
+        lambda: date(2026, 9, 30),
+    )
+    out = tmp_path / "github_output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(out))
+    rc = main(
+        [
+            "--codes",
+            "000003.SZ,000001.SZ",
+            "--end",
+            "2026-09-30",
+            "--skip-flags",
+        ]
+    )
+    assert rc == 0
+    assert calls == ["000001.SZ", "000003.SZ"] or calls == ["000003.SZ", "000001.SZ"]
+    assert "000001.SZ" in calls
+    assert "sync_complete=true" in out.read_text(encoding="utf-8")
+    err = capsys.readouterr().err
+    assert "000003.SZ" in err or "No value to decode" in err or "warn" in err.lower()
+
+
+def test_latest_trade_day_warn_goes_to_stderr(monkeypatch, capsys):
+    import datetime as dt
+
+    from scripts.common import calendar as cal
+
+    cal.clear_trade_date_cache()
+    cal.load_trade_dates_from_list(["2026-09-30", "2026-10-08"])
+
+    class FakeDateTime(dt.datetime):
+        @classmethod
+        def utcnow(cls):
+            return cls(2026, 10, 5, 16, 0, 0)
+
+    monkeypatch.setattr(cal.dt, "datetime", FakeDateTime)
+    d = cal.latest_trade_day()
+    captured = capsys.readouterr()
+    assert d == date(2026, 9, 30)
+    assert captured.out.strip() == ""
+    assert "[warn]" in captured.err
+    cal.clear_trade_date_cache()

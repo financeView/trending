@@ -148,11 +148,23 @@ def main(argv=None) -> int:
             print("[sync_bars] max-codes=%d hit; remaining work" % args.max_codes)
             break
         if need_ohlc:
-            n = sync_symbol_bars(conn, code, end, limiter=lim)
-            print("[sync_bars] ohlc %s rows=%d end=%s" % (code, n, end))
+            try:
+                n = sync_symbol_bars(conn, code, end, limiter=lim)
+                print("[sync_bars] ohlc %s rows=%d end=%s" % (code, n, end))
+            except Exception as e:  # noqa: BLE001 — one dead name must not kill the job
+                print(
+                    "[sync_bars] warn: ohlc %s skipped: %s" % (code, e),
+                    file=sys.stderr,
+                )
         if need_flags:
-            nf = sync_baostock_flags(conn, code, end, limiter=lim)
-            print("[sync_bars] flags %s rows=%d" % (code, nf))
+            try:
+                nf = sync_baostock_flags(conn, code, end, limiter=lim)
+                print("[sync_bars] flags %s rows=%d" % (code, nf))
+            except Exception as e:  # noqa: BLE001
+                print(
+                    "[sync_bars] warn: flags %s skipped: %s" % (code, e),
+                    file=sys.stderr,
+                )
         worked += 1
     if args.with_limits and complete:
         asof = latest_trade_day()

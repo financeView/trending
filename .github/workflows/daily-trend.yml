@@ -73,7 +73,8 @@ jobs:
             echo "[sync] only_date requires date" >&2
             exit 1
           fi
-          ASOF=$(python -c "from scripts.common.calendar import latest_trade_day; print(latest_trade_day().isoformat())")
+          # stderr for calendar warn; stdout must be a bare YYYY-MM-DD
+          ASOF=$(python -c "from scripts.common.calendar import latest_trade_day; print(latest_trade_day().isoformat())" 2>/dev/null)
           END="$ASOF"
           LIMIT_ARGS=(--with-limits)
           BUDGET=200

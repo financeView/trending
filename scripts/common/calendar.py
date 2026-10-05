@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import sys
 from typing import List, Optional
 
 _cache: Optional[List[dt.date]] = None
@@ -43,7 +44,8 @@ def trade_dates(force_refresh: bool = False) -> List[dt.date]:
                 )
             print(
                 "[warn] 交易日历接口失败(%s)，使用文件缓存(%d天,最新%s)"
-                % (str(e)[:50], len(_cache), _cache[-1])
+                % (str(e)[:50], len(_cache), _cache[-1]),
+                file=sys.stderr,
             )
             return _cache
         raise
@@ -71,7 +73,8 @@ def latest_trade_day(today: Optional[dt.date] = None) -> dt.date:
         if now.hour >= 15:
             print(
                 "[warn] UTC %s 启动（北京时间已过零点），trade_date 锚定为 %s"
-                % (now.strftime("%H:%M"), (now.date() - dt.timedelta(days=1)))
+                % (now.strftime("%H:%M"), (now.date() - dt.timedelta(days=1))),
+                file=sys.stderr,
             )
         today = now.date()
     days = [d for d in trade_dates() if d <= today]
