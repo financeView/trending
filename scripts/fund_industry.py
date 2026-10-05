@@ -434,6 +434,11 @@ def fetch_sw_classification_history() -> Any:
                 headers=headers,
                 timeout=(10, 60),
                 verify=str(ca_bundle),
+                allow_redirects=False,
+            )
+        if 300 <= response.status_code < 400:
+            raise FundIndustryError(
+                "SW classification source returned an HTTP 3xx response; redirects are disabled"
             )
         parsed_url = urlsplit(response.url)
         if parsed_url.scheme != "https" or parsed_url.hostname != "www.swsresearch.com":

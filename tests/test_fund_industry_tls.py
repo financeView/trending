@@ -130,6 +130,7 @@ def test_sw_history_download_passes_strict_ephemeral_bundle(monkeypatch):
     class Response:
         content = b"offline XLS fixture handled by mocked parser"
         url = "https://www.swsresearch.com/swindex/pdf/SwClass2021/StockClassifyUse_stock.xls"
+        status_code = 200
 
         @staticmethod
         def raise_for_status():
@@ -160,7 +161,48 @@ def test_sw_history_download_passes_strict_ephemeral_bundle(monkeypatch):
     assert captured["url"] == Response.url
     assert isinstance(captured["verify"], str)
     assert captured["timeout"] == (10, 60)
+    assert captured["allow_redirects"] is False
     assert result.loc[0, "symbol"] == "000001"
     assert result.loc[0, "industry_code"] == "370100"
     assert str(result.loc[0, "start_date"]) == "2021-09-01"
     assert not Path(captured["verify"]).exists()
+
+
+@pytest.mark.parametrize(
+    "location",
+    [
+        "http://www.swsresearch.com/downgrade.xls",
+        "https://attacker.example/steal.xls",
+        "https://www.swsresearch.com/same-host.xls",
+        "//attacker.example/protocol-relative.xls",
+        "https://user@www.swsresearch.com/userinfo.xls",
+        "https://www.swsresearch.com:invalid/bad-port.xls",
+    ],
+)
+def test_sw_history_download_never_requests_redirect_target(monkeypatch, location):
+    source_url = (
+        "https://www.swsresearch.com/swindex/pdf/SwClass2021/"
+        "StockClassifyUse_stock.xls"
+    )
+    requested = []
+
+    class RedirectResponse:
+        url = source_url
+        status_code = 302
+        headers = {"Location": location}
+
+    def fake_get(url, **kwargs):
+        requested.append(url)
+        assert kwargs["allow_redirects"] is False
+        return RedirectResponse()
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    monkeypatch.setattr(
+        fund_industry, "_call_with_retry", lambda fn, **_kwargs: fn()
+    )
+
+    with pytest.raises(fund_industry.FundIndustryError, match="redirects are disabled"):
+        fund_industry.fetch_sw_classification_history()
+
+    assert requested == [source_url]
+    assert location not in requested
