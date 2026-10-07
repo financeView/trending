@@ -253,6 +253,8 @@ S_temp = clip(S0 + s_vol_weight * (σ%ile - 0.5) * sign_trend, 0, 100)
 
 **序约束（CI）**：在金标+抽样实盘日上，`Spearman(rank(T), S_temp) ≥ spearman_min`（初值 0.55）；同档内不强制。若持续失败：降 `s_vol_weight` 或暂时关闭 UI 对 \(S\) 的暴露，**不得**改用 \(S\) 切档替代决策树。
 
+**临时豁免（Spec C / 2026-10-07）：** CI `test_T_S_spearman` 本阶段仅要求金标+合成夹具达到 `spearman_min`；抽样实盘日 Spearman **后放**，见 [`2026-10-07-rs-c1-vol-design.md`](2026-10-07-rs-c1-vol-design.md) §2.2。
+
 ### 5.5 未知态与 null 分流
 
 | 情形 | `T` / 滞回 | FSM |
@@ -596,7 +598,7 @@ RS_raw = rs_w1*ROC63 + rs_w2*ROC126 + rs_w3*ROC189 + rs_w4*ROC252
 RS = round(100 * percentile_rank(RS_raw among peer_universe))  # 0–100 整数
 ```
 
-`percentile_rank`：平均秩，同分同值；peer 为空或仅 1 人 → `RS=null`。
+`percentile_rank`（闭合）：对有限样本 \(n\ge 2\)，1-based 平均秩（同分取均值），\(p_i=(rank_i-1)/(n-1)\)，对外 `round(100*p_i)` → 0–100 整数；\(n\le 1\) 或空集 → null。
 
 ### 9.2 Peer 宇宙（按实体类）
 
@@ -695,6 +697,7 @@ filters_meta                # 复权、资格过滤摘要
 | `spearman_min` | 0.55 | T vs S |
 | `temp_transition_cap_per_year` | 80 | C6，滞回后 |
 | `rs_w1..w4` | 0.4,0.2,0.2,0.2 | |
+| `vol_score_min_samples` | 60 | Spec C 个股 VOL 最少有效 turnover 日 |
 | `atr_len` | 14 | |
 | `atr_floor` | 0.01 | |
 | `stage_D0` | 60 | |
@@ -790,3 +793,4 @@ filters_meta                # 复权、资格过滤摘要
 | 2026-10-01 | §3.1 去掉易误解的「等权」措辞，改指 §6.3 |
 | 2026-10-01 | 跨 spec 对齐：§6.0 事件枚举；`hard_frozen`=ST/显式旗且结束右侧；软冻≠硬冻；伪代码 emit `ENTER`/`EXIT`/`WARM_TO_HOT` |
 | 2026-10-01 | §6.0：每标的×日×event ≤1 **active**（`superseded_by` 允许多历史行） |
+| 2026-10-07 | Spec C T0：§5.4 Spearman 临时豁免；§9.1 `percentile_rank` 闭合式；§13 `vol_score_min_samples` |
