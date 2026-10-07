@@ -156,6 +156,8 @@ DAILY_STOCK_ALTER_COLUMNS: Tuple[Tuple[str, str], ...] = (
     ("RS", "REAL"),
     ("right_side", "INTEGER"),
     ("amount", "REAL"),
+    ("VOL_score", "REAL"),
+    ("param_version", "TEXT"),
 )
 
 DAILY_BASKET_ALTER_COLUMNS: Tuple[Tuple[str, str], ...] = (
@@ -170,6 +172,9 @@ DAILY_BASKET_ALTER_COLUMNS: Tuple[Tuple[str, str], ...] = (
     ("members_total", "INTEGER"),
     ("warm_to_hot_member_count", "INTEGER"),
     ("amount", "REAL"),
+    ("VOL_score", "REAL"),
+    ("universe_id", "TEXT"),
+    ("param_version", "TEXT"),
 )
 
 DAILY_STOCK_COLS = (
@@ -193,6 +198,8 @@ DAILY_STOCK_COLS = (
     "float_mv",
     "stage_score",
     "stage_score_raw",
+    "VOL_score",
+    "param_version",
 )
 
 DAILY_BASKET_COLS = (
@@ -209,6 +216,9 @@ DAILY_BASKET_COLS = (
     "members_total",
     "warm_to_hot_member_count",
     "amount",
+    "VOL_score",
+    "universe_id",
+    "param_version",
 )
 
 _INT_BOOL_COLS = frozenset(

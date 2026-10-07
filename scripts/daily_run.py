@@ -53,6 +53,7 @@ from scripts.metrics.peer_rs import (
     stock_peer_eligible,
 )
 from scripts.metrics.pipeline import replay_from_ohlc
+from scripts.metrics.vol_score import compute_vol_scores, turnover_from_bar
 
 _METRICS_YAML = os.path.join(_ROOT, "config", "metrics", "a_share_daily.yaml")
 
@@ -296,6 +297,7 @@ def _basket_asof_row(
         "members_total": members_total,
         "warm_to_hot_member_count": warm_count,
         "amount": amount_sum if any_amount else None,
+        "VOL_score": None,  # baskets always null this slice (Spec C §2.3)
     }
 
 
@@ -451,6 +453,32 @@ def replay_metrics_cross_section(
         assign_peer_rs(l2_rows, eligible=basket_peer_eligible)
         assign_peer_rs(l1_rows, eligible=basket_peer_eligible)
 
+        # Stock own-history VOL_score on OHLC spine; baskets stay null.
+        for r in stock_rows:
+            records = bar_cache.get(r["ts_code"]) or []
+            turnovers = [
+                turnover_from_bar(b.get("amount"), b.get("float_mv"))
+                for b in records
+            ]
+            scores = compute_vol_scores(
+                turnovers,
+                vol_hist=params.vol_hist,
+                min_samples=params.vol_score_min_samples,
+            )
+            vol = None
+            for i, b in enumerate(records):
+                raw_td = b.get("trade_date")
+                if raw_td is None:
+                    continue
+                bar_td = (
+                    raw_td.isoformat()
+                    if isinstance(raw_td, dt.date)
+                    else str(raw_td)[:10]
+                )
+                if bar_td == td:
+                    vol = scores[i] if i < len(scores) else None
+            r["VOL_score"] = vol
+
         pv = params.param_version
         for r in stock_rows:
             r["universe_id"] = "local_stock"
@@ -458,9 +486,11 @@ def replay_metrics_cross_section(
         for r in l2_rows:
             r["universe_id"] = "local_l2"
             r["param_version"] = pv
+            r["VOL_score"] = None
         for r in l1_rows:
             r["universe_id"] = "local_l1"
             r["param_version"] = pv
+            r["VOL_score"] = None
 
         rs_by_ts = {r["ts_code"]: r.get("RS") for r in stock_rows}
         for ev in events:
