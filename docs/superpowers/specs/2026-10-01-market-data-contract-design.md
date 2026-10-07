@@ -139,7 +139,7 @@ sync_meta (
 - 仅当存在 vendor（或当日东财 f51/f52）写入的 `limit_up`/`limit_down` 时，才做开盘涨跌停可成交判定。  
 - **字段缺失** → 该票该意图日 **`data_gap`**，不得用收盘价顶开盘价，**不得**静默套用主板 10%（含 300/688）。  
 - 历史 H 轨 / 追赶日（`D < session asof`）：多年无 vendor 限价属预期；**不**因缺 `limit_*` 拒绝该日 `ok`（见 §7.2）。  
-- 仅 **session asof** 日：`limit_*` 覆盖率过低则 **不得**标 `ok`（§7.2），避免半截影子日。
+- **session asof** 日：`limit_*` 覆盖率过低 → 仍可 `status=ok`+warn，`last_ok` 前移（§7.2 v1.2 / Spec A）；个股缺限价仍 `data_gap`，避免半截成交。
 
 ### 5.2 将来：`board_calc_v1`（未启用）
 
@@ -200,7 +200,7 @@ w_i     = w_i_raw / sum(w_j_raw for j in M)
 缺口队列里的中间日记为 `D`；**仅当 `D == asof` 时**施加「asof 专用」门槛；**`D < asof` 的历史/追赶日不要求当日 `limit_*` 覆盖率**。
 
 分母 \(U\) **权威定义** = metrics **§3.2** 的 `members_tradable`（分类宇宙 ∧ 非 quarantine ∧ 非 ST/\*ST ∧ 非停牌）。taxonomy 节点上的 `members_tradable` 计数是同集合的局部视图；覆盖率分母用**全局**该集合，不以单 L2 成员数代替。  
-下列写入该日 `run_meta`：`bar_coverage`, `computable_coverage`, `limit_coverage_asof`, `open_raw_coverage_asof`, `mapped_size`, `mapped_sync_coverage`, `ok_predicate_version=v1.1`。  
+下列写入该日 `run_meta`：`bar_coverage`, `computable_coverage`, `limit_coverage_asof`, `open_raw_coverage_asof`, `mapped_size`, `mapped_sync_coverage`, `ok_predicate_version`（现 **`v1.2`**，见 Spec A）。
 （历史日仍可填 `limit_coverage_asof` 作监控，**不参与**该日 ok 判定。）
 
 #### 所有日 `D` 均须满足（含历史追赶）
@@ -212,17 +212,24 @@ w_i     = w_i_raw / sum(w_j_raw for j in M)
 | `bar_coverage` | ≥ **0.90** | \(U\)=`members_tradable` 中具备当日 raw+qfq OHLC 及 `is_suspended`/`is_st` 的比例（已含 `open_raw`） |
 | `computable_coverage` | ≥ **0.50**（冷启动可配置更低，正式评估前须达标） | **\(U\)** 中历史长度已够 metrics 门禁（§3.3，252 交易日）的比例。新股/次新不够 252 是预期，不要求映射全集每只都满 252 |
 
-#### 仅当 `D == asof` 额外满足
+#### 仅当 `D == asof`：limit 软门禁（`ok_predicate_version=v1.2`）
 
 | 条件 | 初阈 | 说明 |
 |------|------|------|
-| `limit_coverage_asof` | ≥ **0.80** | 当日 `limit_up` 与 `limit_down` 均非空的比例（影子/成交需要） |
+| `limit_coverage_asof` | ≥ **0.80** 为「齐」 | 当日 `limit_up` 与 `limit_down` 均非空的比例（影子/成交需要） |
+
+**v1.2（Spec A 修订，取代「不达标 ⇒ status≠ok」）：**
+
+- `limit_coverage_asof` **不达标** → 仍标 **`status=ok`**，`warn` 必含 `limit_coverage_asof<0.80`；**`last_ok` 前移**（队列可越过该日）。  
+- 不达标 **不**再写 `partial`（mapped/bar/computable 仍硬挡）。  
+- 个股缺 `limit_*` 时 fill 仍 `data_gap` / 整日 skip（backtest-eval）；不在此伪造限价。  
+- 权威实现口径：[`2026-10-07-ops-daily-run-hemostasis-design.md`](2026-10-07-ops-daily-run-hemostasis-design.md) §3。
 
 **明确不挡历史日 `ok`（`D < asof`）：** 缺 `limit_*`、缺 `float_mv`。  
-**明确挡 asof `ok`：** `limit_coverage_asof` 不达标；半截失败不得把 `last_ok` 越过失败日。  
+**明确仍挡 asof `ok`：** mapped/bar/computable 不达标或致命错；半截失败不得把 `last_ok` 越过这些失败日。  
 **说明：** 不再单列 `open_raw_coverage_asof`（已含于 `bar_coverage`）；字段可保留为监控别名，数值应与 bar 内 raw open 覆盖一致。
 
-影子 L：意图成交日对应的 **session asof**（或该成交日本身曾为某次 session 的 asof 且 `ok`）须曾 `ok`；确认日可以是历史 `ok` 日。MVP 不拆 `ok_shadow`。
+影子 L：意图成交日对应的 **session asof**（或该成交日本身曾为某次 session 的 asof 且 `ok`）须曾 `ok`；确认日可以是历史 `ok` 日。MVP 不拆 `ok_shadow`。limit 仅 warn 的 `ok` **允许**进 L。
 
 ### 7.3 缺口交易日（断点续跑）
 
@@ -239,12 +246,12 @@ for D in 待跑:
   if D < session_asof:
     用 §7.2「所有日」门槛判定 ok   # 不要求 limit_coverage
   else:  # D == session_asof
-    用 §7.2「所有日」+「仅 asof」门槛判定 ok
-  通过 → status=ok，last=D
-  否则 status=partial（覆盖率/预算不足）或 fail（致命异常），下次仍从该 D 起（不跳过）
+    用 §7.2「所有日」门槛；limit 不足 → 仍 ok+warn（v1.2），last 前移
+  通过（含 limit 软 ok）→ status=ok，last=D
+  否则 status=partial（mapped/bar/computable/预算不足）或 fail（致命异常），下次仍从该 D 起（不跳过）
 ```
 
-`partial`：覆盖率未达标或分批预算用尽。`fail`：未捕获异常 / 源全挂等致命错。二者均不前移 `last_ok`。
+`partial`：mapped/bar/computable 未达标或分批预算用尽（**不含**仅 limit 不足）。`fail`：未捕获异常 / 源全挂等致命错。二者均不前移 `last_ok`。
 
 冷启动若暂时降低 `computable_coverage`：对应日标 `partial` 或单独 `backfill_ok` **不得**写入可被正式评估当作 `last_ok` 的 `status=ok`；升到正式阈后须重跑校验再标 `ok`。
 ### 7.4 分批回填
@@ -276,7 +283,7 @@ for D in 待跑:
 4. 无 `limit_*` → `data_gap`；`limit_*` 与 `open_raw` 同为 raw 空间。  
 5. `float_mv` 加权夹具：null 用 1.0 再归一；历史回填不得出现「用今日 spot 填旧日」。  
 6. qfq 重刷：raw 不变；L fills 不变；H 可读新 qfq。  
-7. 人为压低 **session asof** 的 `limit_coverage` → 该 asof 日 `status≠ok`，`last_ok` 不前移；同队列中 `D < asof` 且仅缺 `limit_*` 仍可 `ok`。  
+7. 人为压低 **session asof** 的 `limit_coverage`（其它门槛过）→ 该 asof 日 **`status=ok` + warn**，`last_ok` **前移**（v1.2 / Spec A）；同队列中 `D < asof` 且仅缺 `limit_*` 仍可 `ok`。压低 mapped/bar/computable → 仍 `partial`，`last_ok` 不前移。  
 8. 冷启动降低 `computable_coverage` 的日不得写入正式 `last_ok`。
 
 ---
@@ -290,3 +297,4 @@ for D in 待跑:
 | 2026-10-01 | 澄清 session asof：仅 asof 日卡 limit 覆盖率；历史追赶日不要求 limit；fail/partial；冷启动不进 last_ok |
 | 2026-10-01 | 跨 spec：scrub「空则等权」措辞；\(U\)=metrics §3.2 `members_tradable` |
 | 2026-10-05 | `--date` 不是 session asof；`mapped_sync_coverage` 入所有日 ok；`ok_predicate_version=v1.1` |
+| 2026-10-07 | Spec A：asof `limit_coverage` 不足 → `ok`+warn，`last_ok` 前移；`ok_predicate_version=v1.2` |

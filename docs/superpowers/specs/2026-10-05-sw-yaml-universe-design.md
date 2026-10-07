@@ -82,11 +82,11 @@ Git（taxonomy §6.1），全文件同一 `map_version`：`sw2021-v1`（替换 `
 | `--date D` | 重跑**起点**（失败首日）。D ≤ session_asof；交易日（除非 `--force-trade-day`）。无 `--only-date` 时队列 = `[D … session_asof]`。 |
 | `--only-date` | **必须**与 `--date D` 联用：队列 = `[D]`。单独传 `--only-date` → 非 0 退出。 |
 
-`evaluate_ok`：**limit 规则不变**（仅 `D == asof` 卡 limit）。本 slice **追加**所有日 `mapped_sync_coverage`（market-data §7.2，`ok_predicate_version=v1.1`）。
+`evaluate_ok`：所有日卡 `mapped_sync_coverage`（本 slice，`ok_predicate_version` 现见 Spec A 的 **v1.2**）。**Limit：** 已由 Spec A / market-data §7.2 **修订**——`D == asof` 且 limit 不足 → `ok`+warn（不 partial，`last_ok` 前移）；不再「硬卡 asof ok」。权威：[`2026-10-07-ops-daily-run-hemostasis-design.md`](2026-10-07-ops-daily-run-hemostasis-design.md) §3。
 
 「今日 / asof / sync end」一律 `latest_trade_day()`（上海交易日历），**不是**民用 `date.today()`（周末/节中会 sync 空日）。
 
-2026-10-05 跑 `--date 2026-09-30 --only-date`：9.30 为历史日，缺 `limit_*` 仍可 `ok`（须过 mapped_sync / bar / computable）。L 无 open+limits 则 skip。
+2026-09-30 冻 asof 补洞缺 `limit_*`：在 v1.2 下可 `ok`+warn（须过 mapped_sync / bar / computable）。L 无 open+limits 则 skip。
 
 ### 3.1 Actions 三种模式（禁止一个 `date` 身兼 asof / 重跑日 / sync end）
 

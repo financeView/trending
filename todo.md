@@ -2,7 +2,22 @@
 
 > 日期：2026-10-06  
 > 已落地：P0 日更骨架 → P0.5 个股 FSM → P1 L1/Radar Issues → P2 纸面影子 → 申万 YAML 映射宇宙 → 2026-09-30 Actions 实跑（`run_meta=partial`，见 P1 缺口）。  
-> **§0 已落地**（L2 同引擎 + digest 名称/亿元）。下一切片从 §1 起；勿把 §1+ 混进已关闭的 §0。
+> **§0 已落地**（L2 同引擎 + digest 名称/亿元）。  
+> **落地顺序（已钉）：A → B → C → D → E**（见文末「切片路线」）。当前只推进 **A**。
+
+---
+
+## 切片路线（A–E）
+
+| Spec | 范围 | 状态 |
+|------|------|------|
+| **A. Ops 日更止血** | §1.1 limit 软门禁；§1.2 heartbeat / only_date shadow | **进行中** — spec [`…/2026-10-07-ops-daily-run-hemostasis-design.md`](docs/superpowers/specs/2026-10-07-ops-daily-run-hemostasis-design.md)；plan [`…/2026-10-07-ops-daily-run-hemostasis.md`](docs/superpowers/plans/2026-10-07-ops-daily-run-hemostasis.md) |
+| **B. L1 同引擎** | §2.1 +（可选）L2 全历史 replay 成本/增量状态 | 后放 |
+| **C. RS + C1** | §2.2 + §1.3 表头/排序与真 RS 同发 | 后放 |
+| **D. 宇宙扩张** | §2.3 未映射全 A + §2.4 YAML 日拉 | 后放 |
+| **E. 成交与冻旗** | §2.5 board_calc / limit_up_unfillable + §2.6 显式硬冻 | 后放 |
+
+§2.7–2.8、§3.* 仍不进 A–E。
 
 ---
 
@@ -63,17 +78,10 @@
 
 ## 1. 高优先级（本 spec 之后、仍影响已上线日更）
 
-### 1.1 假日窗口 `asof` 仍是 9.30 → limit 门禁把映射宇宙日打成 `partial`
+### 1.1–1.2 → Spec A（进行中）
 
-- **现象：** `run_meta(2026-09-30)`：`mapped_sync=0.948`、`bar≈1`、`comp≈0.98`，但 `status=partial`，`warn=limit_coverage_asof<0.80`，`lim=0`。因 `trade_date == session_asof` 才卡 limit；国庆期间 `latest_trade_day()` 仍是 9.30。
-- **连带：** `live_shadow` 要求 `run_meta=ok` → 跳过；YAML 宇宙 spec 写「9.30 不因缺 limit 挡 ok」，与当前 `evaluate_ok` 冲突。
-- **来源：** coverage `apply_limit = (D == asof)`；sync `--with-limits` 在 `end≠latest_trade_day()` 时跳过。
-- **不做进 §0。** 节后 asof 滚到新交易日后，cron 日更会自然卡当日 limit；历史补洞日仍应按 `D < asof` 不卡 limit。
-
-### 1.2 only_date 路径的 heartbeat / Issues / shadow
-
-- 9.30 轮：`live_shadow` 日志 `[shadow] heartbeat no_date; skip`；Issues 注释写 only_date 应用 `--date`，实际走了 `--from-heartbeat`。
-- 核对 `update_l1_issues.py` / workflow：only_date 必须钉交易日，避免雷达写错日或空 heartbeat。
+见 [`2026-10-07-ops-daily-run-hemostasis-design.md`](docs/superpowers/specs/2026-10-07-ops-daily-run-hemostasis-design.md)。  
+实证：Actions `37500945431` clist 失败 → 0 行 limit → 硬门禁 partial；heartbeat 嵌套写/扁平读 → shadow `no_date`。Issues `only_date --date` 已对，shadow 未钉日。
 
 ### 1.3 Issue 表 RS 全空
 
