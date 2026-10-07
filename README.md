@@ -55,8 +55,10 @@ python scripts/eval/paper_book.py --from 2024-01-05 --to 2024-01-08 \
   --signals-json /tmp/signals.json --out output/eval --run-id audit-fri-mon
 ```
 
-**L2 same-engine (shipped):** synthetic float_mv chain OHLC → same FSM as stocks; industry `tag_warm_to_hot` split from `warm_to_hot_member_count`; Issue digests add 名称 columns and 成交额(亿) (3dp). L1 baskets still interim aggregate.
+**L2 same-engine (shipped):** synthetic float_mv chain OHLC → same FSM as stocks; industry `tag_warm_to_hot` split from `warm_to_hot_member_count`; Issue digests add 名称 columns and 成交额(亿) (3dp).
+
+**L1 same-engine (shipped):** L1 member-closure synth → same FSM as stocks/L2; L1 `tag_warm_to_hot` split from `warm_to_hot_member_count`; digest `## L1 自身` + Radar 个股温转热表头对齐 Spec B.
 
 **Ops A (shipped):** asof limit soft-ok (`ok`+warn, `last_ok` advances); nested heartbeat readers; Actions `only_date` pins `live_shadow --asof`.
 
-**Still out of ship:** unmapped 全A sync, same-engine L1 (§10 C5), causal H / walk-forward gates, Spearman / `test_C1`.
+**Still out of ship:** unmapped 全A sync, RS peer / Spearman / `test_C1` (Spec C), causal H / walk-forward gates, L2/L1 replay perf / `engine_state`.

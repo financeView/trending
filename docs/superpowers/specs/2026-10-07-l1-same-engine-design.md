@@ -1,7 +1,7 @@
 # L1 同引擎（C5 剩余）
 
 **日期：** 2026-10-07  
-**状态：** 设计已审；plan [`2026-10-07-l1-same-engine.md`](../plans/2026-10-07-l1-same-engine.md)  
+**状态：** 已落地；plan [`2026-10-07-l1-same-engine.md`](../plans/2026-10-07-l1-same-engine.md)  
 **范围：** 仅一件事——L1 按 metrics §10.4 **成员闭包一次合成** → 与个股/L2 同一套温度/右侧/节气纯函数；行业自身温转热与成分密度拆开；`daily_l1.amount` 与密度同构 L2。digest/Radar 只做语义所需的最小对齐。  
 **后放（禁止混入本 slice）：** L2/L1 全历史 replay 成本 / `engine_state` 增量；Spec C RS / Spearman / C1；Spec D 全 A / YAML 日拉；Spec E `board_calc` / 硬冻旗；假日 limit vendor 重拉；把合成 K 线写入 `bars.db`。
 
