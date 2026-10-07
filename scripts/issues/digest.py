@@ -6,11 +6,26 @@ import sqlite3
 from typing import Any, Iterable, Optional, Sequence
 
 from scripts.common.taxonomy_meta import L1Bucket, load_l1_buckets
+from scripts.common.universe import load_l2_to_l1, load_stock_sw_l2
 from scripts.metrics.temp_raw import rank
 
 
 def _td(value: Any) -> str:
     return str(value)
+
+
+def _fmt_amount_yi(v: Any) -> str:
+    if v is None:
+        return ""
+    return "%.3f" % (float(v) / 1e8)
+
+
+def _stock_name_map() -> dict[str, str]:
+    return {r["ts_code"]: (r.get("name_zh") or "") for r in load_stock_sw_l2()}
+
+
+def _l2_name_map() -> dict[str, str]:
+    return {r["code"]: (r.get("name_zh") or "") for r in load_l2_to_l1()}
 
 
 def _run_link(sha: Optional[str]) -> str:
@@ -73,7 +88,8 @@ def _l2_codes_for_l1(conn: sqlite3.Connection, trade_date: str, l1_id: str) -> l
 
 
 def _sort_l2_key(row: tuple) -> tuple:
-    # row: code, T, S_temp, RS, right_side, tag_warm_to_hot, solar_term, members_tradable
+    # row: code, T, S_temp, RS, right_side, tag_warm_to_hot, solar_term,
+    #      warm_to_hot_member_count, amount
     t = row[1]
     try:
         r = rank(t) if t else -99
@@ -115,6 +131,8 @@ def render_l1_issue(
 ) -> str:
     td = _td(trade_date)
     lines = _meta_header(conn, td, name_zh)
+    stock_names = _stock_name_map()
+    l2_names = _l2_name_map()
 
     l2_codes = _l2_codes_for_l1(conn, td, l1_id)
     l2_rows: list[tuple] = []
@@ -124,7 +142,7 @@ def render_l1_issue(
             conn.execute(
                 """
                 SELECT code, T, S_temp, RS, right_side, tag_warm_to_hot,
-                       solar_term, members_tradable
+                       solar_term, warm_to_hot_member_count, amount
                 FROM daily_l2
                 WHERE trade_date=? AND code IN (%s)
                 """
@@ -137,16 +155,18 @@ def render_l1_issue(
     lines.append("## 行业（L2）扫描")
     lines.extend(
         _md_table(
-            ["T", "名称", "RS", "右侧", "节气", "温转热", "成交额"],
+            ["T", "代码", "名称", "RS", "右侧", "节气", "温转热", "成分温转热", "成交额(亿)"],
             [
                 (
                     r[1],
                     r[0],
+                    l2_names.get(str(r[0]), ""),
                     r[3],
                     r[4],
                     r[6],
                     r[5],
-                    "",  # L2 has no amount column
+                    r[7],
+                    _fmt_amount_yi(r[8]),
                 )
                 for r in l2_rows
             ],
@@ -167,8 +187,11 @@ def render_l1_issue(
     lines.append("## 今日温转热（个股，Top N by 成交额）")
     lines.extend(
         _md_table(
-            ["ts_code", "T", "RS", "右侧", "节气", "成交额"],
-            hot,
+            ["ts_code", "名称", "T", "RS", "右侧", "节气", "成交额(亿)"],
+            [
+                (r[0], stock_names.get(str(r[0]), ""), r[1], r[2], r[3], r[4], _fmt_amount_yi(r[5]))
+                for r in hot
+            ],
         )
     )
     lines.append("")
@@ -186,8 +209,11 @@ def render_l1_issue(
     lines.append("## 今日温转平 / 结束右侧")
     lines.extend(
         _md_table(
-            ["ts_code", "event", "T", "detail"],
-            exits,
+            ["ts_code", "名称", "event", "T", "detail"],
+            [
+                (r[0], stock_names.get(str(r[0]), ""), r[1], r[2], r[3])
+                for r in exits
+            ],
         )
     )
     lines.append("")
@@ -205,8 +231,11 @@ def render_l1_issue(
     lines.append("## 右侧存续 Top（RS 高）")
     lines.extend(
         _md_table(
-            ["ts_code", "T", "RS", "节气", "交易日天数", "成交额"],
-            right,
+            ["ts_code", "名称", "T", "RS", "节气", "交易日天数", "成交额(亿)"],
+            [
+                (r[0], stock_names.get(str(r[0]), ""), r[1], r[2], r[3], r[4], _fmt_amount_yi(r[5]))
+                for r in right
+            ],
         )
     )
     lines.append("")
@@ -275,6 +304,7 @@ def render_radar_issue(
     )
     lines.append("")
     lines.append("## 全市场温转热 Top（成交额）")
+    stock_names = _stock_name_map()
     hot = conn.execute(
         """
         SELECT ts_code, l1_id, T, RS, amount
@@ -286,7 +316,13 @@ def render_radar_issue(
         (td, top_n),
     ).fetchall()
     lines.extend(
-        _md_table(["ts_code", "l1_id", "T", "RS", "成交额"], hot)
+        _md_table(
+            ["ts_code", "名称", "l1_id", "T", "RS", "成交额(亿)"],
+            [
+                (r[0], stock_names.get(str(r[0]), ""), r[1], r[2], r[3], _fmt_amount_yi(r[4]))
+                for r in hot
+            ],
+        )
     )
     lines.append("")
     return "\n".join(lines)
