@@ -9,7 +9,7 @@ from typing import Optional, Sequence
 from scripts.common.ts_code import to_ts_code
 from scripts.common.universe import load_quarantine_codes, load_universe_codes, members_tradable
 
-OK_PREDICATE_VERSION = "v1.1"
+OK_PREDICATE_VERSION = "v1.2"
 
 # 初阈（可后收紧）
 BAR_COVERAGE_MIN = 0.90
@@ -89,8 +89,8 @@ def evaluate_ok(
         )
     if apply_limit and metrics.limit_coverage_asof < LIMIT_COVERAGE_ASOF_MIN:
         return OkDecision(
-            False,
-            "partial",
+            True,
+            "ok",
             "limit_coverage_asof<%.2f" % LIMIT_COVERAGE_ASOF_MIN,
             True,
         )

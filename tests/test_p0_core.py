@@ -44,7 +44,7 @@ def test_ok_history_without_limits():
     assert d.apply_limit_gate is False
 
 
-def test_ok_asof_requires_limits():
+def test_ok_asof_low_limit_is_soft_ok():
     asof = date(2024, 1, 10)
     m = CoverageMetrics(
         bar_coverage=0.95,
@@ -53,9 +53,22 @@ def test_ok_asof_requires_limits():
         mapped_sync_coverage=1.0,
     )
     d = evaluate_ok(asof, asof, m)
-    assert not d.ok
-    assert d.status == "partial"
+    assert d.ok and d.status == "ok"
     assert "limit_coverage" in d.reason
+    assert d.apply_limit_gate is True
+
+
+def test_ok_asof_with_limits_reason_passed():
+    asof = date(2024, 1, 10)
+    m = CoverageMetrics(
+        bar_coverage=0.95,
+        computable_coverage=0.6,
+        limit_coverage_asof=0.85,
+        mapped_sync_coverage=1.0,
+    )
+    d = evaluate_ok(asof, asof, m)
+    assert d.ok and d.reason == "passed"
+    assert d.apply_limit_gate is True
 
 
 def test_ok_asof_with_limits():
