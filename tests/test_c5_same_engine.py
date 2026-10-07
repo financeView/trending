@@ -116,6 +116,9 @@ def test_C5_same_engine_on_synthetic(tmp_path, monkeypatch):
     _assert_opt_approx(stock_asof.get("S_temp"), expected.get("S_temp"))
     _assert_opt_approx(l2.get("S_temp"), expected.get("S_temp"))
     _assert_opt_approx(l2.get("RS_raw"), expected.get("RS_raw"))
+    assert expected.get("S_temp") is not None
+    assert stock_asof.get("S_temp") is not None
+    assert l2.get("S_temp") is not None
     # Chain-equal twins → equal ROC path (recompute; asof often null under SHORT_N < 252).
     stock_rs = compute_rs_raw(
         [float(b["close_qfq"]) for b in stock_bars], params
@@ -207,6 +210,9 @@ def test_C5_same_engine_on_synthetic_l1(tmp_path, monkeypatch):
     _assert_opt_approx(stock_asof.get("S_temp"), expected.get("S_temp"))
     _assert_opt_approx(l1.get("S_temp"), expected.get("S_temp"))
     _assert_opt_approx(l1.get("RS_raw"), expected.get("RS_raw"))
+    assert expected.get("S_temp") is not None
+    assert stock_asof.get("S_temp") is not None
+    assert l1.get("S_temp") is not None
     stock_rs = compute_rs_raw(
         [float(b["close_qfq"]) for b in stock_bars], params
     )
