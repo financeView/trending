@@ -23,13 +23,15 @@ def _ohlc(close: np.ndarray) -> pd.DataFrame:
 
 
 def test_load_params_p05_yaml():
-    assert PARAMS.param_version == "p05-v1"
+    assert PARAMS.param_version == "p05-v2"
     assert PARAMS.slope_scale == 0.02
     assert PARAMS.band == 0.15
     assert PARAMS.adx_s_floor == 15
     assert PARAMS.adx_s_span == 25
     assert PARAMS.s_vol_weight == 5
     assert PARAMS.spearman_min == 0.55
+    assert PARAMS.rs_w1 == 0.4
+    assert PARAMS.vol_score_min_samples == 60
     assert PARAMS.knots_g[0] == (0.0, 0.0)
     assert PARAMS.knots_g[-1] == (5.0, 1.0)
     assert PARAMS.knots_d[1] == (0.25, 0.3)

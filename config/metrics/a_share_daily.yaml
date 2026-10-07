@@ -1,4 +1,4 @@
-param_version: p05-v1
+param_version: p05-v2
 price_adjust: qfq
 ma_fast: 20
 ma_slow: 60
@@ -30,6 +30,11 @@ stage_D0: 60
 w_g: 0.55
 w_d: 0.25
 w_v: 0.20
+rs_w1: 0.4
+rs_w2: 0.2
+rs_w3: 0.2
+rs_w4: 0.2
+vol_score_min_samples: 60
 stage_cuts: [0.15, 0.35, 0.55, 0.75]
 # §8.2 knots: list of [x, y]
 knots_g:

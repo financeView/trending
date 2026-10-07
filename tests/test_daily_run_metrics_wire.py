@@ -154,7 +154,7 @@ def test_synthetic_bars_write_nonnull_T(tmp_path, monkeypatch):
         "SELECT param_version, map_version, status FROM run_meta WHERE trade_date=?",
         (D.isoformat(),),
     ).fetchone()
-    assert meta == ("p05-v1", "p05-v1", "ok")
+    assert meta == ("p05-v2", "p05-v1", "ok")
     l2n = tconn.execute("SELECT COUNT(*) FROM daily_l2").fetchone()[0]
     l1n = tconn.execute("SELECT COUNT(*) FROM daily_l1").fetchone()[0]
     assert l2n >= 1 and l1n >= 1

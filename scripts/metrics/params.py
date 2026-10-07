@@ -59,6 +59,11 @@ class MetricsParams:
     w_g: float
     w_d: float
     w_v: float
+    rs_w1: float
+    rs_w2: float
+    rs_w3: float
+    rs_w4: float
+    vol_score_min_samples: int
     stage_cuts: Tuple[float, ...]
     knots_g: Tuple[Knot, ...]
     knots_d: Tuple[Knot, ...]
@@ -115,6 +120,11 @@ def load_params(path: PathLike) -> MetricsParams:
         w_g=float(raw["w_g"]),
         w_d=float(raw["w_d"]),
         w_v=float(raw["w_v"]),
+        rs_w1=float(raw["rs_w1"]),
+        rs_w2=float(raw["rs_w2"]),
+        rs_w3=float(raw["rs_w3"]),
+        rs_w4=float(raw["rs_w4"]),
+        vol_score_min_samples=int(raw["vol_score_min_samples"]),
         stage_cuts=tuple(float(x) for x in cuts),
         knots_g=_knots(raw["knots_g"]),
         knots_d=_knots(raw["knots_d"]),
