@@ -2,16 +2,28 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import Any
+
+import pytest
 
 from scripts.common.bars import bars_conn
 from scripts.metrics.l2_synth import synthesize_l2_bars
 from scripts.metrics.pipeline import replay_from_ohlc
+from scripts.metrics.rs_raw import compute_rs_raw
 from tests.test_daily_run_metrics_wire import (
     SHORT_N,
     _seed_uptrend,
     _short_params,
     _weekdays_ending,
 )
+
+
+def _assert_opt_approx(actual: Any, expected: Any) -> None:
+    """Match None↔None or finite floats via pytest.approx (RS_raw may be null under short hist)."""
+    if expected is None:
+        assert actual is None
+    else:
+        assert actual == pytest.approx(expected)
 
 
 def test_C5_same_engine_on_synthetic(tmp_path, monkeypatch):
@@ -97,6 +109,23 @@ def test_C5_same_engine_on_synthetic(tmp_path, monkeypatch):
     assert all(e["ts_code"] in ("000001.SZ", "000002.SZ") for e in events)
     assert not any(e["ts_code"] == "370100" for e in events)
 
+    # Twin stock asof vs basket engine: RS_raw + S_temp (not cross-section RS).
+    stock_snaps = replay_from_ohlc(params, stock_bars, min_history=SHORT_N)
+    stock_asof = [s for s in stock_snaps if s.get("trade_date") == D.isoformat()][-1]
+    _assert_opt_approx(stock_asof.get("RS_raw"), expected.get("RS_raw"))
+    _assert_opt_approx(stock_asof.get("S_temp"), expected.get("S_temp"))
+    _assert_opt_approx(l2.get("S_temp"), expected.get("S_temp"))
+    _assert_opt_approx(l2.get("RS_raw"), expected.get("RS_raw"))
+    # Chain-equal twins → equal ROC path (recompute; asof often null under SHORT_N < 252).
+    stock_rs = compute_rs_raw(
+        [float(b["close_qfq"]) for b in stock_bars], params
+    )
+    synth_rs = compute_rs_raw(
+        [float(b["close_qfq"]) for b in synth], params
+    )
+    assert stock_rs[-1] == synth_rs[-1]
+    # Do NOT assert cross-section RS equality
+
 
 def test_C5_same_engine_on_synthetic_l1(tmp_path, monkeypatch):
     """Identical twin stocks in one L1 closure → L1 asof matches single-stock replay."""
@@ -170,3 +199,19 @@ def test_C5_same_engine_on_synthetic_l1(tmp_path, monkeypatch):
     assert l1["tag_warm_to_flat"] == int(bool(expected.get("tag_warm_to_flat")))
     assert l1["solar_term"] == expected.get("solar_term")
     assert not any(e.get("ts_code") == "l1_test" for e in events)
+
+    # Twin stock asof vs L1 basket engine: RS_raw + S_temp (not cross-section RS).
+    stock_snaps = replay_from_ohlc(params, stock_bars, min_history=SHORT_N)
+    stock_asof = [s for s in stock_snaps if s.get("trade_date") == D.isoformat()][-1]
+    _assert_opt_approx(stock_asof.get("RS_raw"), expected.get("RS_raw"))
+    _assert_opt_approx(stock_asof.get("S_temp"), expected.get("S_temp"))
+    _assert_opt_approx(l1.get("S_temp"), expected.get("S_temp"))
+    _assert_opt_approx(l1.get("RS_raw"), expected.get("RS_raw"))
+    stock_rs = compute_rs_raw(
+        [float(b["close_qfq"]) for b in stock_bars], params
+    )
+    synth_rs = compute_rs_raw(
+        [float(b["close_qfq"]) for b in synth], params
+    )
+    assert stock_rs[-1] == synth_rs[-1]
+    # Do NOT assert cross-section RS equality
