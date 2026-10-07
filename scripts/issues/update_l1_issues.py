@@ -29,6 +29,12 @@ from scripts.issues.github_issues import (
 )
 
 
+def _heartbeat_job_view(data: dict) -> dict:
+    """Prefer nested daily_run job; fall back to flat top-level heartbeat."""
+    job = data.get("daily_run")
+    return job if isinstance(job, dict) else data
+
+
 def trade_date_from_heartbeat(path: Optional[str] = None) -> tuple[Optional[str], str]:
     """Return (trade_date, reason). reason=skip → do not update Issues (ops §5.3)."""
     hb = path or os.path.join(os.path.dirname(DEFAULT_DB), "heartbeat.json")
@@ -38,12 +44,13 @@ def trade_date_from_heartbeat(path: Optional[str] = None) -> tuple[Optional[str]
         data = json.loads(Path(hb).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None, "bad_heartbeat"
-    if data.get("status") == "skip":
+    view = _heartbeat_job_view(data)
+    if view.get("status") == "skip":
         return None, "skip"
-    days = data.get("days") or []
+    days = view.get("days") or []
     if days:
         return str(days[-1]), "ok"
-    asof = data.get("asof") or data.get("date")
+    asof = view.get("asof") or view.get("date")
     if asof:
         return str(asof), "ok"
     return None, "no_date"
@@ -65,8 +72,9 @@ def live_publish_allowed(
             data = json.loads(Path(hb).read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             data = {}
-        if data.get("status") == "skip":
-            skip_day = str(data.get("date") or data.get("asof") or "")
+        view = _heartbeat_job_view(data)
+        if view.get("status") == "skip":
+            skip_day = str(view.get("date") or view.get("asof") or "")
             if skip_day == str(trade_date):
                 return False, "skip"
     row = conn.execute(

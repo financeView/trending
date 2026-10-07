@@ -8,6 +8,55 @@ from scripts.issues.update_l1_issues import (
 )
 
 
+def _write_nested(path, *, status="ok", asof="2024-01-10",
+                  days=None, statuses=None, date=None):
+    days = days or ["2024-01-08", "2024-01-10"]
+    statuses = statuses or ["ok", "ok"]
+    job = {"status": status, "asof": asof, "days": days, "statuses": statuses}
+    if date is not None:
+        job["date"] = date
+    path.write_text(
+        json.dumps({"updated_at": "t", "daily_run": job}),
+        encoding="utf-8",
+    )
+
+
+def test_nested_heartbeat_trade_date(tmp_path):
+    path = tmp_path / "heartbeat.json"
+    _write_nested(path)
+    td, reason = trade_date_from_heartbeat(str(path))
+    assert reason == "ok" and td == "2024-01-10"
+
+
+def test_nested_heartbeat_asof_dates_full_prefix(tmp_path):
+    from scripts.eval.live_shadow_step import heartbeat_asof_dates
+    path = tmp_path / "heartbeat.json"
+    _write_nested(path)
+    dates, reason = heartbeat_asof_dates(str(path))
+    assert reason == "ok"
+    assert dates == ["2024-01-08", "2024-01-10"]
+
+
+def test_nested_heartbeat_skip_blocks_publish(tmp_path, monkeypatch):
+    monkeypatch.setenv("TREND_DB", str(tmp_path / "trend.db"))
+    conn = get_conn()
+    init_schema(conn)
+    conn.execute(
+        """INSERT INTO run_meta (
+             trade_date, status, param_version, map_version,
+             bar_coverage, computable_coverage, limit_coverage_asof, tradable_count
+           ) VALUES (?,?,?,?,?,?,?,?)""",
+        ("2024-01-10", "ok", "p05-v1", "p05-v1", 1.0, 1.0, 1.0, 1),
+    )
+    conn.commit()
+    path = tmp_path / "heartbeat.json"
+    _write_nested(path, status="skip", date="2024-01-10", asof="2024-01-10",
+                  days=["2024-01-10"], statuses=["skip"])
+    ok, why = live_publish_allowed(conn, "2024-01-10", heartbeat_path=str(path))
+    assert not ok and why == "skip"
+    conn.close()
+
+
 def test_heartbeat_skip_no_ops(tmp_path, monkeypatch):
     hb = tmp_path / "heartbeat.json"
     hb.write_text(

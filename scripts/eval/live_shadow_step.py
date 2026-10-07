@@ -25,7 +25,10 @@ from scripts.common.db import (
 from scripts.eval.costs import load_costs
 from scripts.eval.fill_day import fill_day
 from scripts.eval.shadow_store import load_shadow_book, save_shadow_book
-from scripts.issues.update_l1_issues import trade_date_from_heartbeat
+from scripts.issues.update_l1_issues import (
+    _heartbeat_job_view,
+    trade_date_from_heartbeat,
+)
 
 
 def _parse(d: str) -> date:
@@ -80,7 +83,8 @@ def heartbeat_asof_dates(path: Optional[str] = None) -> tuple[list, str]:
             data = json.loads(open(hb, encoding="utf-8").read())
         except (OSError, json.JSONDecodeError):
             data = {}
-        days = [str(d) for d in (data.get("days") or [])]
+        view = _heartbeat_job_view(data)
+        days = [str(d) for d in (view.get("days") or [])]
     if days:
         return days, "ok"
     return [str(asof)], "ok"
