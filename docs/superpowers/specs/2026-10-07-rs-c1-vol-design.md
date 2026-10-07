@@ -48,7 +48,7 @@ RS     = round(100 * percentile_rank(RS_raw among peer_universe))  # 0–100 整
 \(n\le 1\) 或集合为空 → 该实体当日分数 **null**（不进 peer 的产出侧亦为 null）。  
 （注：温度特征里的 `_empirical_pctile` / σ%ile 仍用既有「窗内 ≤ 计数 / 窗长」实现，**不**被本公式替换。）
 
-- `ROC_n = P_t/P_{t-n}-1`（前复权收盘）；任一腿因历史不足不可算 → 该实体当日 `RS_raw=null`，**不进** peer。  
+- `ROC_n = P_t/P_{t-n}-1`（前复权收盘）；下标 \(n\) = 与特征层同一 **OHLC bar 脊**（非日历日 pad）；任一腿因历史不足不可算 → 该实体当日 `RS_raw=null`，**不进** peer。  
 - 默认权重：`rs_w1..w4 = 0.4, 0.2, 0.2, 0.2`（入 `config/metrics/a_share_daily.yaml`）。
 
 | 实体 | `universe_id` | peer 集 |
@@ -60,7 +60,8 @@ RS     = round(100 * percentile_rank(RS_raw among peer_universe))  # 0–100 整
 跳过日 / 无合成 bar / asof 引擎字段全 null 的篮子：**不进** peer。  
 不采用「有 bar 即可」的宽松集。篮子侧「指标可算」**不要**误用个股表上的 `members_tradable` 计数字段当资格布尔。
 
-**与 C5：** 同引擎断言的是合成序列上的纯函数输出（`T` / FSM / 节气 / `S_temp` / **`RS_raw`**）与孪生个股一致；截面 `RS` 依赖 `local_l2`/`local_l1` peer，**不得**要求与个股 `RS` 数值相等。既有 `test_C5_*` 保持绿；peer 行为由 `test_RS_peer_universes` 覆盖。
+**与 C5：** 同引擎要求合成序列上的纯函数输出（`T` / FSM / 节气 / `S_temp` / **`RS_raw`**）与孪生个股一致；截面 `RS` 依赖 `local_l2`/`local_l1` peer，**不得**要求与个股 `RS` 数值相等。  
+本 slice **必须**把该断言落进测试：扩展既有 `test_C5_*`，**或**新增 `test_RS_raw_same_engine`（推荐挂在 C5 文件旁），覆盖孪生 `RS_raw` 与 `S_temp`；peer 分位仍由 `test_RS_peer_universes` 覆盖。既有 C5 对 T/R/tags/solar 的断言保持绿。
 
 ### 2.2 `S_temp` 与 C1
 
@@ -161,11 +162,10 @@ metrics §10 的 `map_version` / `member_set` 落篮子行：**本 slice 不补*
 | 块 | 变更 |
 |----|------|
 | 右侧存续 Top（RS 高） | 表头加 **量**；`ORDER BY IFNULL(RS,-1e99) DESC, IFNULL(VOL_score,-1e99) DESC, IFNULL(amount,0) DESC` |
-| L2 扫描 / L1 自身 / Radar 含 RS 的表 | 同样加 **量** 列；篮子量空 |
-| L2/L1 主排序 | 仍 `rank(T)` 再 `S_temp`（S 有值后生效）；VOL 不抬主序 |
-| 今日温转热 | 仍按成交额（本 slice 不改） |
+| L2 扫描 / L1 自身 | 表头加 **量**；篮子行量空；主排序仍 `rank(T)` 再 `S_temp`（S 有值后生效）；VOL 不抬主序 |
+| 今日温转热（L1 Issue） / Radar「全市场温转热 Top」 | **不加「量」列**；排序仍按成交额；可继续展示 `RS` 列（本 slice 不改这两块的表头结构与排序键） |
 
-脚注（L1/L2 表或 Radar 一处即可）：L2/L1「量」本 slice 为空——篮子 VOL 后放（避历史换手序列成本）。
+脚注（L1/L2 表一处即可）：L2/L1「量」本 slice 为空——篮子 VOL 后放（避历史换手序列成本）。
 
 **排序语义（钉死）：** 过滤集内存在 ≥1 个非 null `RS` 时，主序为 RS（§1.3 目标达成）。过滤集 `RS` 全 null 时仍会按 `VOL_score→amount` 退化——这是并列键的合法行为，**不**宣称「成交额冒充路径已从 SQL 消失」。
 
@@ -182,8 +182,9 @@ metrics §10 的 `map_version` / `member_set` 落篮子行：**本 slice 不补*
 | `test_RS_eligibility_tradable` | ST/停牌/quarantine ∉ `local_stock` peer |
 | `test_colinearity_story` | ∃ 凉/寒 且 RS≥80（合成或金标） |
 | `test_T_S_spearman` | 金标+合成 Spearman ≥ `spearman_min`；不含实盘日（§2.2 豁免） |
+| `test_C5_*` 扩展或 `test_RS_raw_same_engine` | 孪生合成 vs 个股：`RS_raw` / `S_temp` 一致；**不**比截面 `RS` |
 | `test_VOL_score_stock` | 个股窗脊=OHLC；公式/`vol_score_min_samples`；**当日 turnover null → VOL null**；L2/L1 写入后仍 null |
-| `test_digest_rs_vol_sort` | 表头含「量」；排序键；NULL→空 |
+| `test_digest_rs_vol_sort` | **仅**右侧 Top + L2/L1 表含「量」；温转热榜无「量」；排序键；NULL→空 |
 | `test_signal_event_rs_matches_daily` | 同日同票 active `signal_event.RS` 与 `daily_stock.RS` 一致；双方 null 亦一致 |
 
 ### 5.2 Done when
@@ -218,7 +219,7 @@ metrics §10 的 `map_version` / `member_set` 落篮子行：**本 slice 不补*
 | metrics 权威 | T0：§5.4 Spearman 豁免注；§9.1 闭合 `percentile_rank`；§13 增 `rs_w*` / `vol_score_min_samples` |
 | `tests/test_*.py` | §5.1（含：当日 turnover null → VOL null） |
 
-建议任务切分（plan 可调）：T0 docs 权威（§5.4/§9.1/§13）→ T1 `RS_raw`+params+`percentile_rank` → T2 `S_temp`+C1/Spearman 测 → T3 peer 截面 + 事件 RS 时序 → T4 个股 VOL + schema → T5 digest → T6 done-when 文档。
+建议任务切分（plan 可调）：T0 docs 权威（§5.4/§9.1/§13）→ T1 `RS_raw`+params+`percentile_rank` → T2 `S_temp`+C1/Spearman 测 → T3 peer 截面 + 事件 RS 时序 → T4 个股 VOL + schema → T5 digest（量列范围见 §4.3）→ T5b C5/`RS_raw` 同引擎测 → T6 done-when 文档。
 
 ---
 
@@ -229,3 +230,4 @@ metrics §10 的 `map_version` / `member_set` 落篮子行：**本 slice 不补*
 | 2026-10-07 | 初版：价格 RS + S_temp/C1 + 个股 VOL 旁路；否决量混 RS；L2/L1 VOL 后放并写明原因；Approach 1 截面后处理；`param_version=p05-v2` |
 | 2026-10-07 | CR 真项修补：闭合 `percentile_rank`；篮子 peer=温度可算；事件时序 peer→内存 RS→append；VOL 窗含 t + `vol_score_min_samples`；Spearman 实盘豁免+metrics 注；C5=`RS_raw`；Done-when/测试补事件 RS 与排序语义；Spec B 篮子 S/RS NULL 被取代；C1 作用域 |
 | 2026-10-07 | 二审真项：当日 turnover null→VOL null；VOL 窗脊=replay OHLC；T0 同步 metrics §9.1/§13/`vol_score_min_samples` |
+| 2026-10-07 | final：量列仅右侧 Top+L2/L1；温转热榜不加量；C5/`RS_raw` 同引擎须落测；ROC 脊=OHLC |
