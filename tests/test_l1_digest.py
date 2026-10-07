@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from scripts.common.db import get_conn, init_schema, upsert_daily_l2, upsert_daily_stock
+from scripts.common.db import (
+    get_conn,
+    init_schema,
+    upsert_daily_l1,
+    upsert_daily_l2,
+    upsert_daily_stock,
+)
 from scripts.common.taxonomy_meta import load_l1_buckets
 from scripts.issues import digest
 from scripts.issues.digest import render_l1_issue, render_radar_issue
@@ -89,6 +95,62 @@ def _seed(tmp_path, monkeypatch):
     )
     conn.commit()
     return conn, td
+
+
+def _seed_with_daily_l1(tmp_path, monkeypatch):
+    conn, td = _seed(tmp_path, monkeypatch)
+    upsert_daily_l1(
+        conn,
+        [
+            {
+                "trade_date": td,
+                "code": "l1_finance",
+                "T": "凉",
+                "S_temp": None,
+                "RS": None,
+                "right_side": 0,
+                "tag_warm_to_hot": 0,
+                "tag_warm_to_flat": 0,
+                "solar_term": None,
+                "members_tradable": 1,
+                "members_total": 2,
+                "warm_to_hot_member_count": 1,
+                "amount": 1e9,
+            }
+        ],
+    )
+    conn.commit()
+    return conn, td
+
+
+def test_l1_issue_has_self_section(tmp_path, monkeypatch):
+    conn, td = _seed_with_daily_l1(tmp_path, monkeypatch)
+    md = render_l1_issue(conn, td, "l1_finance", name_zh="金融")
+    assert "## L1 自身" in md
+    head = md.split("## 行业")[0]
+    assert "同引擎" not in head
+    assert "成分温转热" in head
+    assert "| 凉 | l1_finance | 金融 |  | " in md or "| 凉 | l1_finance | 金融 | |" in md
+    conn.close()
+
+
+def test_radar_stock_warm_header_and_footnote(tmp_path, monkeypatch):
+    conn, td = _seed(tmp_path, monkeypatch)
+    md = render_radar_issue(conn, td, load_l1_buckets())
+    assert "| L1 | l1_id | T* | 个股 | 右侧 | 右侧占比 | 个股温转热 |" in md
+    assert "按 l1_id" in md
+    assert "L1 自身" in md
+    conn.close()
+
+
+def test_l1_self_section_empty_when_no_daily_l1_row(tmp_path, monkeypatch):
+    conn, td = _seed(tmp_path, monkeypatch)
+    md = render_l1_issue(conn, td, "l1_health", name_zh="医药健康")
+    assert "## L1 自身" in md
+    head = md.split("## 行业")[0]
+    assert "成分温转热" in head
+    assert "同引擎" not in head
+    conn.close()
 
 
 def test_render_l1_issue_has_as_of_and_warm_to_hot(tmp_path, monkeypatch):

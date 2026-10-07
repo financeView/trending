@@ -152,6 +152,34 @@ def render_l1_issue(
         )
     l2_rows.sort(key=_sort_l2_key)
 
+    lines.append("## L1 自身")
+    row = conn.execute(
+        """
+        SELECT T, RS, right_side, solar_term, tag_warm_to_hot,
+               warm_to_hot_member_count, amount
+        FROM daily_l1 WHERE trade_date=? AND code=?
+        """,
+        (td, l1_id),
+    ).fetchone()
+    headers = ["T", "l1_id", "名称", "RS", "右侧", "节气", "温转热", "成分温转热", "成交额(亿)"]
+    if row is None:
+        cells = ["", l1_id, name_zh, "", "", "", "", "", ""]
+    else:
+        t, rs, right, solar, tag, wcount, amt = row
+        cells = [
+            "" if t is None else t,
+            l1_id,
+            name_zh,
+            "" if rs is None else rs,
+            "" if right is None else right,
+            "" if solar is None else solar,
+            "" if tag is None else tag,
+            0 if wcount is None else wcount,
+            _fmt_amount_yi(amt),
+        ]
+    lines.extend(_md_table(headers, [tuple(cells)]))
+    lines.append("")
+
     lines.append("## 行业（L2）扫描")
     lines.extend(
         _md_table(
@@ -295,12 +323,17 @@ def render_radar_issue(
     lines.append("## 按 L1")
     lines.extend(
         _md_table(
-            ["L1", "l1_id", "T*", "个股", "右侧", "右侧占比", "温转热"],
+            ["L1", "l1_id", "T*", "个股", "右侧", "右侧占比", "个股温转热"],
             [
                 (name, lid, t, c, r, "%.1f%%" % (100.0 * share), h)
                 for name, lid, t, c, r, share, h in l1_table
             ],
         )
+    )
+    lines.append("")
+    lines.append(
+        "T* / 个股温转热 = 个股截面（按 l1_id），非 L1 同引擎；"
+        "L1 自身（含 YAML 闭包「成分温转热」）见各 L1 Issue「L1 自身」。"
     )
     lines.append("")
     lines.append("## 全市场温转热 Top（成交额）")
