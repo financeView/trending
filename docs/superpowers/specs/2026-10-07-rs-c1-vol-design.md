@@ -79,7 +79,9 @@ turnover_t = amount_t / float_mv_t   # 两者皆有限且 float_mv>0；否则当
 VOL_score  = round(100 * percentile_rank(turnover_t among window))  # 公式同 §2.1
 ```
 
-- 窗：**含当日 t** 的最近 `vol_hist`（252）个交易日会话；分位只在窗内 `turnover` 非 null 的样本上算。  
+- 窗脊：**与该股 `replay_from_ohlc` 所用 OHLC 交易日序列同一条脊**（按 bar/会话日，**含当日 t**）；取脊上最近至多 `vol_hist`（252）根；**不**另开日历 pad、不插入无 bar 的空日。  
+- 分位只在窗内 `turnover` 非 null 的样本上算。  
+- **当日 `turnover_t` 非有限（null）→ `VOL_score=null`**，即使窗内有效样本 n ≥ `vol_score_min_samples`——禁止用「昨日分位」顶今日。  
 - `n < vol_score_min_samples`（默认 **60**，入 yaml / `MetricsParams`）或 `n≤1` → `VOL_score=null`。  
 - **不**排除涨停日（本 slice 不加特殊规则；后放可加）。
 
@@ -180,7 +182,7 @@ metrics §10 的 `map_version` / `member_set` 落篮子行：**本 slice 不补*
 | `test_RS_eligibility_tradable` | ST/停牌/quarantine ∉ `local_stock` peer |
 | `test_colinearity_story` | ∃ 凉/寒 且 RS≥80（合成或金标） |
 | `test_T_S_spearman` | 金标+合成 Spearman ≥ `spearman_min`；不含实盘日（§2.2 豁免） |
-| `test_VOL_score_stock` | 个股窗/公式/`vol_score_min_samples`；L2/L1 写入后仍 null |
+| `test_VOL_score_stock` | 个股窗脊=OHLC；公式/`vol_score_min_samples`；**当日 turnover null → VOL null**；L2/L1 写入后仍 null |
 | `test_digest_rs_vol_sort` | 表头含「量」；排序键；NULL→空 |
 | `test_signal_event_rs_matches_daily` | 同日同票 active `signal_event.RS` 与 `daily_stock.RS` 一致；双方 null 亦一致 |
 
@@ -191,8 +193,12 @@ metrics §10 的 `map_version` / `member_set` 落篮子行：**本 slice 不补*
 3. L2/L1：`VOL_score` 恒 null。  
 4. `signal_event.RS` 与当日个股一致（含双 null）；见 `test_signal_event_rs_matches_daily`。  
 5. digest 右侧 Top：有非 null RS 时主序为 RS（+量+额）；全 null 时允许 VOL→amount 退化（§4.3）。  
-6. §5.1 测试全绿；`todo.md` Spec C **已完成**（改写为价格 RS + C1/Spearman 夹具 + 旁路 VOL；删「量价混合可跟」）；README Still out 去掉 RS peer / Spearman / `test_C1`；metrics §5.4 加实盘 Spearman 豁免修订注。  
-7. **不要求：** 9.30 实盘重跑过门、篮子非 null 量分、量混 RS、实盘 Spearman、C2 新测、`map_version`/`member_set` 落篮子行。
+6. §5.1 测试全绿；`todo.md` Spec C **已完成**（改写为价格 RS + C1/Spearman 夹具 + 旁路 VOL；删「量价混合可跟」）；README Still out 去掉 RS peer / Spearman / `test_C1`。  
+7. **T0 docs（同 slice 权威同步，防双源）：**  
+   - metrics §5.4：实盘 Spearman 本 slice 豁免修订注；  
+   - metrics §9.1：`percentile_rank` 对齐本文件 §2.1 闭合式；  
+   - metrics §13：增列 `rs_w1..w4`、`vol_score_min_samples`（初值 60）。  
+8. **不要求：** 9.30 实盘重跑过门、篮子非 null 量分、量混 RS、实盘 Spearman、C2 新测、`map_version`/`member_set` 落篮子行。
 
 ---
 
@@ -209,10 +215,10 @@ metrics §10 的 `map_version` / `member_set` 落篮子行：**本 slice 不补*
 | `scripts/common/db.py` | `VOL_score` / basket `universe_id` / 行级 `param_version`；COLS/ALTER 齐全 |
 | `scripts/issues/digest.py` | 「量」列 + 排序 |
 | `config/metrics/a_share_daily.yaml` | `rs_w*` + `vol_score_min_samples` + `param_version: p05-v2` |
-| metrics 权威 §5.4 | 实盘 Spearman 本 slice 豁免修订注 |
-| `tests/test_*.py` | §5.1 |
+| metrics 权威 | T0：§5.4 Spearman 豁免注；§9.1 闭合 `percentile_rank`；§13 增 `rs_w*` / `vol_score_min_samples` |
+| `tests/test_*.py` | §5.1（含：当日 turnover null → VOL null） |
 
-建议任务切分（plan 可调）：T0 docs 权威（含 metrics 豁免注）→ T1 `RS_raw`+params+`percentile_rank` → T2 `S_temp`+C1/Spearman 测 → T3 peer 截面 + 事件 RS 时序 → T4 个股 VOL + schema → T5 digest → T6 done-when 文档。
+建议任务切分（plan 可调）：T0 docs 权威（§5.4/§9.1/§13）→ T1 `RS_raw`+params+`percentile_rank` → T2 `S_temp`+C1/Spearman 测 → T3 peer 截面 + 事件 RS 时序 → T4 个股 VOL + schema → T5 digest → T6 done-when 文档。
 
 ---
 
@@ -222,3 +228,4 @@ metrics §10 的 `map_version` / `member_set` 落篮子行：**本 slice 不补*
 |------|------|
 | 2026-10-07 | 初版：价格 RS + S_temp/C1 + 个股 VOL 旁路；否决量混 RS；L2/L1 VOL 后放并写明原因；Approach 1 截面后处理；`param_version=p05-v2` |
 | 2026-10-07 | CR 真项修补：闭合 `percentile_rank`；篮子 peer=温度可算；事件时序 peer→内存 RS→append；VOL 窗含 t + `vol_score_min_samples`；Spearman 实盘豁免+metrics 注；C5=`RS_raw`；Done-when/测试补事件 RS 与排序语义；Spec B 篮子 S/RS NULL 被取代；C1 作用域 |
+| 2026-10-07 | 二审真项：当日 turnover null→VOL null；VOL 窗脊=replay OHLC；T0 同步 metrics §9.1/§13/`vol_score_min_samples` |
