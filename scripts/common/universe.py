@@ -74,12 +74,14 @@ def load_stock_sw_l2(path: Optional[str] = None) -> List[dict]:
     out = []
     for m in members:
         if isinstance(m, str):
-            out.append({"ts_code": to_ts_code(m), "sw_l2_code": None})
+            out.append({"ts_code": to_ts_code(m), "sw_l2_code": None, "name_zh": None})
             continue
         ts = to_ts_code(m["ts_code"])
         raw = m.get("sw_l2_code")
         code = None if raw in (None, "") else str(raw)
-        out.append({"ts_code": ts, "sw_l2_code": code})
+        name = m.get("name_zh")
+        name_zh = None if name in (None, "") else str(name)
+        out.append({"ts_code": ts, "sw_l2_code": code, "name_zh": name_zh})
     if path is None:
         _STOCK_CACHE = out
     return out

@@ -57,3 +57,17 @@ def test_801xxx_does_not_enter_universe(tmp_path):
     u = load_universe_codes(stock_path=str(p))
     assert "000001.SZ" in u
     assert "600519.SH" not in u
+
+
+def test_load_stock_sw_l2_passes_name_zh(tmp_path):
+    p = tmp_path / "m.yaml"
+    p.write_text(
+        "map_version: sw2021-v1\nmembers:\n"
+        "  - {ts_code: 000001.SZ, sw_l2_code: '480300', name_zh: 平安银行}\n"
+        "  - {ts_code: 000002.SZ, sw_l2_code: '430100'}\n",
+        encoding="utf-8",
+    )
+    rows = load_stock_sw_l2(str(p))
+    by = {r["ts_code"]: r for r in rows}
+    assert by["000001.SZ"]["name_zh"] == "平安银行"
+    assert by["000002.SZ"].get("name_zh") in (None, "")
