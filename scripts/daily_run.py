@@ -6,6 +6,7 @@ import argparse
 import datetime as dt
 import os
 import sys
+from typing import Mapping, Sequence
 
 # repo root on sys.path
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -32,13 +33,13 @@ from scripts.common.db import (
     upsert_rows,
     write_heartbeat,
 )
-from scripts.common.universe import load_map_version, load_universe_codes
+from scripts.common.universe import l2_members_map, load_map_version, load_universe_codes
 from scripts.metrics.aggregate import (
     MEMBER_SET,
     aggregate_l1,
-    aggregate_l2,
     taxonomy_for_stock,
 )
+from scripts.metrics.l2_synth import synthesize_l2_bars
 from scripts.metrics.params import MetricsParams, load_params
 from scripts.metrics.pipeline import replay_from_ohlc
 
@@ -227,6 +228,82 @@ def _snap_to_daily_stock(ts_code: str, snap: dict) -> dict:
     }
 
 
+def _l2_asof_row(
+    code: str,
+    members: Sequence[str],
+    stock_rows: Sequence[Mapping],
+    snap: Mapping | None,
+    *,
+    trade_date: str,
+    members_total: int,
+) -> dict:
+    """Build one daily_l2 row: engine fields from snap; count/amount from stocks."""
+    member_set = set(members)
+    warm_count = 0
+    amount_sum = 0.0
+    any_amount = False
+    members_tradable = 0
+    for r in stock_rows:
+        if r.get("sw_l2_code") == code:
+            if r.get("tag_warm_to_hot"):
+                warm_count += 1
+            amt = _sql_float(r.get("amount"))
+            if amt is not None:
+                amount_sum += amt
+                any_amount = True
+        ts = r.get("ts_code")
+        if ts in member_set and not r.get("hard_frozen") and not r.get("_is_suspended"):
+            members_tradable += 1
+
+    if snap is None:
+        t = None
+        right_side = None
+        tag_hot = None
+        tag_flat = None
+        solar = None
+    else:
+        t = snap.get("T")
+        right_side = int(bool(snap.get("R")))
+        tag_hot = int(bool(snap.get("tag_warm_to_hot")))
+        tag_flat = int(bool(snap.get("tag_warm_to_flat")))
+        solar = snap.get("solar_term")
+
+    return {
+        "trade_date": trade_date,
+        "code": code,
+        "T": t,
+        "S_temp": None,
+        "RS": None,
+        "right_side": right_side,
+        "tag_warm_to_hot": tag_hot,
+        "tag_warm_to_flat": tag_flat,
+        "solar_term": solar,
+        "members_tradable": members_tradable,
+        "members_total": members_total,
+        "warm_to_hot_member_count": warm_count,
+        "amount": amount_sum if any_amount else None,
+    }
+
+
+def _l2_trade_dates(bar_cache: Mapping[str, Sequence[Mapping]], D: dt.date) -> list[dt.date]:
+    """Full trading calendar from earliest loaded bar through D (never bar-union)."""
+    start: dt.date | None = None
+    for records in bar_cache.values():
+        for r in records:
+            raw = r.get("trade_date")
+            if raw is None:
+                continue
+            if isinstance(raw, dt.date):
+                d = raw
+            else:
+                d = dt.date.fromisoformat(str(raw)[:10])
+            if start is None or d < start:
+                start = d
+    if start is None:
+        return []
+    return cal.trading_days_inclusive(start, D)
+
+
 def replay_metrics_cross_section(
     D: dt.date,
     *,
@@ -243,9 +320,11 @@ def replay_metrics_cross_section(
         min_hist = _metrics_min_history()
         stock_rows: list[dict] = []
         events: list[dict] = []
+        bar_cache: dict[str, list[dict]] = {}
         td = D.isoformat()
         for ts in universe:
             records = _load_symbol_bars(bconn, ts, D)
+            bar_cache[ts] = records
             if not records:
                 continue
             snaps = replay_from_ohlc(params, records, min_history=min_hist)
@@ -276,11 +355,37 @@ def replay_metrics_cross_section(
             if not r.get("hard_frozen") and not r.get("_is_suspended")
         }
         tradable_rows = [r for r in stock_rows if r["ts_code"] in tradable]
-        l2_rows = [
-            row
-            for row in aggregate_l2(tradable_rows, td)
-            if row.get("members_tradable")
-        ]
+
+        mapping = l2_members_map()
+        for members in mapping.values():
+            for ts in members:
+                if ts not in bar_cache:
+                    bar_cache[ts] = _load_symbol_bars(bconn, ts, D)
+        dates = _l2_trade_dates(bar_cache, D)
+
+        l2_rows: list[dict] = []
+        for code, members in mapping.items():
+            if not members:
+                continue
+            member_bars = {ts: bar_cache[ts] for ts in members if bar_cache.get(ts)}
+            synth = synthesize_l2_bars(member_bars, trade_dates=dates)
+            snap = None
+            if synth:
+                snaps = replay_from_ohlc(params, synth, min_history=min_hist)
+                asof = [s for s in snaps if s.get("trade_date") == td]
+                snap = asof[-1] if asof else None
+            # NEVER append snap.event_records to events
+            l2_rows.append(
+                _l2_asof_row(
+                    code,
+                    members,
+                    stock_rows,
+                    snap,
+                    trade_date=td,
+                    members_total=len(members),
+                )
+            )
+
         l1_rows = [
             row
             for row in aggregate_l1(tradable_rows, td)
