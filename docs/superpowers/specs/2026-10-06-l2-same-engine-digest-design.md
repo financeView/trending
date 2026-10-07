@@ -32,12 +32,12 @@ Issue「行业（L2）扫描」把篮子 T 和 tag-any 写在同一列「温转�
 |------|------|
 | 行业 `T` / `right_side` / `tag_warm_to_hot` / `tag_warm_to_flat` / `solar_term` | **L2 合成序列**走与个股相同的 `compute_features` → `decide_t_raw` → 滞回 → FSM → 节气 |
 | 行业 `tag_warm_to_hot=1` | 仅当 **L2 自己**进入右侧（`ENTER_RIGHT`，进入日不另写 `WARM_TO_HOT`）或右侧内存续「温→热/沸」再确认（metrics §6.0） |
-| `warm_to_hot_member_count` | asof 日 `daily_stock` 中 `sw_l2_code` 命中该 L2 且 `tag_warm_to_hot=1` 的行数（含 ST/停牌截面行；不要求进 tradable） |
+| `warm_to_hot_member_count` | asof 日截面中 **`ts_code ∈ 该 L2 的 YAML 成员集`** 且 `tag_warm_to_hot=1` 的行数（含 ST/停牌截面行；不要求进 tradable）。不以行上 `sw_l2_code` 字段为唯一真源（YAML 成员集为准；与共享 asof helper 对齐） |
 
 禁止再用 OR/tag-any 写入 `daily_l2.tag_warm_to_hot`。  
 因此允许且正确：**T=凉、右侧=0、行业温转热=0、成分温转热=1**。
 
-L1：本 slice **不改** `aggregate_l1`（仍可多数票 + tag-any）。Radar「按 L1」的「温转热」保持对 **个股** 计数，表头不得写成「同引擎」。
+L1：**本 slice 历史范围不改 L1**；L1 同引擎 / `daily_l1` 密度与金额见 [`2026-10-07-l1-same-engine-design.md`](2026-10-07-l1-same-engine-design.md)（**取代**下文已删除的「禁止给 L1 填个数/金额」「`aggregate_l1` 保持现状」作生产真源）。Radar「按 L1」的个股温转热计数仍按个股截面，表头不得写成「同引擎」。
 
 ### 2.2 中文名
 
@@ -58,7 +58,7 @@ L1：本 slice **不改** `aggregate_l1`（仍可多数票 + tag-any）。Radar�
 - 库内仍存 **元**（`REAL`）。
 - Issue 展示：`亿元 = amount / 1e8`，格式 `%.3f`（三位小数）。
 - `amount` 为 SQL NULL → 成交额列 **空**（不写 `0.000`）。
-- L2 `amount` = asof 日 `daily_stock` 中 `sw_l2_code` 命中该 L2 的 `amount` **求和**：只加非 null（含 ST/停牌截面行）；全缺 → NULL。禁止把合成指数的「成交额」另编一套。
+- L2 `amount` = asof 日 **`ts_code ∈ 该 L2 YAML 成员集`** 的 `amount` **求和**：只加非 null（含 ST/停牌截面行）；全缺 → NULL。禁止把合成指数的「成交额」另编一套。
 
 ---
 
@@ -117,7 +117,7 @@ YAML 候选成员：`l2_members_map()` 中该 L2 的 `ts_code` 列表（taxonomy
 6. **历史长度：** `compute_features` 看的是 **成功合成 bar 的行数**（与个股同一 `params.min_history_temp` / `vol_hist` 门槛；测试可用与个股相同的缩短 params）。不足则该日 `computable=False`，温度不可算，不进入右侧。缺 high/low 时用 H=L=P，满足特征层对 high/low 列的要求。
 
 7. **落地路径：** `process_day` 先重放个股截面并 upsert `daily_stock` / 个股 `signal_event`。然后对 **每个 YAML 非空成员列表的 L2**（不论 asof 是否有可合成 bar）用成分 **bars≤D** 按上款合成全序列 → `replay_from_ohlc`（序列可空）→ 只持久化 asof 的 `daily_l2`（可全为引擎 NULL + 截面计数/金额）。  
-   **禁止**调用 `aggregate_l2` / `aggregate_members` 写 L2（会连带改 L1 语义或带回 tag-any）。`aggregate_l1` **保持现状**。  
+   **禁止**调用 `aggregate_l2` / `aggregate_members` 写 L2（会带回 tag-any）。L1 生产写路径见 Spec B（不再以「`aggregate_l1` 保持现状」为本文件真源）。  
    **禁止**把 L2 snap 的 `event_records` 送进 `append_signal_events`。  
    **禁止**把 `L2.370100` 这类假代码写入 `bars.db`。
 
@@ -127,7 +127,7 @@ YAML 候选成员：`l2_members_map()` 中该 L2 的 `ts_code` 列表（taxonomy
 
 ## 4. 表结构
 
-`daily_l2` 必须增加下表两列，并写入 **`DAILY_BASKET_ALTER_COLUMNS` + `DAILY_BASKET_COLS`（及 SCHEMA）**——`upsert_daily_l2` 只持久化 `DAILY_BASKET_COLS` 内键，漏列会静默丢。`daily_l1` **语义不变**（仍 interim）；这两列在 L1 上是否物理存在 **不强制**。**禁止**给 L1 填写温转热个数/金额来冒充同引擎。
+`daily_l2` 必须增加下表两列，并写入 **`DAILY_BASKET_ALTER_COLUMNS` + `DAILY_BASKET_COLS`（及 SCHEMA）**——`upsert_daily_l2` 只持久化 `DAILY_BASKET_COLS` 内键，漏列会静默丢。`daily_l1` 列物理形态可与 L2 共享；**L1 引擎语义与个数/金额填写**以 Spec B 为准（本句原「禁止给 L1 填个数/金额冒充同引擎」仅约束 §0 当时范围，**已被 Spec B 取代**）。
 
 | 列 | 类型 | 含义 |
 |----|------|------|
@@ -188,7 +188,7 @@ Radar「按 L1」表头不变。
 | YAML 无中文名 | 名称列空 |
 | 东财拉名失败 | 该票不写 `name_zh`，不失败整个 dump |
 | 合成夹紧失败 | 该日当跳过 bar |
-| L1 tag-any | 保持；文档与 Radar 不得称同引擎 |
+| L1 引擎 | 本 slice 历史不改；现真源见 Spec B [`2026-10-07-l1-same-engine-design.md`](2026-10-07-l1-same-engine-design.md)；Radar 不得称 L1 同引擎 |
 
 ---
 
@@ -208,5 +208,14 @@ Radar「按 L1」表头不变。
 
 - 不把合成 K 线写入 `bars.db` / git
 - 不改 `evaluate_ok` / limit 门禁
-- 不更新 14 个 L1 的引擎含义
+- 不更新 14 个 L1 的引擎含义（**历史**：§0 当时；L1 现由 Spec B 定义）
 - 不把「成分温转热」做成流通市值占比列（只要个数）
+
+---
+
+## 9. 修订记录
+
+| 日期 | 说明 |
+|------|------|
+| 2026-10-06 | §0 落地 |
+| 2026-10-07 | Spec B CR：密度/`amount` 真源改为 YAML 成员集；L1 interim/禁填句改为指向 Spec B |

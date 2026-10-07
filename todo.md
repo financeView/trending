@@ -3,7 +3,7 @@
 > 日期：2026-10-06  
 > 已落地：P0 日更骨架 → P0.5 个股 FSM → P1 L1/Radar Issues → P2 纸面影子 → 申万 YAML 映射宇宙 → 2026-09-30 Actions 实跑（`run_meta=partial`，见 P1 缺口）。  
 > **§0 已落地**（L2 同引擎 + digest 名称/亿元）。  
-> **落地顺序（已钉）：A → B → C → D → E**。**A 已落地**；下一刀 **B**。
+> **落地顺序（已钉）：A → B → C → D → E**。**A 已落地**；**B plan 就绪**。
 
 ---
 
@@ -12,7 +12,7 @@
 | Spec | 范围 | 状态 |
 |------|------|------|
 | **A. Ops 日更止血** | §1.1 limit 软门禁；§1.2 heartbeat / only_date shadow | **已完成** — [`spec`](docs/superpowers/specs/2026-10-07-ops-daily-run-hemostasis-design.md) / [`plan`](docs/superpowers/plans/2026-10-07-ops-daily-run-hemostasis.md) |
-| **B. L1 同引擎** | §2.1 +（可选）L2 全历史 replay 成本/增量状态 | **下一份** |
+| **B. L1 同引擎** | §2.1（replay 成本后放） | **plan 就绪** — [`spec`](docs/superpowers/specs/2026-10-07-l1-same-engine-design.md) / [`plan`](docs/superpowers/plans/2026-10-07-l1-same-engine.md) |
 | **C. RS + C1** | §2.2 + §1.3 表头/排序与真 RS 同发 | 后放 |
 | **D. 宇宙扩张** | §2.3 未映射全 A + §2.4 YAML 日拉 | 后放 |
 | **E. 成交与冻旗** | §2.5 board_calc / limit_up_unfillable + §2.6 显式硬冻 | 后放 |
