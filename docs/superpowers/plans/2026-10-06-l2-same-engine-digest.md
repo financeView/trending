@@ -50,7 +50,7 @@ Task 2 (names)   ─┴─► Task 5 (digest) ─────► Task 6 (done-wh
 **Interfaces:**
 - Produces: `DAILY_BASKET_COLS` includes `warm_to_hot_member_count`, `amount`; upsert round-trips them; `warm_to_hot_member_count` ∉ `_INT_BOOL_COLS`
 
-- [ ] **Step 1: Failing test**
+- [x] **Step 1: Failing test**
 
 ```python
 def test_daily_l2_upsert_keeps_member_count_and_amount(tmp_path, monkeypatch):
@@ -83,20 +83,20 @@ def test_daily_l2_upsert_keeps_member_count_and_amount(tmp_path, monkeypatch):
     assert row[2] is None
 ```
 
-- [ ] **Step 2: Run — expect FAIL** (unknown cols / silent drop)
+- [x] **Step 2: Run — expect FAIL** (unknown cols / silent drop)
 
 Run: `pytest tests/test_daily_l2_cols.py::test_daily_l2_upsert_keeps_member_count_and_amount -v`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `db.py`:
 - Add to `CREATE TABLE daily_l2` (and optionally `daily_l1` as NULL-only physical cols): `warm_to_hot_member_count INTEGER`, `amount REAL`
 - Append to `DAILY_BASKET_ALTER_COLUMNS` and `DAILY_BASKET_COLS`
 - Do **not** add `warm_to_hot_member_count` to `_INT_BOOL_COLS`
 
-- [ ] **Step 4: Run — PASS**
+- [x] **Step 4: Run — PASS**
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/common/db.py tests/test_daily_l2_cols.py
@@ -121,7 +121,7 @@ EOF
 - Produces: `load_stock_sw_l2()[i]` may include `name_zh: str | None`
 - Produces: `patch_stock_names.py` CLI `--in/--out` patches existing members only via EM `f12,f13,f14`
 
-- [ ] **Step 1: Failing test**
+- [x] **Step 1: Failing test**
 
 ```python
 def test_load_stock_sw_l2_passes_name_zh(tmp_path):
@@ -139,9 +139,9 @@ def test_load_stock_sw_l2_passes_name_zh(tmp_path):
     assert by["000002.SZ"].get("name_zh") in (None, "")
 ```
 
-- [ ] **Step 2: Run — FAIL** (name dropped)
+- [x] **Step 2: Run — FAIL** (name dropped)
 
-- [ ] **Step 3: Loader**
+- [x] **Step 3: Loader**
 
 ```python
 # in load_stock_sw_l2 loop:
@@ -150,7 +150,7 @@ name_zh = None if name in (None, "") else str(name)
 out.append({"ts_code": ts, "sw_l2_code": code, "name_zh": name_zh})
 ```
 
-- [ ] **Step 4: `patch_stock_names.py`** (do **not** call `dump_yaml`)
+- [x] **Step 4: `patch_stock_names.py`** (do **not** call `dump_yaml`)
 
 ```python
 """One-shot: Eastmoney f14 → patch name_zh on existing stock_sw_l2 members."""
@@ -160,7 +160,7 @@ out.append({"ts_code": ts, "sw_l2_code": code, "name_zh": name_zh})
 # rewrite YAML preserving map_version/note; never add new ts_codes
 ```
 
-- [ ] **Step 5: Run patch once** (network) → check-in `stock_sw_l2.yaml`
+- [x] **Step 5: Run patch once** (network) → check-in `stock_sw_l2.yaml`
 
 ```bash
 python scripts/taxonomy/patch_stock_names.py \
@@ -171,7 +171,7 @@ python scripts/taxonomy/patch_stock_names.py \
 
 If offline CI cannot patch: commit loader + fixture test; run patch in a follow-up commit when network available (still this plan Task 2).
 
-- [ ] **Step 6: pytest loader test PASS; Commit**
+- [x] **Step 6: pytest loader test PASS; Commit**
 
 ```bash
 git add scripts/common/universe.py scripts/taxonomy/patch_stock_names.py \
@@ -212,7 +212,7 @@ def synthesize_l2_bars(
 - 「上一交易日」= 该序列里 `t` 的前一个元素（注入列表 = 日历；**禁止** synth 内调全局 `prev_trade_date()` 以免挂网）。
 - **禁止**把「有 bar 的日期并集」当作 `trade_dates`：缺中间日 close 时，并集会把 prev 跳到上一有 bar 日，把多日收益当成一日（与 spec 日历 prev 不符）。
 
-- [ ] **Step 1: Failing test — chain returns**
+- [x] **Step 1: Failing test — chain returns**
 
 ```python
 def test_synth_chain_two_names_known_returns():
@@ -241,7 +241,7 @@ def test_synth_chain_two_names_known_returns():
     assert abs(out[0]["close_qfq"] - 1.10) < 1e-9
 ```
 
-- [ ] **Step 2a: Missing mid-calendar close → omit (not jump prev)**
+- [x] **Step 2a: Missing mid-calendar close → omit (not jump prev)**
 
 ```python
 def test_synth_omits_day_when_calendar_prev_close_missing():
@@ -262,7 +262,7 @@ def test_synth_omits_day_when_calendar_prev_close_missing():
     assert out == []
 ```
 
-- [ ] **Step 2b: ST day omitted; \(P_{\mathrm{prev}}\) survives gap**
+- [x] **Step 2b: ST day omitted; \(P_{\mathrm{prev}}\) survives gap**
 
 ```python
 def test_synth_skips_st_day_and_chains_p_prev():
@@ -292,9 +292,9 @@ def test_synth_skips_st_day_and_chains_p_prev():
     assert abs(out[1]["close_qfq"] - 1.21) < 1e-9  # not 1.10 (would be wrong first-P reset)
 ```
 
-- [ ] **Step 3: Implement `l2_synth.py`** per spec §3. Prev close date = prior entry in **full** `trade_dates`. \(P_{\mathrm{prev}}\), \(M^H_t\), clamp. Index bars by `(ts_code, iso_date)`.
+- [x] **Step 3: Implement `l2_synth.py`** per spec §3. Prev close date = prior entry in **full** `trade_dates`. \(P_{\mathrm{prev}}\), \(M^H_t\), clamp. Index bars by `(ts_code, iso_date)`.
 
-- [ ] **Step 4: PASS all synth tests; Commit**
+- [x] **Step 4: PASS all synth tests; Commit**
 
 ```bash
 git add scripts/metrics/l2_synth.py tests/test_l2_synth.py
@@ -318,7 +318,7 @@ EOF
 - Produces: `l2_rows` with engine fields + `warm_to_hot_member_count` + `amount`
 - Consumes: `synthesize_l2_bars`, `replay_from_ohlc`, `l2_members_map`, bars loader already in module
 
-- [ ] **Step 1: C5 failing test**
+- [x] **Step 1: C5 failing test**
 
 ```python
 def test_C5_same_engine_on_synthetic(tmp_path, monkeypatch):
@@ -335,7 +335,7 @@ def test_C5_same_engine_on_synthetic(tmp_path, monkeypatch):
     # Compare L2 asof T/right_side/tag_warm_to_hot/solar_term to replay_from_ohlc(000001)
 ```
 
-- [ ] **Step 2: Wire test — tag vs count (cool engine snap, not skip-day)**
+- [x] **Step 2: Wire test — tag vs count (cool engine snap, not skip-day)**
 
 ```python
 def test_l2_tag_not_or_of_members():
@@ -370,7 +370,7 @@ def _l2_asof_row(
 ) -> dict: ...
 ```
 
-- [ ] **Step 3: Skip-day NULL test**
+- [x] **Step 3: Skip-day NULL test**
 
 ```python
 def test_l2_skip_day_writes_null_engine_fields(...):
@@ -381,7 +381,7 @@ def test_l2_skip_day_writes_null_engine_fields(...):
     assert row["warm_to_hot_member_count"] == 1
 ```
 
-- [ ] **Step 4: Implement in `replay_metrics_cross_section`**
+- [x] **Step 4: Implement in `replay_metrics_cross_section`**
 
 ```python
 # after stock_rows built:
@@ -419,9 +419,9 @@ for code, members in mapping.items():
 - `members_tradable` = count stock_rows in members that are in tradable set (keep column meaningful)
 - Do **not** use `_sql_int_bool` on nullable engine ints
 
-- [ ] **Step 5: Assert no L2 events** in a wire test (`events` only stock ts_codes)
+- [x] **Step 5: Assert no L2 events** in a wire test (`events` only stock ts_codes)
 
-- [ ] **Step 6: PASS; Commit**
+- [x] **Step 6: PASS; Commit**
 
 ```bash
 git add scripts/daily_run.py tests/test_c5_same_engine.py tests/test_l2_daily_run_wire.py
@@ -444,7 +444,7 @@ EOF
 - Produces: `_fmt_amount_yi(amount) -> str`; L2/stock tables with 名称 + 成交额(亿)
 - Consumes: `load_l2_to_l1` / `load_stock_sw_l2` for name maps
 
-- [ ] **Step 1: Failing digest assertions**
+- [x] **Step 1: Failing digest assertions**
 
 ```python
 def test_l2_scan_headers_and_yi_and_names(tmp_path, monkeypatch):
@@ -471,7 +471,7 @@ def test_radar_hot_top_has_name_and_yi(...):
     assert "成交额(亿)" in body
 ```
 
-- [ ] **Step 2: Implement digest helpers**
+- [x] **Step 2: Implement digest helpers**
 
 ```python
 def _fmt_amount_yi(v: Any) -> str:
@@ -498,9 +498,9 @@ Do **not** change `_fmt_cell` float `%.4g` globally.
 
 Issue L2 code list stays `_l2_codes_for_l1` = DISTINCT `daily_stock.sw_l2_code` (unchanged; YAML-only empty L2s need not appear on Issue).
 
-- [ ] **Step 3: Update `_seed` in tests** with new L2 cols; fix assertions for new headers
+- [x] **Step 3: Update `_seed` in tests** with new L2 cols; fix assertions for new headers
 
-- [ ] **Step 4: PASS; Commit**
+- [x] **Step 4: PASS; Commit**
 
 ```bash
 git add scripts/issues/digest.py tests/test_l1_digest.py
@@ -517,12 +517,12 @@ EOF
 
 **Files:** `README.md`, `todo.md`, spec status line
 
-- [ ] Mark todo.md §0 items done / point to this plan
-- [ ] Spec status → `已接受；plan 见 2026-10-06-l2-same-engine-digest.md`
-- [ ] README one-liner: L2 same-engine + digest names/亿元
-- [ ] `pytest tests/test_daily_l2_cols.py tests/test_l2_synth.py tests/test_c5_same_engine.py tests/test_l2_daily_run_wire.py tests/test_l1_digest.py tests/test_universe_yaml_map.py -q`
-- [ ] Full `pytest tests/ -q` offline green
-- [ ] Commit docs only
+- [x] Mark todo.md §0 items done / point to this plan
+- [x] Spec status → `已落地；plan 见 2026-10-06-l2-same-engine-digest.md`
+- [x] README one-liner: L2 same-engine + digest names/亿元
+- [x] `pytest tests/test_daily_l2_cols.py tests/test_l2_synth.py tests/test_c5_same_engine.py tests/test_l2_daily_run_wire.py tests/test_l1_digest.py tests/test_universe_yaml_map.py -q`
+- [x] Full `pytest tests/ -q` offline green
+- [x] Commit docs only
 
 ```bash
 git add README.md todo.md docs/superpowers/specs/2026-10-06-l2-same-engine-digest-design.md

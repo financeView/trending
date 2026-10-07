@@ -12,6 +12,7 @@
 - Spec：[`docs/superpowers/specs/2026-10-06-l2-same-engine-digest-design.md`](docs/superpowers/specs/2026-10-06-l2-same-engine-digest-design.md)  
 - Plan：[`docs/superpowers/plans/2026-10-06-l2-same-engine-digest.md`](docs/superpowers/plans/2026-10-06-l2-same-engine-digest.md)  
 - 遗留：`stock_sw_l2.yaml` 的 `name_zh` 需有网时跑 `python3 scripts/taxonomy/patch_stock_names.py --in config/taxonomy/stock_sw_l2.yaml --out config/taxonomy/stock_sw_l2.yaml`（loader/digest 已就绪）
+- 后放（CR）：asof 日对 ~131 L2 各全历史 `synth+replay`；截断历史会改 FSM，需引擎状态/增量缓存后再做，勿裸砍 lookback
 
 ### 0.1 同引擎 L2：行业温转热 vs 成分密度拆开
 

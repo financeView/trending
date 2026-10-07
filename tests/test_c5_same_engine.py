@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import date
 
 from scripts.common.bars import bars_conn
+from scripts.metrics.l2_synth import synthesize_l2_bars
 from scripts.metrics.pipeline import replay_from_ohlc
 from tests.test_daily_run_metrics_wire import (
     SHORT_N,
@@ -15,7 +16,7 @@ from tests.test_daily_run_metrics_wire import (
 
 def test_C5_same_engine_on_synthetic(tmp_path, monkeypatch):
     """Two identical OHLC members, equal float_mv → L2 asof T/R/tags/solar == single stock."""
-    from scripts.daily_run import replay_metrics_cross_section
+    from scripts.daily_run import _load_symbol_bars, replay_metrics_cross_section
 
     monkeypatch.setattr(
         "scripts.daily_run.load_metrics_params", lambda: _short_params()
@@ -44,7 +45,7 @@ def test_C5_same_engine_on_synthetic(tmp_path, monkeypatch):
     bars_path = str(tmp_path / "bars.db")
     conn = bars_conn(bars_path)
     _seed_uptrend(conn, "000001.SZ", dates, start_px=10.0)
-    _seed_uptrend(conn, "000002.SZ", dates, start_px=10.0)
+    _seed_uptrend(conn, "000002.SZ", dates, start_px=20.0)  # different level, same +1.5%/day
     conn.close()
 
     params = _short_params()
@@ -58,22 +59,40 @@ def test_C5_same_engine_on_synthetic(tmp_path, monkeypatch):
     l2 = next(r for r in l2_rows if r["code"] == "370100")
     assert l2["T"] is not None
 
-    from scripts.daily_run import _load_symbol_bars
-
     bconn = bars_conn(bars_path)
     stock_bars = _load_symbol_bars(bconn, "000001.SZ", D)
+    twin_bars = _load_symbol_bars(bconn, "000002.SZ", D)
     bconn.close()
-    # Synth omits the first calendar day (no prev); align stock history length.
-    snaps = replay_from_ohlc(params, stock_bars[1:], min_history=SHORT_N)
+
+    synth = synthesize_l2_bars(
+        {"000001.SZ": stock_bars, "000002.SZ": twin_bars},
+        trade_dates=dates,
+    )
+    assert synth, "twins with equal returns must synthesize"
+    # Chain returns == either twin's day returns (not absolute price levels).
+    for i, bar in enumerate(synth):
+        td = bar["trade_date"]
+        idx = next(j for j, r in enumerate(stock_bars) if r["trade_date"] == td)
+        assert idx >= 1
+        stock_ret = float(stock_bars[idx]["close_qfq"]) / float(
+            stock_bars[idx - 1]["close_qfq"]
+        ) - 1.0
+        if i == 0:
+            synth_ret = float(bar["close_qfq"]) - 1.0
+        else:
+            synth_ret = float(bar["close_qfq"]) / float(synth[i - 1]["close_qfq"]) - 1.0
+        assert abs(synth_ret - stock_ret) < 1e-12
+
+    snaps = replay_from_ohlc(params, synth, min_history=SHORT_N)
     asof = [s for s in snaps if s.get("trade_date") == D.isoformat()]
     assert asof
-    single = asof[-1]
+    expected = asof[-1]
 
-    assert l2["T"] == single.get("T")
-    assert l2["right_side"] == int(bool(single.get("R")))
-    assert l2["tag_warm_to_hot"] == int(bool(single.get("tag_warm_to_hot")))
-    assert l2["tag_warm_to_flat"] == int(bool(single.get("tag_warm_to_flat")))
-    assert l2["solar_term"] == single.get("solar_term")
+    assert l2["T"] == expected.get("T")
+    assert l2["right_side"] == int(bool(expected.get("R")))
+    assert l2["tag_warm_to_hot"] == int(bool(expected.get("tag_warm_to_hot")))
+    assert l2["tag_warm_to_flat"] == int(bool(expected.get("tag_warm_to_flat")))
+    assert l2["solar_term"] == expected.get("solar_term")
     # No L2 signal events
     assert all(e["ts_code"] in ("000001.SZ", "000002.SZ") for e in events)
     assert not any(e["ts_code"] == "370100" for e in events)
