@@ -33,7 +33,12 @@ from scripts.common.db import (
     upsert_rows,
     write_heartbeat,
 )
-from scripts.common.universe import l2_members_map, load_map_version, load_universe_codes
+from scripts.common.universe import (
+    l2_members_map,
+    load_map_version,
+    load_quarantine_codes,
+    load_universe_codes,
+)
 from scripts.metrics.aggregate import (
     MEMBER_SET,
     aggregate_l1,  # imported so tests can spy; not used for daily_l1 writes
@@ -42,6 +47,11 @@ from scripts.metrics.aggregate import (
 )
 from scripts.metrics.l2_synth import synthesize_basket_bars
 from scripts.metrics.params import MetricsParams, load_params
+from scripts.metrics.peer_rs import (
+    assign_peer_rs,
+    basket_peer_eligible,
+    stock_peer_eligible,
+)
 from scripts.metrics.pipeline import replay_from_ohlc
 
 _METRICS_YAML = os.path.join(_ROOT, "config", "metrics", "a_share_daily.yaml")
@@ -261,18 +271,23 @@ def _basket_asof_row(
         tag_hot = None
         tag_flat = None
         solar = None
+        s_temp = None
+        rs_raw = None
     else:
         t = snap.get("T")
         right_side = int(bool(snap.get("R")))
         tag_hot = int(bool(snap.get("tag_warm_to_hot")))
         tag_flat = int(bool(snap.get("tag_warm_to_flat")))
         solar = snap.get("solar_term")
+        s_temp = _sql_float(snap.get("S_temp"))
+        rs_raw = snap.get("RS_raw")
     return {
         "trade_date": trade_date,
         "code": code,
         "T": t,
-        "S_temp": None,
-        "RS": None,
+        "S_temp": s_temp,
+        "RS": None,  # filled by peer pass
+        "RS_raw": rs_raw,  # ephemeral; stripped by upsert COLS
         "right_side": right_side,
         "tag_warm_to_hot": tag_hot,
         "tag_warm_to_flat": tag_flat,
@@ -319,6 +334,7 @@ def replay_metrics_cross_section(
         return [], [], [], []
     bconn = bars_conn(path)
     try:
+        qua = load_quarantine_codes()
         min_hist = _metrics_min_history()
         stock_rows: list[dict] = []
         events: list[dict] = []
@@ -336,6 +352,7 @@ def replay_metrics_cross_section(
             snap = asof_snaps[-1]
             row = _snap_to_daily_stock(ts, snap)
             row["_is_suspended"] = bool(snap.get("is_suspended"))
+            row["RS_raw"] = snap.get("RS_raw")  # ephemeral; for peer / strip on upsert
             stock_rows.append(row)
             sw, l1 = taxonomy_for_stock(ts)
             for rec in snap.get("event_records") or []:
@@ -347,7 +364,7 @@ def replay_metrics_cross_section(
                         "l1_id": l1,
                         "event": rec.get("event"),
                         "T": rec.get("T"),
-                        "RS": None,
+                        "RS": None,  # backfilled after peer
                         "detail": rec.get("detail") or {},
                     }
                 )
@@ -425,6 +442,30 @@ def replay_metrics_cross_section(
                     members_total=len(members),
                 )
             )
+
+        # Three separate peer universes (isolation).
+        assign_peer_rs(
+            stock_rows,
+            eligible=lambda r: stock_peer_eligible(r, quarantine=qua),
+        )
+        assign_peer_rs(l2_rows, eligible=basket_peer_eligible)
+        assign_peer_rs(l1_rows, eligible=basket_peer_eligible)
+
+        pv = params.param_version
+        for r in stock_rows:
+            r["universe_id"] = "local_stock"
+            r["param_version"] = pv
+        for r in l2_rows:
+            r["universe_id"] = "local_l2"
+            r["param_version"] = pv
+        for r in l1_rows:
+            r["universe_id"] = "local_l1"
+            r["param_version"] = pv
+
+        rs_by_ts = {r["ts_code"]: r.get("RS") for r in stock_rows}
+        for ev in events:
+            ev["RS"] = rs_by_ts.get(ev["ts_code"])
+
         return stock_rows, l2_rows, l1_rows, events
     finally:
         bconn.close()
