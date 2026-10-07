@@ -71,6 +71,8 @@ CREATE TABLE IF NOT EXISTS daily_l2 (
   solar_term TEXT,
   members_tradable INTEGER,
   members_total INTEGER,
+  warm_to_hot_member_count INTEGER,
+  amount REAL,
   PRIMARY KEY (trade_date, code)
 );
 
@@ -86,6 +88,8 @@ CREATE TABLE IF NOT EXISTS daily_l1 (
   solar_term TEXT,
   members_tradable INTEGER,
   members_total INTEGER,
+  warm_to_hot_member_count INTEGER,
+  amount REAL,
   PRIMARY KEY (trade_date, code)
 );
 
@@ -164,6 +168,8 @@ DAILY_BASKET_ALTER_COLUMNS: Tuple[Tuple[str, str], ...] = (
     ("solar_term", "TEXT"),
     ("members_tradable", "INTEGER"),
     ("members_total", "INTEGER"),
+    ("warm_to_hot_member_count", "INTEGER"),
+    ("amount", "REAL"),
 )
 
 DAILY_STOCK_COLS = (
@@ -201,6 +207,8 @@ DAILY_BASKET_COLS = (
     "solar_term",
     "members_tradable",
     "members_total",
+    "warm_to_hot_member_count",
+    "amount",
 )
 
 _INT_BOOL_COLS = frozenset(
