@@ -146,7 +146,7 @@ Actions 日志（非猜测）：
 
 ### 4.2 读路径（必须修）
 
-`_heartbeat_job_view(data)`：有 `daily_run` dict 则用之，否则顶层扁平。
+`heartbeat_job_view(data)`：有 `daily_run` dict 则用之，否则顶层扁平。
 
 全部经 view：`trade_date_from_heartbeat`、`heartbeat_asof_dates`（**全** `days` 列表）、`live_publish_allowed` 的 skip 门。
 

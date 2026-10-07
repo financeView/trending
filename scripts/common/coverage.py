@@ -60,7 +60,7 @@ def evaluate_ok(
     fatal: bool = False,
     computable_min: float = COMPUTABLE_COVERAGE_MIN,
 ) -> OkDecision:
-    """D < session_asof：不卡 limit；D == asof：卡 limit_coverage_asof。"""
+    """D < session_asof：不检 limit。D == asof：limit 不足仍 ok，reason 记 warn（v1.2 soft）。"""
     if fatal:
         return OkDecision(False, "fail", "fatal_error", trade_date == session_asof)
 

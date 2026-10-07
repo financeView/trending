@@ -29,7 +29,7 @@ from scripts.issues.github_issues import (
 )
 
 
-def _heartbeat_job_view(data: dict) -> dict:
+def heartbeat_job_view(data: dict) -> dict:
     """Prefer nested daily_run job; fall back to flat top-level heartbeat."""
     job = data.get("daily_run")
     return job if isinstance(job, dict) else data
@@ -44,7 +44,7 @@ def trade_date_from_heartbeat(path: Optional[str] = None) -> tuple[Optional[str]
         data = json.loads(Path(hb).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None, "bad_heartbeat"
-    view = _heartbeat_job_view(data)
+    view = heartbeat_job_view(data)
     if view.get("status") == "skip":
         return None, "skip"
     days = view.get("days") or []
@@ -72,7 +72,7 @@ def live_publish_allowed(
             data = json.loads(Path(hb).read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             data = {}
-        view = _heartbeat_job_view(data)
+        view = heartbeat_job_view(data)
         if view.get("status") == "skip":
             skip_day = str(view.get("date") or view.get("asof") or "")
             if skip_day == str(trade_date):
