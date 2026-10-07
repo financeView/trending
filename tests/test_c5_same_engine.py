@@ -1,6 +1,7 @@
 """C5: L2 same-engine matches single-stock replay on identical twins."""
 from __future__ import annotations
 
+import math
 from datetime import date
 from typing import Any
 
@@ -17,13 +18,26 @@ from tests.test_daily_run_metrics_wire import (
     _weekdays_ending,
 )
 
+# ROC_252 needs index ≥ 252; synth drops the first calendar day → seed ≥ 254.
+RS_BARS = 254
+
 
 def _assert_opt_approx(actual: Any, expected: Any) -> None:
-    """Match None↔None or finite floats via pytest.approx (RS_raw may be null under short hist)."""
+    """Match None↔None or finite floats via pytest.approx."""
     if expected is None:
         assert actual is None
     else:
         assert actual == pytest.approx(expected)
+
+
+def _assert_finite_rs_raw_match(*values: Any) -> None:
+    """All values finite and equal within approx (C5 twin RS_raw lock)."""
+    assert values, "need at least one RS_raw"
+    head = values[0]
+    assert head is not None and math.isfinite(float(head))
+    for v in values[1:]:
+        assert v is not None and math.isfinite(float(v))
+        assert v == pytest.approx(head)
 
 
 def test_C5_same_engine_on_synthetic(tmp_path, monkeypatch):
@@ -46,9 +60,9 @@ def test_C5_same_engine_on_synthetic(tmp_path, monkeypatch):
         lambda: {"370100": ["000001.SZ", "000002.SZ"]},
     )
 
-    D = date(2024, 1, 10)
-    # +1 so synth (skips first calendar day) still reaches min_history_temp.
-    dates = _weekdays_ending(D, SHORT_N + 1)
+    D = date(2024, 12, 31)
+    # ≥254 weekdays so synth (≥253 closes) yields finite RS_raw; short params for T/R.
+    dates = _weekdays_ending(D, RS_BARS)
     # Inject full calendar = seed weekdays (never rely on holiday-skewed bar-union).
     monkeypatch.setattr(
         "scripts.daily_run.cal.trading_days_inclusive",
@@ -112,21 +126,24 @@ def test_C5_same_engine_on_synthetic(tmp_path, monkeypatch):
     # Twin stock asof vs basket engine: RS_raw + S_temp (not cross-section RS).
     stock_snaps = replay_from_ohlc(params, stock_bars, min_history=SHORT_N)
     stock_asof = [s for s in stock_snaps if s.get("trade_date") == D.isoformat()][-1]
-    _assert_opt_approx(stock_asof.get("RS_raw"), expected.get("RS_raw"))
+    _assert_finite_rs_raw_match(
+        stock_asof.get("RS_raw"), expected.get("RS_raw"), l2.get("RS_raw")
+    )
     _assert_opt_approx(stock_asof.get("S_temp"), expected.get("S_temp"))
     _assert_opt_approx(l2.get("S_temp"), expected.get("S_temp"))
-    _assert_opt_approx(l2.get("RS_raw"), expected.get("RS_raw"))
     assert expected.get("S_temp") is not None
     assert stock_asof.get("S_temp") is not None
     assert l2.get("S_temp") is not None
-    # Chain-equal twins → equal ROC path (recompute; asof often null under SHORT_N < 252).
+    # Chain-equal twins → equal ROC path (recompute; must be finite).
     stock_rs = compute_rs_raw(
         [float(b["close_qfq"]) for b in stock_bars], params
     )
     synth_rs = compute_rs_raw(
         [float(b["close_qfq"]) for b in synth], params
     )
-    assert stock_rs[-1] == synth_rs[-1]
+    assert stock_rs[-1] is not None and math.isfinite(float(stock_rs[-1]))
+    assert synth_rs[-1] is not None and math.isfinite(float(synth_rs[-1]))
+    assert stock_rs[-1] == pytest.approx(synth_rs[-1])
     # Do NOT assert cross-section RS equality
 
 
@@ -163,8 +180,8 @@ def test_C5_same_engine_on_synthetic_l1(tmp_path, monkeypatch):
         lambda: {"l1_test": ["370100"]},
     )
 
-    D = date(2024, 1, 10)
-    dates = _weekdays_ending(D, SHORT_N + 1)
+    D = date(2024, 12, 31)
+    dates = _weekdays_ending(D, RS_BARS)
     monkeypatch.setattr(
         "scripts.daily_run.cal.trading_days_inclusive",
         lambda start, end: [d for d in dates if start <= d <= end],
@@ -206,10 +223,11 @@ def test_C5_same_engine_on_synthetic_l1(tmp_path, monkeypatch):
     # Twin stock asof vs L1 basket engine: RS_raw + S_temp (not cross-section RS).
     stock_snaps = replay_from_ohlc(params, stock_bars, min_history=SHORT_N)
     stock_asof = [s for s in stock_snaps if s.get("trade_date") == D.isoformat()][-1]
-    _assert_opt_approx(stock_asof.get("RS_raw"), expected.get("RS_raw"))
+    _assert_finite_rs_raw_match(
+        stock_asof.get("RS_raw"), expected.get("RS_raw"), l1.get("RS_raw")
+    )
     _assert_opt_approx(stock_asof.get("S_temp"), expected.get("S_temp"))
     _assert_opt_approx(l1.get("S_temp"), expected.get("S_temp"))
-    _assert_opt_approx(l1.get("RS_raw"), expected.get("RS_raw"))
     assert expected.get("S_temp") is not None
     assert stock_asof.get("S_temp") is not None
     assert l1.get("S_temp") is not None
@@ -219,5 +237,7 @@ def test_C5_same_engine_on_synthetic_l1(tmp_path, monkeypatch):
     synth_rs = compute_rs_raw(
         [float(b["close_qfq"]) for b in synth], params
     )
-    assert stock_rs[-1] == synth_rs[-1]
+    assert stock_rs[-1] is not None and math.isfinite(float(stock_rs[-1]))
+    assert synth_rs[-1] is not None and math.isfinite(float(synth_rs[-1]))
+    assert stock_rs[-1] == pytest.approx(synth_rs[-1])
     # Do NOT assert cross-section RS equality
