@@ -130,6 +130,7 @@ def test_l1_issue_has_self_section(tmp_path, monkeypatch):
     head = md.split("## 行业")[0]
     assert "同引擎" not in head
     assert "成分温转热" in head
+    assert "| T | l1_id | 名称 | RS | 量 | 右侧 | 节气 | 温转热 | 成分温转热 | 成交额(亿) |" in head
     assert "| 凉 | l1_finance | 金融 |  | " in md or "| 凉 | l1_finance | 金融 | |" in md
     conn.close()
 
@@ -150,10 +151,9 @@ def test_l1_self_section_empty_when_no_daily_l1_row(tmp_path, monkeypatch):
     head = md.split("## 行业")[0]
     assert "成分温转热" in head
     assert "同引擎" not in head
-    # no daily_l1 → engine cells empty (not fabricated 0 / 凉)
-    assert "|  | l1_health | 医药健康 |  |  |  |  |  |  |" in head or (
-        "|  | l1_health | 医药健康 |  |  |  |  |  |" in head
-    )
+    # no daily_l1 → engine cells empty (not fabricated 0 / 凉);「量」column present
+    assert "| T | l1_id | 名称 | RS | 量 | 右侧 | 节气 | 温转热 | 成分温转热 | 成交额(亿) |" in head
+    assert "|  | l1_health | 医药健康 |  |  |  |  |  |  |  |" in head
     conn.close()
 
 
@@ -319,7 +319,7 @@ def test_l2_scan_headers_and_yi_and_names(tmp_path, monkeypatch):
     )
     conn.commit()
     body = render_l1_issue(conn, td, "l1_health", name_zh="医药健康")
-    assert "| T | 代码 | 名称 | RS | 右侧 | 节气 | 温转热 | 成分温转热 | 成交额(亿) |" in body
+    assert "| T | 代码 | 名称 | RS | 量 | 右侧 | 节气 | 温转热 | 成分温转热 | 成交额(亿) |" in body
     assert "化学制药" in body
     assert "10.650" in body
     assert "1.065e+09" not in body

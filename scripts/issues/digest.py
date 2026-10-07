@@ -88,8 +88,8 @@ def _l2_codes_for_l1(conn: sqlite3.Connection, trade_date: str, l1_id: str) -> l
 
 
 def _sort_l2_key(row: tuple) -> tuple:
-    # row: code, T, S_temp, RS, right_side, tag_warm_to_hot, solar_term,
-    #      warm_to_hot_member_count, amount
+    # row: code, T, S_temp, RS, VOL_score, right_side, tag_warm_to_hot, solar_term,
+    #      warm_to_hot_member_count, amount — sort by T then S_temp only (not VOL)
     t = row[1]
     try:
         r = rank(t) if t else -99
@@ -141,7 +141,7 @@ def render_l1_issue(
         l2_rows = list(
             conn.execute(
                 """
-                SELECT code, T, S_temp, RS, right_side, tag_warm_to_hot,
+                SELECT code, T, S_temp, RS, VOL_score, right_side, tag_warm_to_hot,
                        solar_term, warm_to_hot_member_count, amount
                 FROM daily_l2
                 WHERE trade_date=? AND code IN (%s)
@@ -155,22 +155,25 @@ def render_l1_issue(
     lines.append("## L1 自身")
     row = conn.execute(
         """
-        SELECT T, RS, right_side, solar_term, tag_warm_to_hot,
+        SELECT T, RS, VOL_score, right_side, solar_term, tag_warm_to_hot,
                warm_to_hot_member_count, amount
         FROM daily_l1 WHERE trade_date=? AND code=?
         """,
         (td, l1_id),
     ).fetchone()
-    headers = ["T", "l1_id", "名称", "RS", "右侧", "节气", "温转热", "成分温转热", "成交额(亿)"]
+    headers = [
+        "T", "l1_id", "名称", "RS", "量", "右侧", "节气", "温转热", "成分温转热", "成交额(亿)",
+    ]
     if row is None:
-        cells = ["", l1_id, name_zh, "", "", "", "", "", ""]
+        cells = ["", l1_id, name_zh, "", "", "", "", "", "", ""]
     else:
-        t, rs, right, solar, tag, wcount, amt = row
+        t, rs, vol, right, solar, tag, wcount, amt = row
         cells = [
             "" if t is None else t,
             l1_id,
             name_zh,
             "" if rs is None else rs,
+            "" if vol is None else vol,
             "" if right is None else right,
             "" if solar is None else solar,
             "" if tag is None else tag,
@@ -183,22 +186,26 @@ def render_l1_issue(
     lines.append("## 行业（L2）扫描")
     lines.extend(
         _md_table(
-            ["T", "代码", "名称", "RS", "右侧", "节气", "温转热", "成分温转热", "成交额(亿)"],
+            ["T", "代码", "名称", "RS", "量", "右侧", "节气", "温转热", "成分温转热", "成交额(亿)"],
             [
                 (
                     r[1],
                     r[0],
                     l2_names.get(str(r[0]), ""),
                     r[3],
-                    r[4],
-                    r[6],
+                    r[4],  # VOL_score — baskets null this slice
                     r[5],
                     r[7],
-                    _fmt_amount_yi(r[8]),
+                    r[6],
+                    r[8],
+                    _fmt_amount_yi(r[9]),
                 )
                 for r in l2_rows
             ],
         )
+    )
+    lines.append(
+        "注：L2/L1「量」本 slice 为空——篮子 VOL 后放（避历史换手序列成本）。"
     )
     lines.append("")
 
@@ -248,10 +255,12 @@ def render_l1_issue(
 
     right = conn.execute(
         """
-        SELECT ts_code, T, RS, solar_term, right_side_days_trading, amount
+        SELECT ts_code, T, RS, VOL_score, solar_term, right_side_days_trading, amount
         FROM daily_stock
         WHERE trade_date=? AND l1_id=? AND IFNULL(right_side,0)=1
-        ORDER BY IFNULL(RS, -1e99) DESC, IFNULL(amount,0) DESC
+        ORDER BY IFNULL(RS, -1e99) DESC,
+                 IFNULL(VOL_score, -1e99) DESC,
+                 IFNULL(amount,0) DESC
         LIMIT ?
         """,
         (td, l1_id, top_n),
@@ -259,9 +268,18 @@ def render_l1_issue(
     lines.append("## 右侧存续 Top（RS 高）")
     lines.extend(
         _md_table(
-            ["ts_code", "名称", "T", "RS", "节气", "交易日天数", "成交额(亿)"],
+            ["ts_code", "名称", "T", "RS", "量", "节气", "交易日天数", "成交额(亿)"],
             [
-                (r[0], stock_names.get(str(r[0]), ""), r[1], r[2], r[3], r[4], _fmt_amount_yi(r[5]))
+                (
+                    r[0],
+                    stock_names.get(str(r[0]), ""),
+                    r[1],
+                    r[2],
+                    r[3],
+                    r[4],
+                    r[5],
+                    _fmt_amount_yi(r[6]),
+                )
                 for r in right
             ],
         )
