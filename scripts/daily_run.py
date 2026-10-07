@@ -39,7 +39,7 @@ from scripts.metrics.aggregate import (
     aggregate_l1,
     taxonomy_for_stock,
 )
-from scripts.metrics.l2_synth import synthesize_l2_bars
+from scripts.metrics.l2_synth import synthesize_basket_bars
 from scripts.metrics.params import MetricsParams, load_params
 from scripts.metrics.pipeline import replay_from_ohlc
 
@@ -228,7 +228,7 @@ def _snap_to_daily_stock(ts_code: str, snap: dict) -> dict:
     }
 
 
-def _l2_asof_row(
+def _basket_asof_row(
     code: str,
     members: Sequence[str],
     stock_rows: Sequence[Mapping],
@@ -237,24 +237,23 @@ def _l2_asof_row(
     trade_date: str,
     members_total: int,
 ) -> dict:
-    """Build one daily_l2 row: engine fields from snap; count/amount from stocks."""
+    """Build one daily_l1/l2 row: engine from snap; count/amount via member_set."""
     member_set = set(members)
     warm_count = 0
     amount_sum = 0.0
     any_amount = False
     members_tradable = 0
     for r in stock_rows:
-        if r.get("sw_l2_code") == code:
+        ts = r.get("ts_code")
+        if ts in member_set:
             if r.get("tag_warm_to_hot"):
                 warm_count += 1
             amt = _sql_float(r.get("amount"))
             if amt is not None:
                 amount_sum += amt
                 any_amount = True
-        ts = r.get("ts_code")
-        if ts in member_set and not r.get("hard_frozen") and not r.get("_is_suspended"):
-            members_tradable += 1
-
+            if not r.get("hard_frozen") and not r.get("_is_suspended"):
+                members_tradable += 1
     if snap is None:
         t = None
         right_side = None
@@ -267,7 +266,6 @@ def _l2_asof_row(
         tag_hot = int(bool(snap.get("tag_warm_to_hot")))
         tag_flat = int(bool(snap.get("tag_warm_to_flat")))
         solar = snap.get("solar_term")
-
     return {
         "trade_date": trade_date,
         "code": code,
@@ -283,6 +281,9 @@ def _l2_asof_row(
         "warm_to_hot_member_count": warm_count,
         "amount": amount_sum if any_amount else None,
     }
+
+
+_l2_asof_row = _basket_asof_row  # compat for tests / call sites
 
 
 def _l2_trade_dates(bar_cache: Mapping[str, Sequence[Mapping]], D: dt.date) -> list[dt.date]:
@@ -368,7 +369,7 @@ def replay_metrics_cross_section(
             if not members:
                 continue
             member_bars = {ts: bar_cache[ts] for ts in members if bar_cache.get(ts)}
-            synth = synthesize_l2_bars(member_bars, trade_dates=dates)
+            synth = synthesize_basket_bars(member_bars, trade_dates=dates)
             snap = None
             if synth:
                 snaps = replay_from_ohlc(params, synth, min_history=min_hist)
@@ -376,7 +377,7 @@ def replay_metrics_cross_section(
                 snap = asof[-1] if asof else None
             # NEVER append snap.event_records to events
             l2_rows.append(
-                _l2_asof_row(
+                _basket_asof_row(
                     code,
                     members,
                     stock_rows,

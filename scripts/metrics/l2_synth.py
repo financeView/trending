@@ -65,7 +65,7 @@ def _index_bars(
     return idx
 
 
-def synthesize_l2_bars(
+def synthesize_basket_bars(
     member_bars_by_ts: Mapping[str, Sequence[Mapping[str, Any]]],
     *,
     trade_dates: Sequence[date],
@@ -169,3 +169,6 @@ def synthesize_l2_bars(
         p_prev = p_t
 
     return out
+
+
+synthesize_l2_bars = synthesize_basket_bars
