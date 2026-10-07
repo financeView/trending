@@ -137,6 +137,7 @@ def test_last_ok_contiguous_stops_at_gap(tmp_path, monkeypatch):
 
 def test_queue_stops_and_resume_from_gap(tmp_path, monkeypatch):
     from scripts.common import calendar as cal
+    from scripts.common import db as dbmod
     from scripts.common.coverage import CoverageMetrics
     from scripts.daily_run import build_queue, process_day
 
@@ -158,34 +159,63 @@ def test_queue_stops_and_resume_from_gap(tmp_path, monkeypatch):
         limit_coverage_asof=0.9,
         mapped_sync_coverage=1.0,
     )
-    bad_asof = CoverageMetrics(
+    # hard partial via mapped_sync (not limit-only soft ok)
+    hard_partial = CoverageMetrics(
         bar_coverage=0.95,
         computable_coverage=0.6,
-        limit_coverage_asof=0.1,  # fails only when D==asof
-        mapped_sync_coverage=1.0,
+        limit_coverage_asof=0.9,
+        mapped_sync_coverage=0.5,
     )
 
     assert process_day(date(2024, 1, 5), asof, metrics=good) == "ok"
-    # history day with low limit still ok
-    assert process_day(date(2024, 1, 8), asof, metrics=bad_asof) == "ok"
+    assert process_day(date(2024, 1, 8), asof, metrics=good) == "ok"
+    assert process_day(date(2024, 1, 9), asof, metrics=good) == "ok"
 
-    # simulate asof partial then ensure later day not processed by stop rule
-    st = process_day(date(2024, 1, 10), asof, metrics=bad_asof)
+    st = process_day(asof, asof, metrics=hard_partial)
     assert st == "partial"
 
-    # resume: hole at asof
     q = build_queue(asof)
-    assert q[0] == date(2024, 1, 10)
-
-    # old bug pattern: even if a later ok were somehow present, last_ok stays before gap
-    from scripts.common import db as dbmod
+    assert q[0] == asof
 
     conn = dbmod.get_conn()
-    conn.execute(
-        "INSERT OR REPLACE INTO run_meta (trade_date, status) VALUES ('2024-01-09', 'ok')"
-    )
-    conn.commit()
-    # 01-08 ok, 01-09 ok, 01-10 partial → contiguous last_ok = 01-09
     assert dbmod.last_ok_trade_date(conn) == "2024-01-09"
     assert dbmod.first_unfinished_trade_date(conn) == "2024-01-10"
+    conn.close()
+
+
+def test_asof_soft_limit_advances_last_ok(tmp_path, monkeypatch):
+    from scripts.common import calendar as cal
+    from scripts.common import db as dbmod
+    from scripts.common.coverage import CoverageMetrics
+    from scripts.daily_run import process_day
+
+    monkeypatch.setenv("TREND_DB", str(tmp_path / "trend.db"))
+    uni = tmp_path / "uni.yaml"
+    uni.write_text(
+        "map_version: p05-v1\nmembers:\n  - 000001.SZ\nquarantine: []\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UNIVERSE_YAML", str(uni))
+    cal.clear_trade_date_cache()
+    cal.load_trade_dates_from_list(
+        ["2024-01-05", "2024-01-08", "2024-01-09", "2024-01-10"]
+    )
+    asof = date(2024, 1, 10)
+    soft_limit = CoverageMetrics(
+        bar_coverage=0.95,
+        computable_coverage=0.6,
+        limit_coverage_asof=0.1,
+        mapped_sync_coverage=1.0,
+    )
+    assert process_day(date(2024, 1, 5), asof, metrics=soft_limit) == "ok"
+    assert process_day(date(2024, 1, 8), asof, metrics=soft_limit) == "ok"
+    assert process_day(date(2024, 1, 9), asof, metrics=soft_limit) == "ok"
+    assert process_day(asof, asof, metrics=soft_limit) == "ok"
+
+    conn = dbmod.get_conn()
+    assert dbmod.last_ok_trade_date(conn) == asof.isoformat()
+    warn = conn.execute(
+        "SELECT warn FROM run_meta WHERE trade_date=?", (asof.isoformat(),)
+    ).fetchone()[0]
+    assert "limit_coverage" in (warn or "")
     conn.close()

@@ -161,7 +161,8 @@ def test_synthetic_bars_write_nonnull_T(tmp_path, monkeypatch):
     tconn.close()
 
 
-def test_asof_low_limit_run_meta_partial(tmp_path, monkeypatch):
+def test_asof_low_limit_run_meta_ok_with_warn(tmp_path, monkeypatch):
+    from scripts.common import db as dbmod
     from scripts.daily_run import process_day
 
     bars_path = _patch_run(tmp_path, monkeypatch, ["000001.SZ"], short_metrics=False)
@@ -173,13 +174,16 @@ def test_asof_low_limit_run_meta_partial(tmp_path, monkeypatch):
     conn.close()
 
     st = process_day(D, D, bars_path=bars_path)
-    assert st == "partial"
+    assert st == "ok"
     tconn = get_conn()
-    status, warn = tconn.execute(
-        "SELECT status, warn FROM run_meta WHERE trade_date=?", (D.isoformat(),)
+    status, warn, ver = tconn.execute(
+        "SELECT status, warn, ok_predicate_version FROM run_meta WHERE trade_date=?",
+        (D.isoformat(),),
     ).fetchone()
-    assert status == "partial"
-    assert "limit_coverage" in warn
+    assert status == "ok"
+    assert "limit_coverage" in (warn or "")
+    assert ver == "v1.2"
+    assert dbmod.last_ok_trade_date(tconn) == D.isoformat()
     tconn.close()
 
 

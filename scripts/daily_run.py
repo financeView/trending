@@ -451,7 +451,11 @@ def process_day(
                 "started_at": started,
                 "finished_at": finished,
                 "status": decision.status,
-                "warn": decision.reason if not decision.ok else "",
+                "warn": (
+                    decision.reason
+                    if decision.reason and decision.reason != "passed"
+                    else ""
+                ),
             }
         ],
     )

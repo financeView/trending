@@ -11,6 +11,7 @@ from scripts.common.bars import (
     bars_conn,
 )
 from scripts.common.coverage import compute_coverage_from_bars, evaluate_ok
+from scripts.common.db import get_conn
 from scripts.common.universe import members_tradable
 
 
@@ -205,7 +206,13 @@ def test_process_day_uses_real_coverage(tmp_path, monkeypatch):
     bconn.commit()
     bconn.close()
     st2 = process_day(td, td, bars_path=bars_path)
-    assert st2 == "partial"
+    assert st2 == "ok"
+    tconn = get_conn()
+    warn = tconn.execute(
+        "SELECT warn FROM run_meta WHERE trade_date=?", (td.isoformat(),)
+    ).fetchone()[0]
+    tconn.close()
+    assert "limit_coverage" in (warn or "")
 
 
 def test_stub_coverage_flag(tmp_path, monkeypatch):
