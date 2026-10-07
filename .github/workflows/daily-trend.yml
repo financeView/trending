@@ -114,7 +114,13 @@ jobs:
       - name: live_shadow
         if: ${{ success() && steps.sync.outputs.sync_complete == 'true' && steps.sync.outputs.run_deferred != 'true' }}
         run: |
-          python scripts/eval/live_shadow_step.py --from-heartbeat
+          DATE="${{ github.event.inputs.date }}"
+          ONLY="${{ github.event.inputs.only_date }}"
+          if [ "$ONLY" = "true" ] && [ -n "$DATE" ]; then
+            python scripts/eval/live_shadow_step.py --asof "$DATE"
+          else
+            python scripts/eval/live_shadow_step.py --from-heartbeat
+          fi
 
       - name: Commit trend.db + heartbeat
         if: ${{ success() && steps.sync.outputs.sync_complete == 'true' && steps.sync.outputs.run_deferred != 'true' }}

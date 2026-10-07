@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 _GATE = (
@@ -36,3 +37,26 @@ def test_actions_live_shadow_before_single_db_commit():
     assert "--from-heartbeat" in issues_chunk
     assert 'ONLY" = "true"' in issues_chunk
     assert "--date" in issues_chunk
+
+
+def test_workflow_only_date_shadow_uses_asof_not_heartbeat():
+    text = Path(".github/workflows/daily-trend.yml").read_text(encoding="utf-8")
+    m = re.search(
+        r"- name: live_shadow\n.*?run: \|(.*?)(?=\n      - name:|\n\njobs:|\Z)",
+        text,
+        re.S,
+    )
+    assert m, "live_shadow step missing"
+    block = m.group(1)
+    # only_date branch must pin asof
+    assert 'live_shadow_step.py --asof "$DATE"' in block or \
+           "live_shadow_step.py --asof \"$DATE\"" in block
+    # Extract the then-branch between ONLY=true and else
+    then = re.search(
+        r'if \[ "\$ONLY" = "true" \].*?\n(.*?)else\n',
+        block,
+        re.S,
+    )
+    assert then, "only_date if-branch missing in live_shadow"
+    assert "--from-heartbeat" not in then.group(1)
+    assert "--from-heartbeat" in block  # else/cron path still present
