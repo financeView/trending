@@ -1,12 +1,10 @@
-"""L2/L1 basket rows (P0.5 interim).
+"""L2/L1 basket helpers (closure, weights, taxonomy).
 
 Universe may be a stub map. Weights: float_mv null→1.0 then normalize.
-L1 = member closure once (union of mapped L2 stocks), not nested L2 series.
+L1 members = member closure once (union of mapped L2 stocks), not nested L2 series.
 
-**P1 deferral (metrics §10 / C5):** MVP uses weighted majority ``T`` / tag-any /
-heaviest ``solar_term`` over member stocks. Same-engine path (synthesize member
-returns → OHLC series → shared T/FSM/solar pure functions) is **not** implemented
-here; do not treat basket ``T``/``right_side`` as engine-equivalent until P1.
+Production L1 same-engine (synth OHLC → shared FSM) lives in ``daily_run``.
+``aggregate_l1`` remains for legacy tests; it is not the ``daily_l1`` write path.
 """
 from __future__ import annotations
 

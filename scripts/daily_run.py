@@ -36,7 +36,8 @@ from scripts.common.db import (
 from scripts.common.universe import l2_members_map, load_map_version, load_universe_codes
 from scripts.metrics.aggregate import (
     MEMBER_SET,
-    aggregate_l1,
+    aggregate_l1,  # imported so tests can spy; not used for daily_l1 writes
+    stub_l1_members,
     taxonomy_for_stock,
 )
 from scripts.metrics.l2_synth import synthesize_basket_bars
@@ -350,13 +351,6 @@ def replay_metrics_cross_section(
                         "detail": rec.get("detail") or {},
                     }
                 )
-        tradable = {
-            r["ts_code"]
-            for r in stock_rows
-            if not r.get("hard_frozen") and not r.get("_is_suspended")
-        }
-        tradable_rows = [r for r in stock_rows if r["ts_code"] in tradable]
-
         mapping = l2_members_map()
         for members in mapping.values():
             for ts in members:
@@ -387,11 +381,50 @@ def replay_metrics_cross_section(
                 )
             )
 
-        l1_rows = [
-            row
-            for row in aggregate_l1(tradable_rows, td)
-            if row.get("members_tradable")
-        ]
+        l1_groups = stub_l1_members()
+        dates_start = dates[0] if dates else None
+        cache_grew_earlier = False
+        for members in l1_groups.values():
+            for ts in members:
+                if ts not in bar_cache:
+                    loaded = _load_symbol_bars(bconn, ts, D)
+                    bar_cache[ts] = loaded
+                    for r in loaded:
+                        raw = r.get("trade_date")
+                        if raw is None:
+                            continue
+                        if isinstance(raw, dt.date):
+                            d = raw
+                        else:
+                            d = dt.date.fromisoformat(str(raw)[:10])
+                        if dates_start is None or d < dates_start:
+                            cache_grew_earlier = True
+                            break
+        if cache_grew_earlier:
+            dates = _l2_trade_dates(bar_cache, D)
+
+        l1_rows: list[dict] = []
+        for l1_id, members in l1_groups.items():
+            if not members:
+                continue
+            member_bars = {ts: bar_cache[ts] for ts in members if bar_cache.get(ts)}
+            synth = synthesize_basket_bars(member_bars, trade_dates=dates)
+            snap = None
+            if synth:
+                snaps = replay_from_ohlc(params, synth, min_history=min_hist)
+                asof = [s for s in snaps if s.get("trade_date") == td]
+                snap = asof[-1] if asof else None
+            # NEVER append snap.event_records to events
+            l1_rows.append(
+                _basket_asof_row(
+                    l1_id,
+                    members,
+                    stock_rows,
+                    snap,
+                    trade_date=td,
+                    members_total=len(members),
+                )
+            )
         return stock_rows, l2_rows, l1_rows, events
     finally:
         bconn.close()
