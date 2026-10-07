@@ -1,7 +1,7 @@
 # Spec C：价格 RS + S_temp/C1 + 旁路 VOL_score
 
 **日期：** 2026-10-07  
-**状态：** 设计已审；plan [`2026-10-07-rs-c1-vol.md`](../plans/2026-10-07-rs-c1-vol.md)  
+**状态：** 已落地；plan [`2026-10-07-rs-c1-vol.md`](../plans/2026-10-07-rs-c1-vol.md)  
 **范围：** metrics §9 价格相对强度（三类 peer）+ §5.4 `S_temp` + §14 `test_C1` / Spearman 夹具门禁 + 个股旁路量分 `VOL_score`；digest §1.3 真 RS 排序与「量」列。  
 **后放（禁止混入本 slice）：** 量能线性/乘法混入 `RS`（否决的「量价混合 RS v1.1」）；L2/L1 非 null `VOL_score`（见 §2.3 原因）；实盘 asof 日 Spearman；Spec D 全 A / YAML 日拉；Spec E `board_calc` / 硬冻旗；C2 开仓夹具扩面；L2/L1 全历史 replay / `engine_state`；改温度决策树。
 

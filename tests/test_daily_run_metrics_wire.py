@@ -136,7 +136,8 @@ def test_synthetic_bars_write_nonnull_T(tmp_path, monkeypatch):
     init_schema(tconn)
     row = tconn.execute(
         """
-        SELECT T, hard_frozen, close_qfq, stage_score, stage_score_raw, param_version
+        SELECT T, hard_frozen, close_qfq, stage_score, stage_score_raw,
+               daily_stock.param_version
         FROM daily_stock JOIN run_meta USING (trade_date)
         WHERE ts_code='000001.SZ' AND trade_date=?
         """,

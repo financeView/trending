@@ -2,8 +2,8 @@
 
 > 日期：2026-10-06  
 > 已落地：P0 日更骨架 → P0.5 个股 FSM → P1 L1/Radar Issues → P2 纸面影子 → 申万 YAML 映射宇宙 → 2026-09-30 Actions 实跑（`run_meta=partial`，见 P1 缺口）。  
-> **§0 已落地**（L2 同引擎 + digest 名称/亿元）。**§2.1 已落地**（L1 同引擎 — Spec B）。  
-> **落地顺序（已钉）：A → B → C → D → E**。**A、B 已落地**；**Spec C plan 就绪**（§2.2 价格 RS + C1/Spearman 夹具 + 旁路 VOL）。
+> **§0 已落地**（L2 同引擎 + digest 名称/亿元）。**§2.1 已落地**（L1 同引擎 — Spec B）。**§1.3 / §2.2 已落地**（价格 RS + S_temp/C1 + 个股旁路 VOL — Spec C）。  
+> **落地顺序（已钉）：A → B → C → D → E**。**A、B、C 已落地**；**Next = Spec D**（§2.3 未映射全 A + §2.4 YAML 日拉）。
 
 ---
 
@@ -13,7 +13,7 @@
 |------|------|------|
 | **A. Ops 日更止血** | §1.1 limit 软门禁；§1.2 heartbeat / only_date shadow | **已完成** — [`spec`](docs/superpowers/specs/2026-10-07-ops-daily-run-hemostasis-design.md) / [`plan`](docs/superpowers/plans/2026-10-07-ops-daily-run-hemostasis.md) |
 | **B. L1 同引擎** | §2.1（replay 成本后放） | **已完成** — [`spec`](docs/superpowers/specs/2026-10-07-l1-same-engine-design.md) / [`plan`](docs/superpowers/plans/2026-10-07-l1-same-engine.md) |
-| **C. RS + C1** | §2.2 + §1.3 表头/排序与真 RS 同发（旁路 VOL；量不进 RS） | **plan 就绪** — [`spec`](docs/superpowers/specs/2026-10-07-rs-c1-vol-design.md) / [`plan`](docs/superpowers/plans/2026-10-07-rs-c1-vol.md) |
+| **C. RS + C1** | §2.2 + §1.3 表头/排序与真 RS 同发（旁路 VOL；量不进 RS） | **已完成** — [`spec`](docs/superpowers/specs/2026-10-07-rs-c1-vol-design.md) / [`plan`](docs/superpowers/plans/2026-10-07-rs-c1-vol.md) |
 | **D. 宇宙扩张** | §2.3 未映射全 A + §2.4 YAML 日拉 | 后放 |
 | **E. 成交与冻旗** | §2.5 board_calc / limit_up_unfillable + §2.6 显式硬冻 | 后放 |
 
@@ -83,10 +83,10 @@
 见 [`2026-10-07-ops-daily-run-hemostasis-design.md`](docs/superpowers/specs/2026-10-07-ops-daily-run-hemostasis-design.md) / plan。  
 `ok_predicate_version=v1.2`：asof limit 不足 → `ok`+warn、`last_ok` 前移；heartbeat 读嵌套 `daily_run`；`only_date` shadow 钉 `--asof`。
 
-### 1.3 Issue 表 RS 全空
+### 1.3 ~~Issue 表 RS 全空~~（已完成 — Spec C）
 
-- `daily_* .RS` 列为 stub/null；「右侧存续 Top（RS 高）」实际在按空 RS + 成交额排。
-- 正式 RS 见 §2.2，不要在 §0 用成交额冒充 RS 而不改表头。
+- `daily_stock` / 篮子行写入真 RS + `S_temp`；个股 `VOL_score` 旁路已 ship；L2/L1 `VOL_score` 恒 null（篮子量分后放）。
+- digest「右侧存续 Top（RS 高）」按 RS → VOL → 成交额；Spec：[`2026-10-07-rs-c1-vol-design.md`](docs/superpowers/specs/2026-10-07-rs-c1-vol-design.md) / plan [`2026-10-07-rs-c1-vol.md`](docs/superpowers/plans/2026-10-07-rs-c1-vol.md)
 
 ---
 
@@ -97,11 +97,11 @@
 - Spec：[`2026-10-07-l1-same-engine-design.md`](docs/superpowers/specs/2026-10-07-l1-same-engine-design.md) / plan [`2026-10-07-l1-same-engine.md`](docs/superpowers/plans/2026-10-07-l1-same-engine.md)
 - 后放（CR）：L1 全历史 replay 成本 / `engine_state` 增量（与 L2 §0 后放同型）
 
-### 2.2 RS peer 宇宙 + Spearman / `test_C1`
+### 2.2 ~~RS peer 宇宙 + Spearman / `test_C1`~~（已完成 — Spec C）
 
-- metrics §9：`RS = percentile_rank(RS_raw among peer)`；`local_stock` / `local_l2` / `local_l1` 隔离；ST/停牌不进 stock peer。
-- `test_RS_peer_universes`、`test_RS_eligibility_tradable`、`test_C1_temp_feature_allowlist`、Spearman(`rank(T)`, `S_temp`) ≥ 0.55 均未做。
-- 量价混合 RS v1.1 可跟本条。README 已列为 still out of ship。
+- Spec：[`2026-10-07-rs-c1-vol-design.md`](docs/superpowers/specs/2026-10-07-rs-c1-vol-design.md) / plan [`2026-10-07-rs-c1-vol.md`](docs/superpowers/plans/2026-10-07-rs-c1-vol.md)
+- 纯价格 RS + 闭合分位；peer 隔离与 eligibility 测试；C1 allowlist；CI Spearman 金标+合成（实盘抽样日后放）。
+- 旁路 `VOL_score`（个股）已 ship；**不做**量价混合进 RS；篮子非 null VOL **后放**（Spec C §2.3）。
 
 ### 2.3 未映射全 A sync
 
@@ -170,7 +170,7 @@
 | L1 同引擎 | §2.1 | 否 |
 | 假日 asof / limit → partial | §1.1 | 否 |
 | only_date heartbeat/Issues | §1.2 | 否 |
-| RS / Spearman / C1 | §2.2 | 否 |
+| RS / Spearman / C1 | §2.2 | 否（Spec C 已落地） |
 | 未映射全 A、YAML 日拉 | §2.3–2.4 | 否 |
 | board_calc、硬冻旗、止盈 tag | §2.5–2.7 | 否 |
 | 因果 H、WF、P3、实盘 M | §3 | 否 |
