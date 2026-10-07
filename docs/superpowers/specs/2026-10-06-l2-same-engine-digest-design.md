@@ -175,7 +175,7 @@ YAML 候选成员：`l2_members_map()` 中该 L2 的 `ts_code` 列表（taxonomy
 `ts_code` 仍是 `300016.SZ`；`名称` 新列。  
 **今日温转平 / 结束右侧：** `| ts_code | 名称 | event | T | detail |`
 
-Radar「按 L1」表头不变。
+Radar「按 L1」表头：本 slice 当时不变；**已被 Spec B 改为「个股温转热」+ 脚注**（见 [`2026-10-07-l1-same-engine-design.md`](2026-10-07-l1-same-engine-design.md) §5.2）。
 
 ---
 
@@ -219,3 +219,4 @@ Radar「按 L1」表头不变。
 |------|------|
 | 2026-10-06 | §0 落地 |
 | 2026-10-07 | Spec B CR：密度/`amount` 真源改为 YAML 成员集；L1 interim/禁填句改为指向 Spec B |
+| 2026-10-07 | Spec B 实现 CR：§5 Radar 表头句改指 Spec B「个股温转热」 |

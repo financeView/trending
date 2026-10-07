@@ -150,6 +150,10 @@ def test_l1_self_section_empty_when_no_daily_l1_row(tmp_path, monkeypatch):
     head = md.split("## 行业")[0]
     assert "成分温转热" in head
     assert "同引擎" not in head
+    # no daily_l1 → engine cells empty (not fabricated 0 / 凉)
+    assert "|  | l1_health | 医药健康 |  |  |  |  |  |  |" in head or (
+        "|  | l1_health | 医药健康 |  |  |  |  |  |" in head
+    )
     conn.close()
 
 

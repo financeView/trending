@@ -135,12 +135,12 @@ def test_l1_synth_uses_member_closure_stock_bars_not_daily_l2(tmp_path, monkeypa
     _seed_uptrend(conn, "000001.SZ", dates, start_px=10.0)
     conn.close()
 
-    captured = {}
+    calls: list[list[str]] = []
     real_synth = dr.synthesize_basket_bars
 
     def spy_synth(member_bars, *, trade_dates):
-        captured["keys"] = sorted(member_bars.keys())
-        captured["dates"] = list(trade_dates)
+        keys = sorted(member_bars.keys())
+        calls.append(keys)
         for ts, rows in member_bars.items():
             assert rows, ts
             assert "close_qfq" in rows[0]
@@ -148,7 +148,6 @@ def test_l1_synth_uses_member_closure_stock_bars_not_daily_l2(tmp_path, monkeypa
         return real_synth(member_bars, trade_dates=trade_dates)
 
     monkeypatch.setattr(dr, "synthesize_basket_bars", spy_synth)
-    # if still imported as synthesize_l2_bars alias in module, patch that too
     if hasattr(dr, "synthesize_l2_bars"):
         monkeypatch.setattr(dr, "synthesize_l2_bars", spy_synth)
 
@@ -160,7 +159,10 @@ def test_l1_synth_uses_member_closure_stock_bars_not_daily_l2(tmp_path, monkeypa
     )
     assert any(r["code"] == "l1_test" for r in l1_rows)
     expected = sorted(member_closure(["370100"], {"370100": ["000001.SZ"]}))
-    assert captured["keys"] == expected
+    # L2 then L1 both synth; last-call-only would green if L1 skipped — require ≥2.
+    assert len(calls) >= 2, calls
+    assert calls[-1] == expected
+    assert expected in calls
 
 
 def test_l1_helper_members_tradable_zero_still_has_keys():

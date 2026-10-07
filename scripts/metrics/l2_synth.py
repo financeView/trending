@@ -1,4 +1,7 @@
-"""Pure L2 OHLC synthesis via float_mv-weighted chain returns + HL-ratio proxy."""
+"""Basket OHLC synthesis (L2/L1) via float_mv-weighted chain returns + HL-ratio proxy.
+
+``synthesize_basket_bars`` is level-agnostic; ``synthesize_l2_bars`` is a thin alias.
+"""
 from __future__ import annotations
 
 import math
