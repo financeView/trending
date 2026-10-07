@@ -3,7 +3,7 @@
 > 日期：2026-10-06  
 > 已落地：P0 日更骨架 → P0.5 个股 FSM → P1 L1/Radar Issues → P2 纸面影子 → 申万 YAML 映射宇宙 → 2026-09-30 Actions 实跑（`run_meta=partial`，见 P1 缺口）。  
 > **§0 已落地**（L2 同引擎 + digest 名称/亿元）。  
-> **落地顺序（已钉）：A → B → C → D → E**（见文末「切片路线」）。当前只推进 **A**。
+> **落地顺序（已钉）：A → B → C → D → E**。**A 已落地**；下一刀 **B**。
 
 ---
 
@@ -11,8 +11,8 @@
 
 | Spec | 范围 | 状态 |
 |------|------|------|
-| **A. Ops 日更止血** | §1.1 limit 软门禁；§1.2 heartbeat / only_date shadow | **进行中** — spec [`…/2026-10-07-ops-daily-run-hemostasis-design.md`](docs/superpowers/specs/2026-10-07-ops-daily-run-hemostasis-design.md)；plan [`…/2026-10-07-ops-daily-run-hemostasis.md`](docs/superpowers/plans/2026-10-07-ops-daily-run-hemostasis.md) |
-| **B. L1 同引擎** | §2.1 +（可选）L2 全历史 replay 成本/增量状态 | 后放 |
+| **A. Ops 日更止血** | §1.1 limit 软门禁；§1.2 heartbeat / only_date shadow | **已完成** — [`spec`](docs/superpowers/specs/2026-10-07-ops-daily-run-hemostasis-design.md) / [`plan`](docs/superpowers/plans/2026-10-07-ops-daily-run-hemostasis.md) |
+| **B. L1 同引擎** | §2.1 +（可选）L2 全历史 replay 成本/增量状态 | **下一份** |
 | **C. RS + C1** | §2.2 + §1.3 表头/排序与真 RS 同发 | 后放 |
 | **D. 宇宙扩张** | §2.3 未映射全 A + §2.4 YAML 日拉 | 后放 |
 | **E. 成交与冻旗** | §2.5 board_calc / limit_up_unfillable + §2.6 显式硬冻 | 后放 |
@@ -78,10 +78,10 @@
 
 ## 1. 高优先级（本 spec 之后、仍影响已上线日更）
 
-### 1.1–1.2 → Spec A（进行中）
+### 1.1–1.2 → Spec A（已完成）
 
-见 [`2026-10-07-ops-daily-run-hemostasis-design.md`](docs/superpowers/specs/2026-10-07-ops-daily-run-hemostasis-design.md)。  
-实证：Actions `37500945431` clist 失败 → 0 行 limit → 硬门禁 partial；heartbeat 嵌套写/扁平读 → shadow `no_date`。Issues `only_date --date` 已对，shadow 未钉日。
+见 [`2026-10-07-ops-daily-run-hemostasis-design.md`](docs/superpowers/specs/2026-10-07-ops-daily-run-hemostasis-design.md) / plan。  
+`ok_predicate_version=v1.2`：asof limit 不足 → `ok`+warn、`last_ok` 前移；heartbeat 读嵌套 `daily_run`；`only_date` shadow 钉 `--asof`。
 
 ### 1.3 Issue 表 RS 全空
 

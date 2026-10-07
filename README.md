@@ -57,4 +57,6 @@ python scripts/eval/paper_book.py --from 2024-01-05 --to 2024-01-08 \
 
 **L2 same-engine (shipped):** synthetic float_mv chain OHLC → same FSM as stocks; industry `tag_warm_to_hot` split from `warm_to_hot_member_count`; Issue digests add 名称 columns and 成交额(亿) (3dp). L1 baskets still interim aggregate.
 
+**Ops A (shipped):** asof limit soft-ok (`ok`+warn, `last_ok` advances); nested heartbeat readers; Actions `only_date` pins `live_shadow --asof`.
+
 **Still out of ship:** unmapped 全A sync, same-engine L1 (§10 C5), causal H / walk-forward gates, Spearman / `test_C1`.

@@ -1,7 +1,7 @@
 # Spec A：Ops 日更止血（limit 软门禁 + heartbeat / only_date）
 
 **日期：** 2026-10-07  
-**状态：** 已接受设计；plan [`2026-10-07-ops-daily-run-hemostasis.md`](../plans/2026-10-07-ops-daily-run-hemostasis.md)  
+**状态：** 已落地；plan [`2026-10-07-ops-daily-run-hemostasis.md`](../plans/2026-10-07-ops-daily-run-hemostasis.md)  
 **范围：**（1）`D == session_asof` 时限价不足 → `run_meta=ok`+`warn`，**`last_ok` 前移**；（2）统一 heartbeat 嵌套读写（含 catch-up `days` 与 skip）；（3）Actions `only_date` 时 shadow 钉交易日。  
 **后放（禁止混入）：** Spec B L1 同引擎；Spec C RS；Spec D 全 A / YAML 日拉；Spec E `board_calc` / 历史限价 vendor / 自动重拉 limit；L2 replay 性能。
 
