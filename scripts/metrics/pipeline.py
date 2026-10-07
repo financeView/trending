@@ -12,6 +12,7 @@ from scripts.metrics.fsm import EVENT_ENTER, EVENT_EXIT, RightSideFsm
 from scripts.metrics.hysteresis import Hysteresis
 from scripts.metrics.params import MetricsParams
 from scripts.metrics.rs_raw import compute_rs_raw
+from scripts.metrics.s_temp import compute_s_temp
 from scripts.metrics.solar import piecewise_linear_clamp, step_solar, SOLAR_TERMS_ASC, SolarState
 from scripts.metrics.temp_raw import decide_t_raw_from_features
 
@@ -194,11 +195,13 @@ def replay_from_ohlc(
         feat_row = feat.iloc[i] if i < len(feat) else {}
         feats = _feat_map(feat_row, close)
         t_raw = decide_t_raw_from_features(feats, params)
+        s_temp = compute_s_temp(feats, t_raw, params)
         hard = bool(int(bar.get("is_st") or 0))
         days.append(
             {
                 "trade_date": _as_trade_date(bar["trade_date"]),
                 "T_raw": t_raw,
+                "S_temp": s_temp,
                 "hard_frozen": hard,
                 "P": close,
                 "sigma_pctile": feats.get("sigma_pctile"),
@@ -225,4 +228,5 @@ def replay_from_ohlc(
         snap["hard_frozen"] = bool(day.get("hard_frozen"))
         snap["is_suspended"] = bool(day.get("is_suspended"))
         snap["RS_raw"] = rs_series[i] if i < len(rs_series) else None
+        snap["S_temp"] = day.get("S_temp")
     return snaps
