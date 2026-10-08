@@ -1,7 +1,7 @@
 # Spec D：宇宙扩张（YAML 日拉 + unmapped 可见）
 
 **日期：** 2026-10-08  
-**状态：** plan 就绪 — [`2026-10-08-universe-expansion.md`](../plans/2026-10-08-universe-expansion.md)  
+**状态：** 已落地；plan [`2026-10-08-universe-expansion.md`](../plans/2026-10-08-universe-expansion.md)  
 **范围：** todo §2.4 成分 YAML 每日 vendor 拉新（Actions 直推 main）+ §2.3 未映射**计数与 IPO 告警**（软门、**不做**树外 bars 预热）。  
 **后放（禁止混入本 slice）：** 树外票 `sync_bars` 预热（仍留 todo §2.3 一行遗留，**不**算 Spec D 做完就消失）；fetch 失败杀死日更；PR 审合后再用新宇宙；`unmapped_count>0` → `evaluate_ok` partial；Spec E `board_calc` / `limit_up_unfillable` / 显式硬冻；L2/L1 `engine_state`；改温度 / RS / peer 语义；北交所进树（本 slice **丢弃** BJ，收窄 SW YAML「丢弃或 quarantine」）。
 

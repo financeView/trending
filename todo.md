@@ -1,9 +1,9 @@
 # trending 待办（后放清单）
 
-> 日期：2026-10-06  
+> 日期：2026-10-08  
 > 已落地：P0 日更骨架 → P0.5 个股 FSM → P1 L1/Radar Issues → P2 纸面影子 → 申万 YAML 映射宇宙 → 2026-09-30 Actions 实跑（`run_meta=partial`，见 P1 缺口）。  
-> **§0 已落地**（L2 同引擎 + digest 名称/亿元）。**§2.1 已落地**（L1 同引擎 — Spec B）。**§1.3 / §2.2 已落地**（价格 RS + S_temp/C1 + 个股旁路 VOL — Spec C）。  
-> **落地顺序（已钉）：A → B → C → D → E**。**A、B、C 已落地**；**Next = Spec D**（§2.3 未映射全 A + §2.4 YAML 日拉）。
+> **§0 已落地**（L2 同引擎 + digest 名称/亿元）。**§2.1 已落地**（L1 同引擎 — Spec B）。**§1.3 / §2.2 已落地**（价格 RS + S_temp/C1 + 个股旁路 VOL — Spec C）。**§2.3–2.4 已落地**（YAML 日拉 + unmapped 计数/IPO 告警 — Spec D）。  
+> **落地顺序（已钉）：A → B → C → D → E**。**A、B、C、D 已落地**；**Next = Spec E**（§2.5 board_calc / limit_up_unfillable + §2.6 显式硬冻）。
 
 ---
 
@@ -14,7 +14,7 @@
 | **A. Ops 日更止血** | §1.1 limit 软门禁；§1.2 heartbeat / only_date shadow | **已完成** — [`spec`](docs/superpowers/specs/2026-10-07-ops-daily-run-hemostasis-design.md) / [`plan`](docs/superpowers/plans/2026-10-07-ops-daily-run-hemostasis.md) |
 | **B. L1 同引擎** | §2.1（replay 成本后放） | **已完成** — [`spec`](docs/superpowers/specs/2026-10-07-l1-same-engine-design.md) / [`plan`](docs/superpowers/plans/2026-10-07-l1-same-engine.md) |
 | **C. RS + C1** | §2.2 + §1.3 表头/排序与真 RS 同发（旁路 VOL；量不进 RS） | **已完成** — [`spec`](docs/superpowers/specs/2026-10-07-rs-c1-vol-design.md) / [`plan`](docs/superpowers/plans/2026-10-07-rs-c1-vol.md) |
-| **D. 宇宙扩张** | §2.3 未映射全 A + §2.4 YAML 日拉 | 后放 |
+| **D. 宇宙扩张** | §2.3 unmapped 计数/IPO 告警 + §2.4 YAML 日拉（**不含**树外 bars 预热） | **已完成** — [`spec`](docs/superpowers/specs/2026-10-08-universe-expansion-design.md) / [`plan`](docs/superpowers/plans/2026-10-08-universe-expansion.md) |
 | **E. 成交与冻旗** | §2.5 board_calc / limit_up_unfillable + §2.6 显式硬冻 | 后放 |
 
 §2.7–2.8、§3.* 仍不进 A–E。
@@ -103,15 +103,14 @@
 - 纯价格 RS + 闭合分位；peer 隔离与 eligibility 测试；C1 allowlist；CI Spearman 金标+合成（实盘抽样日后放）。
 - 旁路 `VOL_score`（个股）已 ship；**不做**量价混合进 RS；篮子非 null VOL **后放**（Spec C §2.3）。
 
-### 2.3 未映射全 A sync
+### 2.3 ~~未映射计数 / IPO 告警~~（已完成 — Spec D）
 
-- 当前 U = YAML 已映射 SH/SZ。quarantine、无二级、北交所不进树、不进全量 bars。
-- taxonomy：`unmapped_count` 生产门禁、IPO 三日未归属告警未接。
-- **不要**把 U 缩成「有 bar 的子集」来刷 coverage。
+- Spec：[`2026-10-08-universe-expansion-design.md`](docs/superpowers/specs/2026-10-08-universe-expansion-design.md) / plan [`2026-10-08-universe-expansion.md`](docs/superpowers/plans/2026-10-08-universe-expansion.md)
+- **遗留（后放）：** 树外 bars 预热仍后放（Spec D 不做 `sync_bars` 预热）。
 
-### 2.4 成分 YAML 每日 vendor 拉新
+### 2.4 ~~成分 YAML 每日 vendor 拉新~~（已完成 — Spec D）
 
-- `stock_sw_l2.yaml` 是 check-in 快照；fetch 脚本一次性归一 §4 码。cron 不改映射。后续 `map_version` bump。
+- Spec / plan 同上（Actions taxonomy 步：fetch + 语义 diff + `map_version` bump + push）。
 
 ### 2.5 `board_calc_v1` 与 `limit_up_unfillable`
 

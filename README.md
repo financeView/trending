@@ -63,4 +63,4 @@ python scripts/eval/paper_book.py --from 2024-01-05 --to 2024-01-08 \
 
 **Ops A (shipped):** asof limit soft-ok (`ok`+warn, `last_ok` advances); nested heartbeat readers; Actions `only_date` pins `live_shadow --asof`.
 
-**Still out of ship:** unmapped 全A sync (Spec D), causal H / walk-forward gates, L2/L1 replay perf / `engine_state`, basket non-null VOL.
+**Still out of ship:** tree-out bars warmup (deferred), causal H / walk-forward gates, L2/L1 replay perf / `engine_state`, basket non-null VOL.
