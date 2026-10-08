@@ -8,6 +8,8 @@ import re
 import sys
 from typing import Iterable, Optional
 
+import yaml
+
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
@@ -58,17 +60,30 @@ def normalize_member(
     return {"ts_code": ts, "sw_l2_code": mapped}
 
 
-def dump_yaml(vendor_rows: Iterable[dict], map_version: str = "sw2021-v1") -> str:
-    allowed = section4_codes()
-    names = _l2_name_to_code()
+def _fmt_name_zh(name: str) -> str:
+    if any(ch in name for ch in (":", "#", "{", "}", "[", "]", ",", '"', "'", "\\")):
+        return yaml.dump(name, allow_unicode=True, default_style='"').strip()
+    return name
+
+
+def dump_yaml(
+    vendor_rows: Iterable[dict],
+    *,
+    map_version: str = "sw2021-v1",
+    prior_names: Optional[dict[str, str]] = None,
+    allowed: Optional[set[str]] = None,
+) -> str:
+    allowed_set = allowed if allowed is not None else section4_codes()
+    l2_names = _l2_name_to_code()
+    prior = prior_names or {}
     members = []
     for row in vendor_rows:
         norm = normalize_member(
             row.get("ts_code") or "",
             str(row.get("industry_code") or ""),
             str(row.get("industry_name") or ""),
-            allowed=allowed,
-            names=names,
+            allowed=allowed_set,
+            names=l2_names,
         )
         if norm is None:
             continue
@@ -85,7 +100,14 @@ def dump_yaml(vendor_rows: Iterable[dict], map_version: str = "sw2021-v1") -> st
     for m in members:
         code = m["sw_l2_code"]
         code_s = "null" if not code else "'%s'" % code
-        lines.append("  - {ts_code: %s, sw_l2_code: %s}" % (m["ts_code"], code_s))
+        name = prior.get(m["ts_code"])
+        if name not in (None, ""):
+            lines.append(
+                "  - {ts_code: %s, sw_l2_code: %s, name_zh: %s}"
+                % (m["ts_code"], code_s, _fmt_name_zh(str(name)))
+            )
+        else:
+            lines.append("  - {ts_code: %s, sw_l2_code: %s}" % (m["ts_code"], code_s))
     return "\n".join(lines) + "\n"
 
 
