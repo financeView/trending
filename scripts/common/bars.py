@@ -15,6 +15,7 @@ DEFAULT_BARS_DB = os.path.join(
 
 FLAG_SOURCE_BAOSTOCK = "baostock"
 LIMIT_SOURCE_EM = "em_f51f52"
+LIMIT_SOURCE_BOARD_CALC = "board_calc_v1"
 
 BARS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS bars (
@@ -28,6 +29,7 @@ CREATE TABLE IF NOT EXISTS bars (
   limit_up REAL, limit_down REAL,
   is_suspended INTEGER NOT NULL DEFAULT 0,
   is_st INTEGER NOT NULL DEFAULT 0,
+  hard_freeze_flag INTEGER NOT NULL DEFAULT 0,
   bar_source TEXT,
   flag_source TEXT,
   limit_source TEXT,
@@ -66,6 +68,24 @@ ON CONFLICT(ts_code, trade_date) DO UPDATE SET
   fetched_at=excluded.fetched_at
 """
 
+_BARS_ALTER_COLUMNS = (
+    ("hard_freeze_flag", "INTEGER NOT NULL DEFAULT 0"),
+)
+
+
+def ensure_bars_columns(conn: sqlite3.Connection) -> None:
+    """Idempotent ALTER for columns missing on restored bars.db caches."""
+    rows = conn.execute("PRAGMA table_info(bars)").fetchall()
+    if not rows:
+        return
+    existing = {r[1] for r in rows}
+    for name, decl in _BARS_ALTER_COLUMNS:
+        if name in existing:
+            continue
+        conn.execute("ALTER TABLE bars ADD COLUMN %s %s" % (name, decl))
+        existing.add(name)
+    conn.commit()
+
 
 def bars_conn(path: Optional[str] = None) -> sqlite3.Connection:
     p = path or DEFAULT_BARS_DB
@@ -73,7 +93,7 @@ def bars_conn(path: Optional[str] = None) -> sqlite3.Connection:
     conn = sqlite3.connect(p)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(BARS_SCHEMA)
-    conn.commit()
+    ensure_bars_columns(conn)
     return conn
 
 
