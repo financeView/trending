@@ -98,18 +98,32 @@ job metrics (timeout 360, needs: sync)
 
 Spec D / sw-yaml 文中「预算 200/300 + run_deferred」→ 改为指向本 Spec F。
 
-### 4.3 产物交接（bars）
+### 4.3 产物交接
+
+#### 4.3.1 bars（`data/cache`）
 
 | 机制 | 规则 |
 |------|------|
 | Cache path | `data/cache`（含 `bars.db` 等，与现一致） |
 | Cache key | `bars-${{ github.run_id }}`（两 job **相同**） |
-| restore-keys | `bars-`（冷启动） |
+| restore-keys | `bars-`（**仅 sync job** 冷启动用） |
 | metrics | **必须**在跑 daily_run 前 restore；禁止假定 runner 磁盘上有 sync 的本地文件 |
 
-taxonomy 若 push 了 YAML：metrics job **重新 checkout**（默认）即可读到 remote；`TAXONOMY_HEAD_SHA` / `TAXONOMY_FETCH` 经 **job outputs** 从 sync 传入 metrics（与现 env 同名）。
+**metrics cache 硬门闩：** `actions/cache` restore 后须确认 **精确 key 命中**（`cache-hit == true`）。若 `sync_complete=true` 但精确 key **未命中**（含仅命中 `restore-keys` 旧缓存）→ **fail metrics**（`::error::`），禁止用过期 bars 算截面。  
+sync job 仍可用 `restore-keys: bars-` 加速增量拉取。
 
-`trend.db` / heartbeat：**仅 metrics job** commit（保持「一次 commit」）。
+#### 4.3.2 Git 树（taxonomy / heartbeat / first_seen）
+
+Spec D 的 taxonomy 步可能 **push** `config/taxonomy/*.yaml`、`data/heartbeat.json`、`data/unmapped_first_seen.json` 到 `main`。  
+`daily_run` 读工作区 YAML / first_seen，且 `run_meta.git_sha` 须反映 taxonomy push 后的 tip（Spec D）。
+
+**禁止** metrics 使用默认 `actions/checkout`（钉 **workflow 触发 SHA**）——会读到 sync push **之前** 的树。
+
+**钉死：** metrics job checkout **仓库默认分支 tip**（`ref: main` 或 `github.event.repository.default_branch`），`fetch-depth` ≥ 1，确保看到 sync job 已成功 push 的提交。随后再 restore bars cache。
+
+`TAXONOMY_HEAD_SHA` / `TAXONOMY_FETCH` 仍经 **job outputs** 传入 metrics env（与现同名）；**不能**代替工作区 YAML/first_seen 文件。
+
+`trend.db` + 当日 heartbeat 刷新：**仅 metrics job** 做一次 commit（保持「一次 db commit」；不得 restage taxonomy）。
 
 ### 4.4 Job outputs 与门闩
 
@@ -171,8 +185,9 @@ if: ${{ needs.sync.outputs.sync_complete == 'true' }}
 3. sync job 内顺序：Unit tests → Refresh taxonomy → Sync mapped-universe。  
 4. metrics 内顺序：daily_run → live_shadow → commit → Issues；整文件仅 **一次** trend.db commit。  
 5. 两 job 均 `timeout-minutes: 360`（或 metrics≥180 且 pin 为 360）。  
-6. cache key 两处均为 `bars-${{ github.run_id }}`（或计划钉死的同一表达式）。  
-7. only_date → shadow `--asof` 断言保留。
+6. cache key 两处均为 `bars-${{ github.run_id }}`；metrics 含精确 `cache-hit` 失败门闩（或等价脚本断言）。  
+7. only_date → shadow `--asof` 断言保留。  
+8. metrics checkout 显式 `ref:` 默认分支（或文档等价的 tip checkout），**不是**仅默认触发 SHA。
 
 ### 5.2 `write_sync_complete` 单测
 
@@ -207,3 +222,4 @@ if: ${{ needs.sync.outputs.sync_complete == 'true' }}
 | 日期 | 说明 |
 |------|------|
 | 2026-10-08 | 初版：两 job；废 deferred 门闩；废生产 time-budget 截断；cache 同 run_id；反假绿 warning |
+| 2026-10-08 | CR：metrics 须 checkout 默认分支 tip（非触发 SHA）；metrics cache 精确 key miss → fail；补验收项 |

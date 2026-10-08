@@ -17,6 +17,8 @@
 - Production cron/only_date: no `--time-budget-min` (or `0`).
 - Workflow must not reference `run_deferred` in any `if:`.
 - Single `trend.db`+heartbeat commit remains in metrics job only.
+- metrics must checkout default-branch **tip** (not bare `GITHUB_SHA`) after sync may have pushed taxonomy/heartbeat/first_seen.
+- metrics bars restore: exact `bars-${{ github.run_id }}` hit required; no stale `restore-keys` fallback on metrics.
 - Exclude committing `data/cache/trade_dates.json` / local heartbeat noise from agent commits unless the metrics job itself commits them on Actions.
 
 ---
@@ -49,28 +51,34 @@
 rg -n "run_deferred|write_sync_complete|time-budget" tests scripts/sync_bars_sample.py
 ```
 
-- [ ] **Step 2: Write failing test** — elapsed >200 with `complete=True` must **not** imply deferred-for-workflow (assert no `run_deferred=true` in GITHUB_OUTPUT, or function returns/writes only `sync_complete` + elapsed)
+- [ ] **Step 2: Update / replace deferred assertions**
 
-Example shape:
+**Must change** existing `tests/test_sync_budget.py::test_github_output_sync_complete` — today it **requires** `run_deferred=true` at `elapsed_min=201` (will FAIL the suite if left unchanged).
+
+Rewrite to:
 
 ```python
-def test_write_sync_complete_no_deferred_gate(tmp_path, monkeypatch):
-    out = tmp_path / "out.txt"
+def test_github_output_sync_complete(tmp_path, monkeypatch):
+    out = tmp_path / "github_output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(out))
-    from scripts.sync_bars_sample import write_sync_complete
-    write_sync_complete(True, elapsed_min=250.0)
+    write_sync_complete(True)
+    write_sync_complete(False)
+    write_sync_complete(True, elapsed_min=201.0)
     text = out.read_text(encoding="utf-8")
     assert "sync_complete=true" in text
-    assert "run_deferred=true" not in text
+    assert "sync_complete=false" in text
+    assert "run_deferred=true" not in text  # Spec F: no deferred gate
 ```
+
+Optional extra: `assert text.count("sync_complete=true") >= 2`.
 
 - [ ] **Step 3: Run test — expect FAIL** on old code
 
 ```bash
-.venv/bin/pytest tests/test_sync_budget.py::test_write_sync_complete_no_deferred_gate -q
+.venv/bin/pytest tests/test_sync_budget.py::test_github_output_sync_complete -q
 ```
 
-- [ ] **Step 4: Implement** — in `write_sync_complete`, remove deferred computation; stop writing `run_deferred` (preferred). Keep stdout log with `elapsed_min`.
+- [ ] **Step 4: Implement** — in `write_sync_complete`, remove deferred computation; **stop writing** `run_deferred` (preferred). Keep stdout log with `elapsed_min`.
 
 - [ ] **Step 5: Run tests — expect PASS**
 
@@ -99,23 +107,40 @@ EOF
 
 - [ ] **Step 1: Rewrite failing workflow tests** first (TDD on static file)
 
-Replace `_GATE` / single-job assumptions with:
+Replace `_GATE` / single-job assumptions with concrete asserts:
 
 ```python
+def _metrics_block(text: str) -> str:
+    m = re.search(r"^  metrics:\n(.*?)(?=^  [a-z]|^\Z)", text, re.M | re.S)
+    assert m, "metrics job missing"
+    return m.group(1)
+
 def test_workflow_has_sync_and_metrics_jobs():
     text = Path(".github/workflows/daily-trend.yml").read_text(encoding="utf-8")
     assert re.search(r"^  sync:\s*$", text, re.M)
     assert re.search(r"^  metrics:\s*$", text, re.M)
     assert "needs: sync" in text or "needs: [sync]" in text
     assert "run_deferred" not in text
-    assert "steps.sync.outputs.sync_complete" in text or "needs.sync.outputs.sync_complete" in text
+    assert "needs.sync.outputs.sync_complete" in text
+    assert text.count("bars-${{ github.run_id }}") >= 2
+    assert text.count("timeout-minutes: 360") >= 2
+    met = _metrics_block(text)
+    assert "ref:" in met or "repository.default_branch" in met  # tip checkout, not bare trigger SHA
+    assert "cache-hit" in met  # exact-key gate
+    assert "BARS_SOURCE" in text
 
 def test_metrics_ordered_daily_shadow_commit_issues():
-    # metrics job chunk only
-    ...
+    text = Path(".github/workflows/daily-trend.yml").read_text(encoding="utf-8")
+    met = _metrics_block(text)
+    daily = met.index("python scripts/daily_run.py")
+    shadow = met.index("live_shadow_step.py")
+    commit = met.index("git add data/trend.db data/heartbeat.json")
+    issues = met.index("update_l1_issues.py")
+    assert daily < shadow < commit < issues
+    assert met.count("git commit -m") == 1
 ```
 
-Keep: unit → taxonomy → sync order **inside sync job**; only_date shadow `--asof`; Issues `continue-on-error`; one trend.db commit.
+Keep: unit → taxonomy → sync order **inside sync job**; only_date shadow `--asof`; Issues `continue-on-error`.
 
 - [ ] **Step 2: Run tests — expect FAIL**
 
@@ -151,12 +176,20 @@ jobs:
     if: ${{ needs.sync.outputs.sync_complete == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
+    env:
+      BARS_SOURCE: sina
+      PYTHONUNBUFFERED: "1"
     steps:
-      # checkout, setup-python, pip
-      # Restore bars cache: same key bars-${{ github.run_id }}, restore-keys bars-
-      # daily_run (env TAXONOMY_* from needs.sync.outputs)
+      # checkout@v4 with ref: main  (or github.event.repository.default_branch)
+      #   REQUIRED — default checkout of GITHUB_SHA misses taxonomy/heartbeat pushes from sync job
+      # setup-python, pip
+      # Restore bars cache id: bars-cache
+      #   key: bars-${{ github.run_id }}
+      #   DO NOT set restore-keys on metrics (avoid silent stale bars)
+      # Fail if steps.bars-cache.outputs.cache-hit != 'true'
+      # daily_run (env TAXONOMY_* from needs.sync.outputs); step timeout-minutes: 120 OK
       # live_shadow
-      # Commit trend.db + heartbeat (once)
+      # Commit trend.db + heartbeat (once); pull --rebase before push as today
       # Update L1 / Radar Issues (skip_issue_update honored)
 ```
 
@@ -165,6 +198,7 @@ Pin:
 - Remove sync step `timeout-minutes: 330`.
 - Remove all `run_deferred` from `if:`.
 - `concurrency` / `permissions` / `on:` unchanged.
+- metrics **git tip checkout** + **exact cache-hit gate** (Spec §4.3).
 
 - [ ] **Step 4: Incomplete warning** — after sync script, if output false, emit `::warning::` (bash read `steps.sync.outputs.sync_complete` or parse log). Prefer:
 
@@ -245,10 +279,11 @@ EOF
 
 - [ ] Two jobs; metrics needs sync; no `run_deferred` in yml  
 - [ ] Production sync omits time-budget truncation  
-- [ ] `write_sync_complete` does not emit deferred=true gate  
-- [ ] Static tests green  
+- [ ] `write_sync_complete` does not emit deferred=true gate；`test_github_output_sync_complete` updated  
+- [ ] metrics checkout default-branch tip；exact `cache-hit` fail gate  
+- [ ] Static tests green（含双 cache key、metrics 步序）  
 - [ ] Docs/README/todo updated  
-- [ ] (Manual) long complete sync still starts metrics job  
+- [ ] (Manual) long complete sync still starts metrics job；metrics log shows cache-hit true 
 
 ---
 
