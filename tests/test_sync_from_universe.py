@@ -20,18 +20,37 @@ def test_codes_from_universe_drops_quarantine(tmp_path):
     assert codes_from_universe(str(p)) == ["000001.SZ"]
 
 
-def test_with_limits_em_failure_exits_zero(monkeypatch):
-    class _Conn:
-        def close(self):
-            return None
+def test_with_limits_em_failure_exits_zero(tmp_path, monkeypatch):
+    """EM limits boom must not kill sync; Spec E passes still need a real bars conn."""
+    from scripts.common.bars import bars_conn
+    from scripts.sync_bars_sample import main
 
-    monkeypatch.setattr("scripts.sync_bars_sample.bars_conn", lambda: _Conn())
+    db = tmp_path / "b.db"
+    called = {"em": 0}
 
     def _boom(*_a, **_k):
+        called["em"] += 1
         raise RuntimeError("em_f51f52: clist 全部 host 失败")
 
+    monkeypatch.setattr(
+        "scripts.sync_bars_sample.bars_conn", lambda: bars_conn(str(db))
+    )
+    monkeypatch.setattr(
+        "scripts.sync_bars_sample.codes_from_universe",
+        lambda *a, **k: ["000001.SZ"],
+    )
     monkeypatch.setattr("scripts.sync_bars_sample.sync_em_limits_asof", _boom)
-    from scripts.sync_bars_sample import main
+    monkeypatch.setattr(
+        "scripts.sync_bars_sample.write_sync_complete", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        "scripts.common.hard_freeze.load_hard_freeze_min_suspend_days",
+        lambda: 20,
+    )
+    monkeypatch.setattr(
+        "scripts.eval.costs.load_costs",
+        lambda: type("C", (), {"limit_rule": "board_calc_v1"})(),
+    )
 
     rc = main(
         [
@@ -42,6 +61,9 @@ def test_with_limits_em_failure_exits_zero(monkeypatch):
             "000001.SZ",
             "--end",
             "2024-01-10",
+            "--asof",
+            "2024-01-10",  # must match --end or with-limits is skipped
         ]
     )
     assert rc == 0
+    assert called["em"] == 1
