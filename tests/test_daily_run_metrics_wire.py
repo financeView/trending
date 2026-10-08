@@ -137,20 +137,22 @@ def test_synthetic_bars_write_nonnull_T(tmp_path, monkeypatch):
     row = tconn.execute(
         """
         SELECT T, hard_frozen, close_qfq, stage_score, stage_score_raw,
-               daily_stock.param_version
+               daily_stock.param_version, daily_stock.universe_id
         FROM daily_stock JOIN run_meta USING (trade_date)
         WHERE ts_code='000001.SZ' AND trade_date=?
         """,
         (D.isoformat(),),
     ).fetchone()
     assert row is not None
-    t, hard, close_qfq, score, score_raw, pv = row
+    t, hard, close_qfq, score, score_raw, pv, universe_id = row
     assert t is not None and t != ""
     assert hard == 0
     assert close_qfq is not None
     # R may or may not be on; scores are written (SQL NULL on non-right / exit).
     assert score is None or isinstance(score, float)
     assert score_raw is None or isinstance(score_raw, float)
+    assert pv == "p05-v2"
+    assert universe_id == "local_stock"
     meta = tconn.execute(
         "SELECT param_version, map_version, status FROM run_meta WHERE trade_date=?",
         (D.isoformat(),),
@@ -159,6 +161,15 @@ def test_synthetic_bars_write_nonnull_T(tmp_path, monkeypatch):
     l2n = tconn.execute("SELECT COUNT(*) FROM daily_l2").fetchone()[0]
     l1n = tconn.execute("SELECT COUNT(*) FROM daily_l1").fetchone()[0]
     assert l2n >= 1 and l1n >= 1
+    l2u = tconn.execute(
+        "SELECT universe_id FROM daily_l2 WHERE trade_date=? LIMIT 1",
+        (D.isoformat(),),
+    ).fetchone()[0]
+    l1u = tconn.execute(
+        "SELECT universe_id FROM daily_l1 WHERE trade_date=? LIMIT 1",
+        (D.isoformat(),),
+    ).fetchone()[0]
+    assert l2u == "local_l2" and l1u == "local_l1"
     tconn.close()
 
 

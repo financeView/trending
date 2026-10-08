@@ -123,7 +123,8 @@
 | \(ROC_n\) | \(P_t/P_{t-n}-1\) |
 | \(RS_{raw}\) | `rs_w1*ROC_63 + rs_w2*ROC_126 + rs_w3*ROC_189 + rs_w4*ROC_252` |
 
-量价混合 RS 标为 **v1.1**，开启时须通过「凉/寒 + RS≥80」回归。
+~~量价混合 RS 标为 **v1.1**，开启时须通过「凉/寒 + RS≥80」回归。~~
+**作废（Spec C）：** 量不进 `RS`；旁路 `VOL_score` 见 [`2026-10-07-rs-c1-vol-design.md`](2026-10-07-rs-c1-vol-design.md)。
 
 ## 5. 温度引擎
 
@@ -608,6 +609,8 @@ RS = round(100 * percentile_rank(RS_raw among peer_universe))  # 0–100 整数
 | L2 合成 | `local_l2` | 当日有有效合成价且温度可算的全部 L2 |
 | L1 合成 | `local_l1` | 当日可算的全部 L1 |
 | 调用方池 | `custom:<id>` | 调用方传入的可算成员 |
+
+**资格钉死（Spec C §2.1）：** 个股 = `members_tradable`（宇宙内 ∧ ¬quarantine ∧ ¬ST ∧ ¬停牌）∧ 历史足够 ∧ `RS_raw≠null`；篮子 = asof `T` 非 null ∧ `RS_raw≠null`。上表「指标可算 / 当日可算」不得宽于该谓词。详见 [`2026-10-07-rs-c1-vol-design.md`](2026-10-07-rs-c1-vol-design.md)。
 
 战场雷达与选筹必须带上所用 `universe_id`。
 

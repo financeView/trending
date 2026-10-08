@@ -190,6 +190,15 @@ def _bars_db_path(bars_path: str | None) -> str | None:
     return None
 
 
+def _bar_trade_date_str(raw_td) -> str | None:
+    """Normalize bar trade_date to YYYY-MM-DD (date/datetime/str)."""
+    if raw_td is None:
+        return None
+    if isinstance(raw_td, dt.date):
+        return raw_td.isoformat()[:10]
+    return str(raw_td)[:10]
+
+
 def _load_symbol_bars(conn, ts_code: str, D: dt.date) -> list[dict]:
     rows = conn.execute(_BARS_SELECT, (ts_code, D.isoformat())).fetchall()
     out = []
@@ -467,14 +476,7 @@ def replay_metrics_cross_section(
             )
             vol = None
             for i, b in enumerate(records):
-                raw_td = b.get("trade_date")
-                if raw_td is None:
-                    continue
-                bar_td = (
-                    raw_td.isoformat()
-                    if isinstance(raw_td, dt.date)
-                    else str(raw_td)[:10]
-                )
+                bar_td = _bar_trade_date_str(b.get("trade_date"))
                 if bar_td == td:
                     vol = scores[i] if i < len(scores) else None
             r["VOL_score"] = vol

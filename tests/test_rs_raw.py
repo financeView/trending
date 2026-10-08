@@ -1,3 +1,5 @@
+import pytest
+
 from scripts.metrics.params import load_params
 from scripts.metrics.rs_raw import compute_rs_raw
 
@@ -13,11 +15,17 @@ def test_rs_raw_null_until_252():
 
 
 def test_rs_raw_weighted_roc_at_end():
-    # 253 closes: index 252 can see 252 lookback
+    # 253 closes: index 252 can see 252 lookback; constant +1%/bar locks rs_w*
     closes = [100.0]
     for i in range(252):
         closes.append(closes[-1] * 1.01)
-    out = compute_rs_raw(closes, _params())
+    p = _params()
+    out = compute_rs_raw(closes, p)
     assert out[-1] is not None
-    # all positive trend → RS_raw > 0
-    assert out[-1] > 0
+    expected = (
+        p.rs_w1 * (1.01**63 - 1)
+        + p.rs_w2 * (1.01**126 - 1)
+        + p.rs_w3 * (1.01**189 - 1)
+        + p.rs_w4 * (1.01**252 - 1)
+    )
+    assert out[-1] == pytest.approx(expected)

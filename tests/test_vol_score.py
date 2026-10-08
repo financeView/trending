@@ -1,7 +1,8 @@
 """Spec C stock VOL_score: turnover gates, own-history window, basket null."""
 from __future__ import annotations
 
-from datetime import date
+from dataclasses import replace
+from datetime import date, datetime
 
 import pytest
 
@@ -34,6 +35,54 @@ def test_turnover_null_when_float_mv_nonpositive_or_nonfinite():
     assert turnover_from_bar(1e8, None) is None
     assert turnover_from_bar(None, 1e10) is None
     assert turnover_from_bar(1e8, 1e10) == pytest.approx(1e8 / 1e10)
+
+
+def test_stock_vol_score_nonnull_on_asof_wire(tmp_path, monkeypatch):
+    """≥60 finite turnovers + matching asof date → stock VOL_score is 0..100 int."""
+    params = replace(_short_params(), vol_hist=80, vol_score_min_samples=60)
+    monkeypatch.setattr("scripts.daily_run.load_metrics_params", lambda: params)
+    monkeypatch.setattr(
+        "scripts.daily_run.taxonomy_for_stock",
+        lambda ts, **kw: ("370100", "l1_test"),
+    )
+    monkeypatch.setattr(
+        "scripts.daily_run.l2_members_map",
+        lambda: {"370100": ["000001.SZ"]},
+    )
+    monkeypatch.setattr(
+        "scripts.daily_run.stub_l1_members",
+        lambda: {"l1_test": ["000001.SZ"]},
+    )
+
+    D = date(2024, 1, 10)
+    dates = _weekdays_ending(D, 80)
+    monkeypatch.setattr(
+        "scripts.daily_run.cal.trading_days_inclusive",
+        lambda start, end: [d for d in dates if start <= d <= end],
+    )
+    bars_path = str(tmp_path / "bars.db")
+    conn = bars_conn(bars_path)
+    _seed_uptrend(conn, "000001.SZ", dates, start_px=10.0)
+    conn.close()
+
+    stock_rows, _l2, _l1, _ev = replay_metrics_cross_section(
+        D,
+        bars_path=bars_path,
+        params=params,
+        universe=["000001.SZ"],
+    )
+    assert stock_rows
+    vol = stock_rows[0].get("VOL_score")
+    assert isinstance(vol, int) and 0 <= vol <= 100
+
+
+def test_bar_trade_date_str_normalizes_datetime():
+    from scripts.daily_run import _bar_trade_date_str
+
+    assert _bar_trade_date_str(date(2024, 1, 10)) == "2024-01-10"
+    assert _bar_trade_date_str(datetime(2024, 1, 10, 15, 0)) == "2024-01-10"
+    assert _bar_trade_date_str("2024-01-10") == "2024-01-10"
+    assert _bar_trade_date_str(None) is None
 
 
 def test_basket_vol_score_always_null_after_wire(tmp_path, monkeypatch):
