@@ -67,7 +67,7 @@ _TAXONOMY_COMMIT_RE = re.compile(r"^[0-9a-f]{7,40}$")
 
 _BARS_SELECT = """
 SELECT trade_date, open_qfq, high_qfq, low_qfq, close_qfq,
-       is_st, is_suspended, float_mv, amount
+       is_st, is_suspended, float_mv, amount, hard_freeze_flag
 FROM bars
 WHERE ts_code=? AND trade_date<=?
 ORDER BY trade_date ASC
@@ -337,6 +337,7 @@ def _load_symbol_bars(conn, ts_code: str, D: dt.date) -> list[dict]:
                 "is_suspended": r[6],
                 "float_mv": r[7],
                 "amount": r[8],
+                "hard_freeze_flag": r[9],
             }
         )
     return out

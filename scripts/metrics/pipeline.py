@@ -171,6 +171,12 @@ def _feat_map(row: Mapping[str, Any], close: Optional[float]) -> dict[str, Any]:
     return out
 
 
+def bar_hard_frozen(bar) -> bool:
+    return bool(int(bar.get("is_st") or 0)) or bool(
+        int(bar.get("hard_freeze_flag") or 0)
+    )
+
+
 def replay_from_ohlc(
     params: MetricsParams,
     records: Sequence[Mapping[str, Any]],
@@ -181,7 +187,7 @@ def replay_from_ohlc(
 
     ``records`` must be sorted by ``trade_date`` and include ``close_qfq`` plus
     high/low (``high_qfq``/``low_qfq`` or ``high``/``low``). ``hard_frozen`` for
-    each day is ``bool(is_st)`` on that bar.
+    each day is ``is_st OR hard_freeze_flag`` on that bar.
     """
     if not records:
         return []
@@ -196,7 +202,7 @@ def replay_from_ohlc(
         feats = _feat_map(feat_row, close)
         t_raw = decide_t_raw_from_features(feats, params)
         s_temp = compute_s_temp(feats, t_raw, params)
-        hard = bool(int(bar.get("is_st") or 0))
+        hard = bar_hard_frozen(bar)
         days.append(
             {
                 "trade_date": _as_trade_date(bar["trade_date"]),
