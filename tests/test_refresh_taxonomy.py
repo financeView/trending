@@ -359,3 +359,28 @@ def test_step_f_writes_heartbeat_taxonomy_no_last_success(tmp_path, monkeypatch)
     assert tax["yaml_quarantine_size"] == 0
     assert "last_success" not in tax
     assert tax["taxonomy_commit"] in ("", "unpushed")
+
+
+def test_step_f_exception_reports_real_quarantine_size(tmp_path, monkeypatch):
+    from scripts.taxonomy.refresh_taxonomy import _step_f_unmapped_heartbeat
+
+    _seed_taxonomy_tree(tmp_path)
+    (tmp_path / "data").mkdir(parents=True)
+    (tmp_path / "data" / "unmapped_first_seen.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        "scripts.common.universe.load_quarantine_codes",
+        lambda: {"000099.SZ", "000098.SZ"},
+    )
+    monkeypatch.setattr(
+        "scripts.taxonomy.refresh_taxonomy.compute_unmapped_metrics",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    st = _step_f_unmapped_heartbeat(
+        {"taxonomy_fetch": "fail", "map_version": "sw2021-v1", "taxonomy_commit": ""},
+        session_asof=date(2024, 1, 10),
+        repo_root=str(tmp_path),
+        git=False,
+        clist_rows=[{"ts_code": "000001.SZ", "f26": None}],
+    )
+    assert st["clist_fetch"] == "fail"
+    assert st["yaml_quarantine_size"] == 2

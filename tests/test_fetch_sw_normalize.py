@@ -1,5 +1,9 @@
 """Normalize vendor SW classify rows onto taxonomy §4 L2 codes."""
-from scripts.taxonomy.fetch_sw_members import dump_yaml, normalize_member
+from scripts.taxonomy.fetch_sw_members import (
+    _read_map_version_header,
+    dump_yaml,
+    normalize_member,
+)
 
 
 def test_801780_never_written():
@@ -40,3 +44,20 @@ def test_exact_name_when_code_unknown():
         industry_name="白酒Ⅱ",
     )
     assert row == {"ts_code": "600519.SH", "sw_l2_code": "340500"}
+
+
+def test_dump_yaml_sorts_members_by_ts_code():
+    rows = [
+        {"ts_code": "600000.SH", "industry_code": "480300", "industry_name": ""},
+        {"ts_code": "000001.SZ", "industry_code": "480300", "industry_name": ""},
+    ]
+    out = dump_yaml(rows, map_version="sw2021-v2")
+    i0 = out.index("000001.SZ")
+    i1 = out.index("600000.SH")
+    assert i0 < i1
+
+
+def test_read_map_version_header_keeps_bumped(tmp_path):
+    p = tmp_path / "stock_sw_l2.yaml"
+    p.write_text("map_version: sw2021-v3\nmembers:\n  []\n", encoding="utf-8")
+    assert _read_map_version_header(str(p)) == "sw2021-v3"

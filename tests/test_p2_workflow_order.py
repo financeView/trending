@@ -7,6 +7,17 @@ _GATE = (
 )
 
 
+def test_actions_unit_tests_then_taxonomy_then_sync():
+    """Spec D: Unit tests → Refresh taxonomy YAML → Sync mapped-universe bars."""
+    text = Path(".github/workflows/daily-trend.yml").read_text(encoding="utf-8")
+    unit = text.index("name: Unit tests")
+    taxonomy = text.index("name: Refresh taxonomy YAML")
+    sync = text.index("name: Sync mapped-universe bars")
+    assert unit < taxonomy < sync
+    tax_chunk = text[taxonomy:sync]
+    assert "continue-on-error" not in tax_chunk
+
+
 def test_actions_live_shadow_before_single_db_commit():
     text = Path(".github/workflows/daily-trend.yml").read_text(encoding="utf-8")
     daily = text.index("python scripts/daily_run.py")

@@ -248,12 +248,13 @@ def _step_f_unmapped_heartbeat(
     try:
         metrics = compute_unmapped_metrics(**kwargs)
     except Exception:
+        from scripts.common.universe import load_quarantine_codes
         from scripts.taxonomy.unmapped import UnmappedMetrics
 
         metrics = UnmappedMetrics(
             unmapped_count=None,
             ipo_unmapped_alert_count=None,
-            yaml_quarantine_size=0,
+            yaml_quarantine_size=len(load_quarantine_codes()),
             clist_fetch="fail",
         )
 
@@ -503,6 +504,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     # Capture YAML publish SHA only; never re-rev-parse after a later heartbeat push.
     taxonomy_head_sha = ""
+    st: dict = {}
     try:
         st = refresh_taxonomy_once(
             fetch_rows=fetch_latest_rows,
@@ -529,9 +531,19 @@ def main(argv: Optional[list[str]] = None) -> int:
         _clear_taxonomy_head_sha()
 
     _write_github_output(taxonomy_fetch, taxonomy_head_sha)
+    # Spec §2.1.c′: log guard triple (and mapped sizes) for ops diagnosis
     print(
-        "[refresh_taxonomy] taxonomy_fetch=%s taxonomy_head_sha=%s"
-        % (taxonomy_fetch, taxonomy_head_sha or "")
+        "[refresh_taxonomy] taxonomy_fetch=%s taxonomy_head_sha=%s "
+        "adds=%s deletes=%s changes=%s head_mapped=%s cand_mapped=%s"
+        % (
+            taxonomy_fetch,
+            taxonomy_head_sha or "",
+            st.get("adds", ""),
+            st.get("deletes", ""),
+            st.get("changes", ""),
+            st.get("head_mapped", ""),
+            st.get("cand_mapped", ""),
+        )
     )
     return 0
 

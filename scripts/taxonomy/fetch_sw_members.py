@@ -88,6 +88,7 @@ def dump_yaml(
         if norm is None:
             continue
         members.append(norm)
+    members.sort(key=lambda m: m["ts_code"])
     lines = [
         "map_version: %s" % map_version,
         "note: >",
@@ -143,15 +144,38 @@ def fetch_latest_rows():
     return rows
 
 
+def _read_map_version_header(path: str) -> Optional[str]:
+    """Return existing map_version from YAML header, or None if missing/unreadable."""
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                m = re.match(r"^map_version:\s*(\S+)\s*$", line)
+                if m:
+                    return m.group(1)
+                if line.strip() and not line.startswith("#"):
+                    break
+    except OSError:
+        return None
+    return None
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--out", default=_DEFAULT_OUT)
+    p.add_argument(
+        "--map-version",
+        default=None,
+        help="map_version to write (default: keep existing header, else sw2021-v1)",
+    )
     args = p.parse_args(argv)
-    text = dump_yaml(fetch_latest_rows())
+    version = args.map_version or _read_map_version_header(args.out) or "sw2021-v1"
+    text = dump_yaml(fetch_latest_rows(), map_version=version)
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as f:
         f.write(text)
-    print("[fetch_sw] wrote %s bytes=%d" % (args.out, len(text)))
+    print("[fetch_sw] wrote %s bytes=%d map_version=%s" % (args.out, len(text), version))
     return 0
 
 
