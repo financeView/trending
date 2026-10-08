@@ -5,6 +5,9 @@ from scripts.taxonomy.unmapped import compute_unmapped_metrics, parse_em_list_da
 
 def test_parse_f26_yyyymmdd_and_ms():
     assert parse_em_list_date("20240105") == date(2024, 1, 5)
+    # Numeric YYYYMMDD (pandas/EM clist to_dict) — not Unix seconds → 1970.
+    assert parse_em_list_date(20240105) == date(2024, 1, 5)
+    assert parse_em_list_date(20240105.0) == date(2024, 1, 5)
     # 2024-01-05 00:00 Asia/Shanghai
     assert parse_em_list_date(1704384000000) == date(2024, 1, 5)
     assert parse_em_list_date(None) is None

@@ -175,12 +175,13 @@ def test_refresh_name_map_raises_keeps_prior_name(tmp_path):
     assert "000002.SZ" in text
 
 
-def test_publish_fail_resets_to_pre_sha_not_orig_head(monkeypatch):
-    """Push-fail must hard-reset to pre-commit SHA; never prefer ORIG_HEAD."""
+def test_publish_fail_prefers_upstream_over_pre_sha(monkeypatch):
+    """Push-fail must hard-reset to @{upstream} first; never ORIG_HEAD."""
     from scripts.taxonomy import refresh_taxonomy as rt
 
     calls: list[tuple] = []
     pre_sha = "aaa111pre"
+    upstream_sha = "ccc333up"  # published tip after rebase brought remote commits
     new_sha = "bbb222new"  # post-commit / ORIG_HEAD would be this
 
     def fake_git(repo_root, *args, check=True):
@@ -194,7 +195,7 @@ def test_publish_fail_resets_to_pre_sha_not_orig_head(monkeypatch):
                 return _cp(0, new_sha + "\n")
             return _cp(0, pre_sha + "\n")
         if cmd == "rev-parse" and "@{upstream}" in args:
-            return _cp(0, pre_sha + "\n")
+            return _cp(0, upstream_sha + "\n")
         if cmd == "rev-parse" and "ORIG_HEAD" in args:
             return _cp(0, new_sha + "\n")
         if cmd == "pull":
@@ -219,11 +220,104 @@ def test_publish_fail_resets_to_pre_sha_not_orig_head(monkeypatch):
     )
     assert first_head_idx < commit_idx
 
-    # hard reset to pre_sha; never ORIG_HEAD / checkout-only restore
-    assert ("reset", "--hard", pre_sha) in calls
+    # Prefer @{upstream} over stale pre_sha; never ORIG_HEAD / checkout-only
+    assert ("reset", "--hard", upstream_sha) in calls
+    assert ("reset", "--hard", pre_sha) not in calls
     assert not any("ORIG_HEAD" in c for c in calls)
     assert not any(c[0] == "checkout" for c in calls)
     assert not rt.os.environ.get("TAXONOMY_HEAD_SHA")
+
+
+def test_publish_fail_falls_back_to_pre_sha_without_upstream(monkeypatch):
+    """When @{upstream} is unavailable, restore uses pre-commit SHA."""
+    from scripts.taxonomy import refresh_taxonomy as rt
+
+    calls: list[tuple] = []
+    pre_sha = "aaa111pre"
+
+    def fake_git(repo_root, *args, check=True):
+        calls.append(args)
+        cmd = args[0] if args else ""
+        if cmd == "diff" and "--cached" in args:
+            return _cp(1)
+        if cmd == "rev-parse" and args[-1:] == ("HEAD",):
+            return _cp(0, pre_sha + "\n")
+        if cmd == "rev-parse" and "@{upstream}" in args:
+            return _cp(128, stderr="no upstream")
+        if cmd == "pull":
+            return _cp(0)
+        if cmd == "push":
+            return _cp(1, stderr="rejected")
+        if cmd == "reset":
+            return _cp(0)
+        return _cp(0)
+
+    monkeypatch.setattr(rt, "_git", fake_git)
+    monkeypatch.delenv("TAXONOMY_HEAD_SHA", raising=False)
+
+    status, sha = rt._publish_taxonomy_yaml("/tmp/fake-repo")
+    assert status == "push_fail"
+    assert sha == ""
+    assert ("reset", "--hard", pre_sha) in calls
+    assert not any("ORIG_HEAD" in c for c in calls)
+
+
+def test_push_fail_heartbeat_reports_restored_map_version(tmp_path, monkeypatch):
+    """After YAML restore, status/heartbeat map_version is head, not bumped."""
+    from scripts.taxonomy import refresh_taxonomy as rt
+
+    _seed_taxonomy_tree(tmp_path)
+    (tmp_path / "data").mkdir(parents=True)
+    (tmp_path / "data" / "unmapped_first_seen.json").write_text("{}", encoding="utf-8")
+
+    def fake_git(repo_root, *args, check=True):
+        cmd = args[0] if args else ""
+        if cmd == "diff" and "--cached" in args:
+            return _cp(1)
+        if cmd == "rev-parse" and args[-1:] == ("HEAD",):
+            return _cp(0, "preprepre\n")
+        if cmd == "rev-parse" and "@{upstream}" in args:
+            return _cp(0, "preprepre\n")
+        if cmd == "pull":
+            return _cp(0)
+        if cmd == "push":
+            return _cp(1, stderr="rejected")
+        if cmd == "reset":
+            # Simulate restore: rewrite YAML back to head_version
+            tax = tmp_path / "config" / "taxonomy"
+            for name in ("stock_sw_l2.yaml", "sw_l2_to_l1.yaml", "l1_buckets.yaml"):
+                p = tax / name
+                text = p.read_text(encoding="utf-8")
+                p.write_text(
+                    text.replace("map_version: sw2021-v2", "map_version: sw2021-v1"),
+                    encoding="utf-8",
+                )
+            return _cp(0)
+        return _cp(0)
+
+    monkeypatch.setattr(rt, "_git", fake_git)
+    monkeypatch.delenv("TAXONOMY_HEAD_SHA", raising=False)
+    rows = [
+        {"ts_code": "000001.SZ", "industry_code": "370100", "industry_name": "银行"},
+        {"ts_code": "000002.SZ", "industry_code": "370100", "industry_name": "万科"},
+    ]
+    st = refresh_taxonomy_once(
+        fetch_rows=lambda: rows,
+        name_map=lambda: {},
+        repo_root=str(tmp_path),
+        session_asof=date(2024, 1, 10),
+        git=True,
+        allowed={"370100"},
+        clist_rows=[{"ts_code": "000001.SZ", "f26": "20200101"}],
+    )
+    assert st["taxonomy_fetch"] == "push_fail"
+    assert st["map_version"] == "sw2021-v1"
+    hb = json.loads((tmp_path / "data" / "heartbeat.json").read_text(encoding="utf-8"))
+    assert hb["taxonomy"]["map_version"] == "sw2021-v1"
+    stock = (tmp_path / "config" / "taxonomy" / "stock_sw_l2.yaml").read_text(
+        encoding="utf-8"
+    )
+    assert "map_version: sw2021-v1" in stock
 
 
 def test_step_f_writes_heartbeat_taxonomy_no_last_success(tmp_path, monkeypatch):

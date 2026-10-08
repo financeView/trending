@@ -87,20 +87,22 @@ def _set_taxonomy_head_sha(sha: str) -> None:
 
 
 def _restore_taxonomy_to_published(repo_root: str, pre_sha: str = "") -> None:
-    """Drop unpushed YAML commit; restore workspace to pre-publish tip.
+    """Drop unpushed YAML commit; restore workspace to published tip.
 
-    ``pre_sha`` must be captured via ``git rev-parse HEAD`` *before* ``git commit``.
-    Never prefer post-commit ORIG_HEAD/HEAD — after commit+rebase those can be the
-    new unpushed taxonomy commit. Fall back to ``@{upstream}`` only.
+    Prefer ``@{upstream}`` (remote-tracking tip after rebase) so the workspace
+    matches published main when concurrent commits landed. Fall back to
+    ``pre_sha`` (HEAD captured *before* ``git commit``) when upstream is
+    unavailable (detached / no tracking). Never prefer post-commit
+    ORIG_HEAD/HEAD — those can be the unpushed taxonomy commit.
     """
     candidates: list[str] = []
-    if pre_sha:
-        candidates.append(pre_sha)
     up = _git(repo_root, "rev-parse", "--verify", "@{upstream}", check=False)
     if up.returncode == 0:
         tip = (up.stdout or "").strip()
-        if tip and tip not in candidates:
+        if tip:
             candidates.append(tip)
+    if pre_sha and pre_sha not in candidates:
+        candidates.append(pre_sha)
     for tip in candidates:
         # Hard reset drops the local unpushed commit; file checkout alone is not enough.
         r = _git(repo_root, "reset", "--hard", tip, check=False)
@@ -433,10 +435,12 @@ def refresh_taxonomy_once(
     if git:
         pub, sha = _publish_taxonomy_yaml(root)
         if pub == "push_fail":
+            # YAML restored to published tip; report that map_version, not the
+            # rolled-back bump that is no longer on disk.
             return _finish(
                 _status(
                     "push_fail",
-                    map_version=new_version,
+                    map_version=head_version,
                     taxonomy_commit="unpushed",
                     adds=adds,
                     deletes=deletes,

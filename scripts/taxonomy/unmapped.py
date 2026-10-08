@@ -35,6 +35,13 @@ def parse_em_list_date(f26_val: Any) -> Optional[date]:
     if isinstance(f26_val, datetime):
         return f26_val.astimezone(_TZ_SH).date() if f26_val.tzinfo else f26_val.date()
     if isinstance(f26_val, (int, float)):
+        # Numeric YYYYMMDD (pandas/EM clist shape) before Unix seconds/ms.
+        n = int(f26_val)
+        if 19000101 <= n <= 21001231:
+            try:
+                return datetime.strptime(str(n), "%Y%m%d").date()
+            except ValueError:
+                return None
         ts = float(f26_val)
         if ts > 1e11:  # ms
             ts = ts / 1000.0
