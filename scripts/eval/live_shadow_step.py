@@ -190,6 +190,7 @@ def run_asof(
         map_version=map_v,
         run_id="shadow-%s" % T,
         skip_event_days=paper_fill_keys_on_date(conn, T),
+        limit_up_unfillable=costs.limit_up_unfillable,
     )
     print("[shadow] asof=%s fills=%d" % (T, len(fills)))
     if dry_run:

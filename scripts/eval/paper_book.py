@@ -98,17 +98,21 @@ def replay_window(
             costs,
             track="H",
             run_id=run_id,
+            limit_up_unfillable=costs.limit_up_unfillable,
         )
         all_fills.extend(fills)
     kpi = window_kpis(all_fills, book)
-    return {"fills": all_fills, "kpi": kpi, "book": book}
+    return {"fills": all_fills, "kpi": kpi, "book": book, "costs": costs}
 
 
 def _write_out(out_dir: str, run_id: str, payload: dict) -> None:
     dest = os.path.join(out_dir, run_id)
     os.makedirs(dest, exist_ok=True)
     fills = payload["fills"]
-    kpi = payload["kpi"]
+    kpi = dict(payload["kpi"])
+    costs = payload["costs"]
+    kpi["limit_rule"] = costs.limit_rule
+    kpi["cost_version"] = costs.cost_version
     with open(os.path.join(dest, "fills.json"), "w", encoding="utf-8") as f:
         json.dump(fills, f, ensure_ascii=False, indent=2, default=str)
     with open(os.path.join(dest, "summary.json"), "w", encoding="utf-8") as f:

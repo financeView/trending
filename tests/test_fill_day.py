@@ -243,3 +243,63 @@ def test_buy_data_gap_without_limits():
     )
     assert fills[0]["status"] == "data_gap"
     assert book.positions == {}
+
+
+def test_limit_up_sell_still_fills_when_unfillable_false():
+    """Mirror test_fill_forced_exit_st setup; open at limit_up; unfillable false → filled."""
+    load_trade_dates_from_list(["2024-01-05", "2024-01-08", "2024-01-09"])
+    costs = load_costs()
+    assert costs.limit_up_unfillable is False
+    book = BookState(cash=costs.initial_cash, last_equity=costs.initial_cash)
+    fill_day(
+        "2024-01-08",
+        [{"event": "ENTER_RIGHT", "ts_code": "000001.SZ", "trade_date": "2024-01-05", "id": 1, "RS": 1}],
+        book,
+        {"000001.SZ": {
+            "open_raw": 10.0, "close_raw": 10.0,
+            "limit_up": 11.0, "limit_down": 9.0, "is_suspended": 0,
+        }},
+        costs,
+        limit_up_unfillable=costs.limit_up_unfillable,
+    )
+    fills = fill_day(
+        "2024-01-09",
+        [{
+            "event": "EXIT_RIGHT",
+            "ts_code": "000001.SZ",
+            "trade_date": "2024-01-08",
+            "id": 3,
+            "detail": {"exit_kind": "temperature"},
+        }],
+        book,
+        {"000001.SZ": {
+            "open_raw": 11.0, "close_raw": 11.0,
+            "limit_up": 11.0, "limit_down": 9.0, "is_suspended": 0,
+        }},
+        costs,
+        limit_up_unfillable=False,
+    )
+    sold = [f for f in fills if f["side"] == "sell" and f["status"] == "filled"]
+    assert len(sold) == 1
+
+
+def test_summary_includes_limit_rule_and_cost_version(tmp_path):
+    """Must go through _write_out(payload with costs) — do not pre-stuff kpi keys."""
+    import json
+    from scripts.eval.paper_book import replay_window, _write_out
+
+    load_trade_dates_from_list(["2024-01-05", "2024-01-08"])
+    costs = load_costs()
+    payload = replay_window(
+        date(2024, 1, 5),
+        date(2024, 1, 8),
+        signals=[],
+        bars_by_day={},
+        costs=costs,
+        run_id="sum-meta",
+    )
+    assert "costs" in payload
+    _write_out(str(tmp_path), "t", payload)
+    summary = json.loads((tmp_path / "t" / "summary.json").read_text())
+    assert summary["limit_rule"] == "board_calc_v1"
+    assert summary["cost_version"] == "v2"
