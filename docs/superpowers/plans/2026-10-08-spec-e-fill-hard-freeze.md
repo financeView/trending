@@ -37,23 +37,23 @@
 | `scripts/metrics/pipeline.py` | `hard_frozen = is_st ∨ hard_freeze_flag` |
 | `scripts/daily_run.py` | `_BARS_SELECT` includes `hard_freeze_flag` |
 | `config/eval/costs.yaml` | `board_calc_v1`, `limit_up_unfillable: false`, bump `cost_version` |
-| `config/metrics/a_share_daily.yaml` | `hard_freeze_min_suspend_days: 20`, bump `param_version` |
-| `tests/test_hard_freeze.py` | streak via `apply_*`+calendar / N rewrite / resume |
+| `config/metrics/a_share_daily.yaml` | Task 0: add `hard_freeze_min_suspend_days: 20` (**keep** `param_version` until Task 5); Task 5: bump → `p05-v3` |
+| `tests/test_hard_freeze.py` | streak via `apply_*`+calendar / N rewrite mid-state / resume |
 | `tests/test_board_calc.py` | hist/asof/vendor/gate/pct/HALF_UP/`session_asof`≠end |
-| `tests/test_sync_spec_e_passes.py` | `run_spec_e_passes` + incomplete still runs |
+| `tests/test_sync_spec_e_passes.py` | passes on full mapped U; `session_asof`≠`--end`; incomplete + `complete=False` |
 | `tests/test_fill_day.py` / `test_eval_costs_book.py` | `cost_version` v2 + `limit_up_unfillable` |
-| `tests/test_features.py` / `test_daily_run_metrics_wire.py` | **only** real-yaml `p05-v3` pins (not fixture hardcodes) |
-| `scripts/eval/paper_book.py` / fill summary path | emit `limit_rule` + `cost_version` in summary/kpi |
+| `tests/test_features.py` / `test_daily_run_metrics_wire.py` | Task 5: real-yaml `p05-v3` pins |
+| `scripts/eval/paper_book.py` / fill summary path | emit `limit_rule` + `cost_version` from payload `costs` |
 | docs: market-data / metrics §5.5 / backtest-eval / `todo.md` / Spec E status | Done-when |
 | `.github/workflows/daily-trend.yml` | **no change required** — sync default `session_asof=latest_trade_day()` |
 
 ```text
-Task 0 (config bumps + costs loader + pin updates)
+Task 0 (costs v2 + N knob; NOT param_version yet)
   └─► Task 1 (bars ensure-column + CREATE)
         ├─► Task 2 (hard_freeze pass) ──┐
-        └─► Task 3 (board_calc pass) ───┴─► Task 4 (sync wire)
-                                              └─► Task 5 (metrics + daily_run)
-                                                    └─► Task 6 (fill wire from costs)
+        └─► Task 3 (board_calc pass) ───┴─► Task 4 (sync wire: full-U passes, before close)
+                                              └─► Task 5 (metrics OR + param_version p05-v3)
+                                                    └─► Task 6 (fill + summary limit_rule)
                                                           └─► Task 7 (docs done-when)
 ```
 
@@ -61,16 +61,18 @@ Tasks 2 and 3 may proceed in parallel after Task 1. Task 4 waits for both.
 
 ---
 
-### Task 0: Config bumps + `limit_up_unfillable` on `EvalCosts`
+### Task 0: Costs v2 + `hard_freeze_min_suspend_days` (defer `param_version`)
 
 **Files:**
 - Modify: `config/eval/costs.yaml`
-- Modify: `config/metrics/a_share_daily.yaml`
+- Modify: `config/metrics/a_share_daily.yaml` (**add N only** — leave `param_version: p05-v2`)
 - Modify: `scripts/eval/costs.py`
-- Modify: `tests/test_fill_day.py`, `tests/test_eval_costs_book.py`, `tests/test_features.py`, `tests/test_daily_run_metrics_wire.py` (and any other `p05-v2` / `cost_version == "v1"` pins revealed by pytest)
+- Modify: `tests/test_fill_day.py`, `tests/test_eval_costs_book.py`
+- Create: `tests/test_hard_freeze_config.py`
 
 **Interfaces:**
-- Produces: `EvalCosts.limit_up_unfillable: bool`; `cost_version: v2`; `param_version: p05-v3`; yaml key `hard_freeze_min_suspend_days: 20`
+- Produces: `EvalCosts.limit_up_unfillable: bool`; `cost_version: v2`; yaml `hard_freeze_min_suspend_days: 20`
+- **Does not** bump `param_version` (protocol B: claim `p05-v3` only in Task 5 after freeze rewrite + metrics OR)
 
 - [ ] **Step 1: Update YAML**
 
@@ -92,14 +94,11 @@ fill_price: open_raw
 hs300_series: 000300.SH
 ```
 
-`config/metrics/a_share_daily.yaml` — change first line and add after `param_version`:
+`config/metrics/a_share_daily.yaml` — **keep** `param_version: p05-v2`; insert after it:
 
 ```yaml
-param_version: p05-v3
 hard_freeze_min_suspend_days: 20
 ```
-
-(keep all other keys unchanged)
 
 - [ ] **Step 2: Failing test for loader field**
 
@@ -127,79 +126,46 @@ ROOT = Path(__file__).resolve().parents[1]
 YAML = ROOT / "config" / "metrics" / "a_share_daily.yaml"
 
 
-def test_hard_freeze_n_and_param_version():
+def test_hard_freeze_n_knob_present():
     raw = yaml.safe_load(YAML.read_text(encoding="utf-8"))
-    assert raw["param_version"] == "p05-v3"
     assert int(raw["hard_freeze_min_suspend_days"]) == 20
+    # param_version bump is Task 5 — still p05-v2 here
+    assert raw["param_version"] == "p05-v2"
 ```
 
-- [ ] **Step 3: Run tests — expect FAIL on missing dataclass field / old pins**
+- [ ] **Step 3: Run tests — expect FAIL**
 
 Run: `.venv/bin/pytest tests/test_fill_day.py::test_load_costs_v2_spec_e tests/test_hard_freeze_config.py -q`  
 Expected: FAIL (`limit_up_unfillable` missing or AttributeError)
 
 - [ ] **Step 4: Implement `EvalCosts` field**
 
-In `scripts/eval/costs.py`:
+In `scripts/eval/costs.py`, add field after `limit_rule`:
 
 ```python
-@dataclass(frozen=True)
-class EvalCosts:
-    # ...existing fields...
-    limit_rule: str
-    limit_up_unfillable: bool
-    fill_price: str
-    hs300_series: str
-
-
-def load_costs(path: Optional[str | Path] = None) -> EvalCosts:
-    p = Path(path) if path else _DEFAULT
-    data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-    return EvalCosts(
-        # ...existing...
-        limit_rule=str(data.get("limit_rule") or "vendor_fields"),
-        limit_up_unfillable=bool(data.get("limit_up_unfillable", False)),
-        fill_price=str(data.get("fill_price") or "open_raw"),
-        hs300_series=str(data.get("hs300_series") or "000300.SH"),
-    )
+limit_up_unfillable: bool
 ```
 
-- [ ] **Step 5: Update real-yaml `p05-v2` pins only (whitelist)**
+In `load_costs`:
 
-Must change (load production `a_share_daily.yaml` or assert its version):
-
-| File | Change |
-|------|--------|
-| `tests/test_features.py` | `PARAMS.param_version == "p05-v3"` |
-| `tests/test_daily_run_metrics_wire.py` | assertions `"p05-v2"` → `"p05-v3"` (daily_stock + run_meta) |
-
-**Do not change** synthetic INSERT/fixture versions, e.g. `tests/test_digest_rs_vol.py` row `("ok", "p05-v2", ...)` — that string is local fixture data, not the live yaml pin.
-
-Also bump cost pins: `tests/test_fill_day.py`, `tests/test_eval_costs_book.py` → `v2` (Step 2).
-
-Verify no stray live pins left:
-
-```bash
-rg -n "p05-v2" tests --glob '*.py'
-# expected remaining: only fixture hardcodes (digest etc.), not load_params/real yaml asserts
-rg -n 'cost_version == "v1"' tests --glob '*.py'
-# expected: empty
+```python
+limit_up_unfillable=bool(data.get("limit_up_unfillable", False)),
 ```
 
-- [ ] **Step 6: Pytest**
+(keep all other `EvalCosts` fields/order as today; insert the new kwarg next to `limit_rule=...`)
 
-Run: `.venv/bin/pytest tests/test_fill_day.py::test_load_costs_v2_spec_e tests/test_eval_costs_book.py tests/test_hard_freeze_config.py tests/test_features.py tests/test_daily_run_metrics_wire.py -q`  
+- [ ] **Step 5: Pytest**
+
+Run: `.venv/bin/pytest tests/test_fill_day.py::test_load_costs_v2_spec_e tests/test_eval_costs_book.py tests/test_hard_freeze_config.py -q`  
 Expected: PASS
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add config/eval/costs.yaml config/metrics/a_share_daily.yaml scripts/eval/costs.py \
-  tests/test_fill_day.py tests/test_eval_costs_book.py tests/test_hard_freeze_config.py \
-  tests/test_features.py tests/test_daily_run_metrics_wire.py
-# add any other pin files touched
+  tests/test_fill_day.py tests/test_eval_costs_book.py tests/test_hard_freeze_config.py
 git commit -m "$(cat <<'EOF'
-feat(config): Spec E cost_version v2 + param_version p05-v3
+feat(config): Spec E cost_version v2 and hard_freeze N knob
 
 EOF
 )"
@@ -499,6 +465,12 @@ def test_n_change_requires_rewrite(tmp_path):
         ).fetchone()[0]
         == 1
     )
+    # Spec §5.2#10 mid-state: yaml N conceptually 60 but no rewrite → flag stays old
+    stale = conn.execute(
+        "SELECT hard_freeze_flag FROM bars WHERE ts_code=? AND trade_date=?",
+        (code, asof),
+    ).fetchone()[0]
+    assert stale == 1
     apply_hard_freeze_flags(conn, [code], n=60)
     assert (
         conn.execute(
@@ -859,12 +831,10 @@ EOF
 - Test: `tests/test_sync_spec_e_passes.py`
 
 **Interfaces:**
-- Consumes: `ensure_bars_columns`, `apply_hard_freeze_flags`, `load_hard_freeze_min_suspend_days`, `apply_board_calc`, `load_costs`
-- Produces: CLI `--asof`; after OHLC/flags (+ limits), always run both passes; `session_asof` from `--asof` or `latest_trade_day()`
+- Consumes: `ensure_bars_columns`, `apply_hard_freeze_flags`, `load_hard_freeze_min_suspend_days`, `apply_board_calc`, `load_costs`, `codes_from_universe`
+- Produces: CLI `--asof`; `session_asof` from `--asof` or `latest_trade_day()` (**never** `--end`); passes always scan **full mapped U** via `codes_from_universe()` (OHLC loop may still honor `--codes`); call **after** `with_limits` block and **before** `conn.close()`
 
-- [ ] **Step 1: Extract helper + failing tests**
-
-Add to `scripts/sync_bars_sample.py` (before `main`):
+- [ ] **Step 1: Extract helper**
 
 ```python
 def run_spec_e_passes(conn, codes, *, session_asof: dt.date) -> None:
@@ -891,6 +861,8 @@ def run_spec_e_passes(conn, codes, *, session_asof: dt.date) -> None:
         print("[sync_bars] warn: board_calc skipped: %s" % e, file=sys.stderr)
 ```
 
+- [ ] **Step 2: Failing tests (no escape hatches)**
+
 ```python
 # tests/test_sync_spec_e_passes.py
 import datetime as dt
@@ -902,7 +874,6 @@ from scripts.sync_bars_sample import main, run_spec_e_passes
 def test_run_spec_e_passes_invokes_both(tmp_path, monkeypatch):
     conn = bars_conn(str(tmp_path / "b.db"))
     seen: list[str] = []
-
     monkeypatch.setattr(
         "scripts.common.hard_freeze.apply_hard_freeze_flags",
         lambda *a, **k: seen.append("freeze") or 0,
@@ -923,15 +894,60 @@ def test_run_spec_e_passes_invokes_both(tmp_path, monkeypatch):
     assert seen == ["freeze", "board"]
 
 
-def test_incomplete_still_calls_passes(tmp_path, monkeypatch):
-    """Budget abort (complete=false) must still invoke run_spec_e_passes once."""
+def test_main_passes_use_full_universe_not_codes_argv(tmp_path, monkeypatch):
+    """Spec: passes scan mapped U; --codes only limits OHLC/flags loop."""
     db = tmp_path / "b.db"
-    calls = {"n": 0}
+    got = {}
+
+    def _passes(conn, codes, *, session_asof):
+        got["codes"] = list(codes)
+        got["asof"] = session_asof
+
+    monkeypatch.setattr("scripts.sync_bars_sample.run_spec_e_passes", _passes)
+    monkeypatch.setattr(
+        "scripts.sync_bars_sample.bars_conn", lambda: bars_conn(str(db))
+    )
+    monkeypatch.setattr(
+        "scripts.sync_bars_sample.codes_from_universe",
+        lambda *a, **k: ["AAA.SZ", "BBB.SZ"],
+    )
+    monkeypatch.setattr(
+        "scripts.sync_bars_sample.skip_ohlc", lambda *a, **k: True
+    )
+    monkeypatch.setattr(
+        "scripts.sync_bars_sample.skip_flags", lambda *a, **k: True
+    )
+    monkeypatch.setattr(
+        "scripts.sync_bars_sample.latest_trade_day",
+        lambda: dt.date(2024, 1, 9),
+    )
+    monkeypatch.setattr(
+        "scripts.sync_bars_sample.write_sync_complete",
+        lambda *a, **k: None,
+    )
+    rc = main(
+        ["--end", "2024-01-05", "--asof", "2024-01-09", "--codes", "AAA.SZ"]
+    )
+    assert rc == 0
+    assert got["codes"] == ["AAA.SZ", "BBB.SZ"]
+    assert got["asof"] == dt.date(2024, 1, 9)  # not --end
+
+
+def test_incomplete_still_calls_passes_and_keeps_complete_false(
+    tmp_path, monkeypatch
+):
+    db = tmp_path / "b.db"
+    calls = {"n": 0, "complete": None}
 
     def _passes(conn, codes, *, session_asof):
         calls["n"] += 1
 
+    def _wsc(complete, elapsed_min=0.0):
+        calls["complete"] = complete
+
+    # Force budget hit: max-codes=1 with two universe names needing OHLC
     monkeypatch.setattr("scripts.sync_bars_sample.run_spec_e_passes", _passes)
+    monkeypatch.setattr("scripts.sync_bars_sample.write_sync_complete", _wsc)
     monkeypatch.setattr(
         "scripts.sync_bars_sample.bars_conn", lambda: bars_conn(str(db))
     )
@@ -945,89 +961,72 @@ def test_incomplete_still_calls_passes(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "scripts.sync_bars_sample.skip_flags", lambda *a, **k: True
     )
-
-    # First code works; budget exhausted before second — complete=False path.
-    state = {"t0": dt.datetime(2024, 1, 1, 0, 0, 0)}
-
-    class _DT:
-        @staticmethod
-        def utcnow():
-            # first call in loop: 0 min; after first code bump clock past budget
-            return state["t0"]
-
-        strptime = staticmethod(dt.datetime.strptime)
-
-    real_sync = lambda *a, **k: state.__setitem__(
-        "t0", dt.datetime(2024, 1, 1, 1, 0, 0)
-    ) or 1
-    monkeypatch.setattr("scripts.sync_bars_sample.dt", _DT)
-    monkeypatch.setattr("scripts.sync_bars_sample.datetime", _DT, raising=False)
-    # sync_bars_sample imports datetime as dt — patch sync_mod.dt.datetime.utcnow
     monkeypatch.setattr(
-        "scripts.sync_bars_sample.dt.datetime",
-        type(
-            "D",
-            (),
-            {
-                "utcnow": staticmethod(lambda: state["t0"]),
-                "strptime": staticmethod(dt.datetime.strptime),
-            },
-        ),
+        "scripts.sync_bars_sample.sync_symbol_bars", lambda *a, **k: 1
     )
-    monkeypatch.setattr("scripts.sync_bars_sample.sync_symbol_bars", real_sync)
     monkeypatch.setattr(
         "scripts.sync_bars_sample.latest_trade_day",
         lambda: dt.date(2024, 1, 9),
     )
-    monkeypatch.setattr(
-        "scripts.sync_bars_sample.write_sync_complete",
-        lambda complete, elapsed_min=0.0: None,
-    )
-
     rc = main(
-        [
-            "--end",
-            "2024-01-09",
-            "--time-budget-min",
-            "0.5",
-            "--skip-flags",
-        ]
+        ["--end", "2024-01-09", "--max-codes", "1", "--skip-flags"]
     )
     assert rc == 0
     assert calls["n"] == 1
+    assert calls["complete"] is False
 ```
 
-If the budget monkeypatch is brittle in-repo, keep `test_run_spec_e_passes_invokes_both` mandatory and implement `test_incomplete_still_calls_passes` by asserting `main` source order: after the `complete = False` budget `break`, `run_spec_e_passes` is still reached (structural test via reading call placement). Prefer the behavioral test above; fix clock bump so elapsed ≥ `time_budget_min` after first symbol.
+- [ ] **Step 3: Wire `main()` call site (exact order)**
 
-- [ ] **Step 2: Wire CLI + call site**
-
-In `main()`:
+Current tail of `main` today:
 
 ```python
-p.add_argument(
-    "--asof",
-    default="",
-    help="session_asof YYYY-MM-DD (default: latest_trade_day); never use --end",
-)
-session_asof = (
-    dt.datetime.strptime(args.asof, "%Y-%m-%d").date()
-    if args.asof
-    else latest_trade_day()
-)
-# after OHLC/flags loop and with_limits block, BEFORE write_sync_complete:
-run_spec_e_passes(conn, codes, session_asof=session_asof)
-# do not modify `complete` based on pass outcomes
-write_sync_complete(complete, elapsed_min)
+    if args.with_limits and complete:
+        asof = latest_trade_day()
+        ...
+    conn.close()
+    elapsed_min = ...
+    write_sync_complete(complete, elapsed_min)
 ```
 
-**Actions:** leave `.github/workflows/daily-trend.yml` unchanged — default `latest_trade_day()` is correct `session_asof` even when `--end=$DATE` for `only_date`.
+Replace with:
 
-- [ ] **Step 3: Pytest PASS**
+```python
+    p.add_argument("--asof", default="", help="session_asof (default latest_trade_day)")
+    # after parse:
+    session_asof = (
+        dt.datetime.strptime(args.asof, "%Y-%m-%d").date()
+        if args.asof
+        else latest_trade_day()
+    )
+    # OHLC loop still uses `codes` from --codes / --from-universe / universe
+
+    if args.with_limits and complete:
+        if end != session_asof:  # was: latest_trade_day()
+            print("[sync_bars] skip --with-limits (end=%s != asof %s)" % (end, session_asof))
+        else:
+            ... sync_em_limits_asof(conn, end, ...) ...
+
+    # Spec E passes: full mapped U, open connection
+    pass_codes = codes_from_universe(args.from_universe) if args.from_universe else codes_from_universe()
+    run_spec_e_passes(conn, pass_codes, session_asof=session_asof)
+    # do not change `complete` here
+
+    conn.close()
+    elapsed_min = (dt.datetime.utcnow() - started).total_seconds() / 60.0
+    write_sync_complete(complete, elapsed_min)
+```
+
+When `--from-universe` is a fixture path, `pass_codes` may equal that fixture’s mapped set (tests). Production cron omits `--codes`/`--from-universe` → full mapped U.
+
+**Actions:** leave `.github/workflows/daily-trend.yml` unchanged.
+
+- [ ] **Step 4: Pytest PASS**
 
 Run: `.venv/bin/pytest tests/test_sync_spec_e_passes.py -q`  
 Expected: PASS
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add scripts/sync_bars_sample.py tests/test_sync_spec_e_passes.py
@@ -1040,16 +1039,18 @@ EOF
 
 ---
 
-### Task 5: metrics + `daily_run` read `hard_freeze_flag`
+### Task 5: metrics + `daily_run` read flag + bump `param_version`
 
 **Files:**
 - Modify: `scripts/metrics/pipeline.py` (`replay_from_ohlc` hard line)
 - Modify: `scripts/daily_run.py` (`_BARS_SELECT` + `_load_symbol_bars`)
-- Test: `tests/test_pipeline_hard_freeze_flag.py` (new) and/or extend `tests/test_fsm.py` / `tests/test_daily_run_metrics_wire.py`
+- Modify: `config/metrics/a_share_daily.yaml` — `param_version: p05-v3`
+- Modify: `tests/test_features.py`, `tests/test_daily_run_metrics_wire.py`, `tests/test_hard_freeze_config.py`
+- Test: `tests/test_pipeline_hard_freeze_flag.py`
 
 **Interfaces:**
 - Consumes: bar dict field `hard_freeze_flag`
-- Produces: `hard_frozen = bool(is_st) or bool(hard_freeze_flag)`
+- Produces: `hard_frozen = is_st ∨ hard_freeze_flag`; live yaml `param_version: p05-v3` (protocol B: freeze pass + OR already landed in Tasks 2–4/this task)
 
 - [ ] **Step 1: Failing tests**
 
@@ -1133,17 +1134,37 @@ ORDER BY trade_date ASC
 "hard_freeze_flag": r[9],
 ```
 
-- [ ] **Step 3: Pytest**
+- [ ] **Step 3: Bump `param_version` + whitelist pins**
 
-Run: `.venv/bin/pytest tests/test_pipeline_hard_freeze_flag.py tests/test_fsm.py -q`  
+In `config/metrics/a_share_daily.yaml`:
+
+```yaml
+param_version: p05-v3
+```
+
+Update only real-yaml pins:
+
+| File | Change |
+|------|--------|
+| `tests/test_features.py` | `== "p05-v3"` |
+| `tests/test_daily_run_metrics_wire.py` | `"p05-v2"` → `"p05-v3"` |
+| `tests/test_hard_freeze_config.py` | assert `param_version == "p05-v3"` |
+
+Do **not** change fixture hardcodes in `tests/test_digest_rs_vol.py`.
+
+- [ ] **Step 4: Pytest**
+
+Run: `.venv/bin/pytest tests/test_pipeline_hard_freeze_flag.py tests/test_fsm.py tests/test_features.py tests/test_daily_run_metrics_wire.py tests/test_hard_freeze_config.py -q`  
 Expected: PASS
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add scripts/metrics/pipeline.py scripts/daily_run.py tests/test_pipeline_hard_freeze_flag.py
+git add scripts/metrics/pipeline.py scripts/daily_run.py config/metrics/a_share_daily.yaml \
+  tests/test_pipeline_hard_freeze_flag.py tests/test_features.py \
+  tests/test_daily_run_metrics_wire.py tests/test_hard_freeze_config.py
 git commit -m "$(cat <<'EOF'
-feat(metrics): OR hard_freeze_flag into hard_frozen
+feat(metrics): OR hard_freeze_flag into hard_frozen; bump p05-v3
 
 EOF
 )"
@@ -1169,68 +1190,101 @@ EOF
 rg -n "fill_day\(" scripts/eval --glob '*.py'
 ```
 
-- [ ] **Step 2: Wire fill_day**
+- [ ] **Step 2: Wire fill_day (exact call sites)**
 
-In `live_shadow_step.py` and `paper_book.replay_window` (and any other production caller):
-
-```python
-fills = fill_day(
-    T.isoformat(),  # or existing first args
-    sigs,
-    book,
-    bars,
-    costs,
-    track="H",  # or existing
-    run_id=run_id,
-    limit_up_unfillable=costs.limit_up_unfillable,
-)
-```
-
-- [ ] **Step 3: Summary meta**
-
-In `paper_book._write_out` (or when building `kpi`), merge:
+`scripts/eval/paper_book.py` `replay_window`:
 
 ```python
-kpi = dict(payload["kpi"])
-costs = payload.get("costs")  # thread costs through replay_window return
-kpi["limit_rule"] = costs.limit_rule
-kpi["cost_version"] = costs.cost_version
-json.dump(kpi, f, ensure_ascii=False, indent=2)
+        fills = fill_day(
+            T.isoformat(),
+            sigs,
+            book,
+            bars,
+            costs,
+            track="H",
+            run_id=run_id,
+            limit_up_unfillable=costs.limit_up_unfillable,
+        )
 ```
 
-Minimal threading: change `replay_window` to `return {"fills", "kpi", "book", "costs": costs}` and read in `_write_out`. Shadow path: if it does not write summary.json, still ensure paper/H summary satisfies Spec §3.3.
+`scripts/eval/live_shadow_step.py`:
+
+```python
+    fills = fill_day(
+        T,
+        pending,
+        book,
+        bars,
+        costs,
+        track="L",
+        param_version=param_v,
+        map_version=map_v,
+        run_id="shadow-%s" % T,
+        skip_event_days=paper_fill_keys_on_date(conn, T),
+        limit_up_unfillable=costs.limit_up_unfillable,
+    )
+```
+
+- [ ] **Step 3: Summary meta from payload costs**
+
+`replay_window` return:
+
+```python
+    return {"fills": all_fills, "kpi": kpi, "book": book, "costs": costs}
+```
+
+`_write_out`:
+
+```python
+    kpi = dict(payload["kpi"])
+    costs = payload["costs"]
+    kpi["limit_rule"] = costs.limit_rule
+    kpi["cost_version"] = costs.cost_version
+    with open(os.path.join(dest, "summary.json"), "w", encoding="utf-8") as f:
+        json.dump(kpi, f, ensure_ascii=False, indent=2)
+```
+
+Any CLI/`main` that calls `_write_out` must pass the enriched payload (already returned by `replay_window`).
 
 - [ ] **Step 4: Tests**
 
 ```python
 def test_limit_up_sell_still_fills_when_unfillable_false():
-    from scripts.eval.book import BookState, Position
-    from scripts.eval.fill_day import fill_day
+    """Mirror test_fill_forced_exit_st setup; open at limit_up; unfillable false → filled."""
+    from datetime import date
+    from scripts.common.calendar import load_trade_dates_from_list
+    from scripts.eval.book import BookState
     from scripts.eval.costs import load_costs
+    from scripts.eval.fill_day import fill_day
 
+    load_trade_dates_from_list(["2024-01-05", "2024-01-08", "2024-01-09"])
     costs = load_costs()
     assert costs.limit_up_unfillable is False
-    book = BookState(cash=0, last_equity=0)
-    book.positions["000001.SZ"] = Position(
-        shares=100, entry_date="2024-01-05", entry_px=10.0, signal_date="2024-01-05"
-    )
-    # Adjust Position ctor to match scripts/eval/book.py exactly if fields differ.
-    fills = fill_day(
+    book = BookState(cash=costs.initial_cash, last_equity=costs.initial_cash)
+    fill_day(
         "2024-01-08",
+        [{"event": "ENTER_RIGHT", "ts_code": "000001.SZ", "trade_date": "2024-01-05", "id": 1, "RS": 1}],
+        book,
+        {"000001.SZ": {
+            "open_raw": 10.0, "close_raw": 10.0,
+            "limit_up": 11.0, "limit_down": 9.0, "is_suspended": 0,
+        }},
+        costs,
+        limit_up_unfillable=costs.limit_up_unfillable,
+    )
+    fills = fill_day(
+        "2024-01-09",
         [{
             "event": "EXIT_RIGHT",
             "ts_code": "000001.SZ",
-            "trade_date": "2024-01-05",
-            "id": 9,
+            "trade_date": "2024-01-08",
+            "id": 3,
             "detail": {"exit_kind": "temperature"},
         }],
         book,
         {"000001.SZ": {
-            "open_raw": 11.0,
-            "close_raw": 11.0,
-            "limit_up": 11.0,
-            "limit_down": 9.0,
-            "is_suspended": 0,
+            "open_raw": 11.0, "close_raw": 11.0,
+            "limit_up": 11.0, "limit_down": 9.0, "is_suspended": 0,
         }},
         costs,
         limit_up_unfillable=False,
@@ -1240,25 +1294,29 @@ def test_limit_up_sell_still_fills_when_unfillable_false():
 
 
 def test_summary_includes_limit_rule_and_cost_version(tmp_path):
-    # Call the same helper _write_out uses after a tiny replay_window,
-    # or unit-test the kpi merge function.
-    from scripts.eval.costs import load_costs
-    from scripts.eval.paper_book import window_kpis, _write_out
-    from scripts.eval.book import BookState
-
-    costs = load_costs()
-    book = BookState(cash=costs.initial_cash, last_equity=costs.initial_cash)
-    kpi = window_kpis([], book)
-    kpi["limit_rule"] = costs.limit_rule
-    kpi["cost_version"] = costs.cost_version
-    _write_out(str(tmp_path), "t", {"fills": [], "kpi": kpi, "book": book})
+    """Must go through _write_out(payload with costs) — do not pre-stuff kpi keys."""
     import json
+    from datetime import date
+    from scripts.common.calendar import load_trade_dates_from_list
+    from scripts.eval.costs import load_costs
+    from scripts.eval.paper_book import replay_window, _write_out
+
+    load_trade_dates_from_list(["2024-01-05", "2024-01-08"])
+    costs = load_costs()
+    payload = replay_window(
+        date(2024, 1, 5),
+        date(2024, 1, 8),
+        signals=[],
+        bars_by_day={},
+        costs=costs,
+        run_id="sum-meta",
+    )
+    assert "costs" in payload
+    _write_out(str(tmp_path), "t", payload)
     summary = json.loads((tmp_path / "t" / "summary.json").read_text())
     assert summary["limit_rule"] == "board_calc_v1"
     assert summary["cost_version"] == "v2"
 ```
-
-If `Position` import/fields differ, copy the setup from `tests/test_fill_day.py::test_fill_forced_exit_st` and only change the open/limit relationship.
 
 - [ ] **Step 5: Pytest + commit**
 
@@ -1327,14 +1385,16 @@ EOF
 | `limit_rule` gate / no vendor overwrite | 3 |
 | prior `close_raw` + HALF_UP + 300/301/688/ST | 3 |
 | `limit_up_unfillable` explicit false + loader | 0, 6 |
-| summary `limit_rule` + `cost_version` | 6 |
-| `cost_version` / `param_version` bump | 0 (whitelist pins) |
+| summary `limit_rule` + `cost_version` | 6 (via payload `costs`, not pre-stuffed kpi) |
+| `cost_version` bump | 0 |
+| `param_version` bump | 5 (after freeze+OR) |
 | `hard_freeze_flag` ensure + CREATE | 1 |
 | streak N=20, holes, resume clear | 2 (`apply_*` only) |
-| full-U rewrite; N change protocol B fixture | 2 |
-| passes after loop; incomplete still runs | 4 |
+| full-U rewrite; N mid-state + rewrite | 2 |
+| passes before `conn.close`; full mapped U; incomplete+`complete=False` | 4 |
+| CLI `session_asof`≠`--end`; `--asof` drives `with_limits` compare | 4 |
 | metrics OR flag; daily_run SELECT; flag→forced_exit | 5 |
 | docs touchpoints | 7 |
 | Actions workflow | no change |
 
-Plan CR patch (2026-10-08): removed contradictory `streak_flags` hole test; closed Task 4/5/6 placeholders; whitelist `p05-v3` pins; summary `limit_rule`.
+Indep plan CR patch (2026-10-08): `conn.close` order; full-U passes; #2b/#10/#11; drop brittle escape; defer `p05-v3`; non-tautological summary test.
