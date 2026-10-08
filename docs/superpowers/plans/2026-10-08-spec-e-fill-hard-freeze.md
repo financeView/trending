@@ -38,10 +38,14 @@
 | `scripts/daily_run.py` | `_BARS_SELECT` includes `hard_freeze_flag` |
 | `config/eval/costs.yaml` | `board_calc_v1`, `limit_up_unfillable: false`, bump `cost_version` |
 | `config/metrics/a_share_daily.yaml` | `hard_freeze_min_suspend_days: 20`, bump `param_version` |
-| `tests/test_hard_freeze.py` | streak / migrate / N rewrite / incomplete sync |
+| `tests/test_hard_freeze.py` | streak via `apply_*`+calendar / N rewrite / resume |
 | `tests/test_board_calc.py` | hist/asof/vendor/gate/pct/HALF_UP/`session_asof`≠end |
-| `tests/test_fill_day.py` / `test_eval_costs_book.py` / pinned `p05-v2` tests | version bumps |
+| `tests/test_sync_spec_e_passes.py` | `run_spec_e_passes` + incomplete still runs |
+| `tests/test_fill_day.py` / `test_eval_costs_book.py` | `cost_version` v2 + `limit_up_unfillable` |
+| `tests/test_features.py` / `test_daily_run_metrics_wire.py` | **only** real-yaml `p05-v3` pins (not fixture hardcodes) |
+| `scripts/eval/paper_book.py` / fill summary path | emit `limit_rule` + `cost_version` in summary/kpi |
 | docs: market-data / metrics §5.5 / backtest-eval / `todo.md` / Spec E status | Done-when |
+| `.github/workflows/daily-trend.yml` | **no change required** — sync default `session_asof=latest_trade_day()` |
 
 ```text
 Task 0 (config bumps + costs loader + pin updates)
@@ -160,18 +164,31 @@ def load_costs(path: Optional[str | Path] = None) -> EvalCosts:
     )
 ```
 
-- [ ] **Step 5: Update `p05-v2` pins to `p05-v3`**
+- [ ] **Step 5: Update real-yaml `p05-v2` pins only (whitelist)**
+
+Must change (load production `a_share_daily.yaml` or assert its version):
+
+| File | Change |
+|------|--------|
+| `tests/test_features.py` | `PARAMS.param_version == "p05-v3"` |
+| `tests/test_daily_run_metrics_wire.py` | assertions `"p05-v2"` → `"p05-v3"` (daily_stock + run_meta) |
+
+**Do not change** synthetic INSERT/fixture versions, e.g. `tests/test_digest_rs_vol.py` row `("ok", "p05-v2", ...)` — that string is local fixture data, not the live yaml pin.
+
+Also bump cost pins: `tests/test_fill_day.py`, `tests/test_eval_costs_book.py` → `v2` (Step 2).
+
+Verify no stray live pins left:
 
 ```bash
 rg -n "p05-v2" tests --glob '*.py'
+# expected remaining: only fixture hardcodes (digest etc.), not load_params/real yaml asserts
+rg -n 'cost_version == "v1"' tests --glob '*.py'
+# expected: empty
 ```
-
-Replace assertions/fixtures that expect production `param_version == "p05-v2"` with `p05-v3` where they load real `a_share_daily.yaml`. Leave synthetic fixture strings that hardcode their own version alone.
 
 - [ ] **Step 6: Pytest**
 
-Run: `.venv/bin/pytest tests/test_fill_day.py::test_load_costs_v2_spec_e tests/test_eval_costs_book.py tests/test_hard_freeze_config.py tests/test_features.py::test_params_load -q`  
-(adjust test name if `test_features` pin differs)  
+Run: `.venv/bin/pytest tests/test_fill_day.py::test_load_costs_v2_spec_e tests/test_eval_costs_book.py tests/test_hard_freeze_config.py tests/test_features.py tests/test_daily_run_metrics_wire.py -q`  
 Expected: PASS
 
 - [ ] **Step 7: Commit**
@@ -322,66 +339,127 @@ EOF
 - Optional tiny helper: `load_hard_freeze_min_suspend_days(path) -> int` in same module
 
 **Interfaces:**
-- Consumes: `ensure_bars_columns`; bars rows with `is_suspended`, `flag_source`
+- Consumes: `ensure_bars_columns`; bars rows with `is_suspended`, `flag_source`; trade calendar via `prev_trade_date`
 - Produces:
   - `load_hard_freeze_min_suspend_days(path: Path | None = None) -> int`
-  - `streak_flags(rows: list[tuple[str, int, str | None]], n: int) -> list[int]`
-    - `rows` ordered by `trade_date` asc: `(trade_date, is_suspended, flag_source)`
-    - only counts when `is_suspended==1` and `flag_source` truthy; gap/`flag_source` empty breaks streak
   - `apply_hard_freeze_flags(conn, ts_codes: Sequence[str], *, n: int, commit: bool = True) -> int`  
-    returns rows updated (or symbols processed — pick **rows written** and document in docstring)
+    (**sole** streak implementation — rows written count). Resets streak when `flag_source` empty, `is_suspended!=1`, or `prev_trade_date(td) != previous row date` (calendar hole).
+
+**Do not** ship a separate `streak_flags` helper that ignores the calendar — that caused a contradictory hole test in draft v1.
 
 - [ ] **Step 1: Failing unit tests**
 
 ```python
 # tests/test_hard_freeze.py
-from scripts.common.hard_freeze import streak_flags, apply_hard_freeze_flags, load_hard_freeze_min_suspend_days
+from datetime import date, timedelta
+
+from scripts.common.hard_freeze import apply_hard_freeze_flags, load_hard_freeze_min_suspend_days
 from scripts.common.bars import bars_conn, ensure_bars_columns
+from scripts.common.calendar import load_trade_dates_from_list
+
+
+def _consec(start: date, n: int) -> list[str]:
+    out = []
+    d = start
+    for _ in range(n):
+        out.append(d.isoformat())
+        d += timedelta(days=1)
+    return out
 
 
 def test_load_n_default():
     assert load_hard_freeze_min_suspend_days() == 20
 
 
-def test_streak_boundary_n():
-    # 19 suspended → 0; 20th → 1
-    rows = []
-    for i in range(1, 21):
-        rows.append((f"2024-01-{i:02d}", 1, "baostock"))
-    # use flat list of 20 days — only last should be 1 when n=20
-    flags = streak_flags(rows, n=20)
+def test_streak_boundary_n(tmp_path):
+    days = _consec(date(2024, 1, 2), 25)
+    load_trade_dates_from_list(days)
+    conn = bars_conn(str(tmp_path / "b.db"))
+    ensure_bars_columns(conn)
+    code = "000001.SZ"
+    for td in days[:20]:
+        conn.execute(
+            "INSERT INTO bars (ts_code, trade_date, is_suspended, flag_source, hard_freeze_flag)"
+            " VALUES (?,?,1,'baostock',0)",
+            (code, td),
+        )
+    conn.commit()
+    apply_hard_freeze_flags(conn, [code], n=20)
+    flags = [
+        r[0]
+        for r in conn.execute(
+            "SELECT hard_freeze_flag FROM bars WHERE ts_code=? ORDER BY trade_date",
+            (code,),
+        )
+    ]
     assert flags[:19] == [0] * 19
     assert flags[19] == 1
 
 
-def test_streak_hole_breaks():
-    rows = [
-        ("2024-01-02", 1, "baostock"),
-        ("2024-01-03", 1, "baostock"),
-        # hole: missing 01-04
-        ("2024-01-05", 1, "baostock"),
-    ]
-    # n=3: no day reaches 3
-    assert streak_flags(rows, n=3) == [0, 0, 0]
+def test_streak_hole_breaks(tmp_path):
+    # calendar has 01-04 but bar row missing → streak must reset
+    load_trade_dates_from_list(["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05"])
+    conn = bars_conn(str(tmp_path / "b.db"))
+    ensure_bars_columns(conn)
+    code = "000001.SZ"
+    for td in ("2024-01-02", "2024-01-03", "2024-01-05"):
+        conn.execute(
+            "INSERT INTO bars (ts_code, trade_date, is_suspended, flag_source, hard_freeze_flag)"
+            " VALUES (?,?,1,'baostock',0)",
+            (code, td),
+        )
+    conn.commit()
+    apply_hard_freeze_flags(conn, [code], n=3)
+    got = dict(
+        conn.execute(
+            "SELECT trade_date, hard_freeze_flag FROM bars WHERE ts_code=?",
+            (code,),
+        )
+    )
+    assert got == {"2024-01-02": 0, "2024-01-03": 0, "2024-01-05": 0}
 
 
-def test_missing_flag_source_breaks():
+def test_missing_flag_source_breaks(tmp_path):
+    load_trade_dates_from_list(["2024-01-02", "2024-01-03", "2024-01-04"])
+    conn = bars_conn(str(tmp_path / "b.db"))
+    ensure_bars_columns(conn)
+    code = "000001.SZ"
     rows = [
         ("2024-01-02", 1, "baostock"),
         ("2024-01-03", 1, None),
         ("2024-01-04", 1, "baostock"),
     ]
-    assert streak_flags(rows, n=2) == [0, 0, 0]
+    for td, sus, src in rows:
+        conn.execute(
+            "INSERT INTO bars (ts_code, trade_date, is_suspended, flag_source, hard_freeze_flag)"
+            " VALUES (?,?,?,?,0)",
+            (code, td, sus, src),
+        )
+    conn.commit()
+    apply_hard_freeze_flags(conn, [code], n=2)
+    flags = [
+        r[0]
+        for r in conn.execute(
+            "SELECT hard_freeze_flag FROM bars WHERE ts_code=? ORDER BY trade_date",
+            (code,),
+        )
+    ]
+    assert flags == [0, 0, 0]
 
 
 def test_resume_clears(tmp_path):
+    load_trade_dates_from_list(
+        ["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05"]
+    )
     conn = bars_conn(str(tmp_path / "b.db"))
     ensure_bars_columns(conn)
     code = "000001.SZ"
-    for i, (td, sus) in enumerate([
-        ("2024-01-02", 1), ("2024-01-03", 1), ("2024-01-04", 1),
+    for td, sus in [
+        ("2024-01-02", 1),
+        ("2024-01-03", 1),
+        ("2024-01-04", 1),
         ("2024-01-05", 0),
-    ]):
+    ]:
         conn.execute(
             "INSERT INTO bars (ts_code, trade_date, is_suspended, flag_source, hard_freeze_flag)"
             " VALUES (?,?,?,?,0)",
@@ -389,44 +467,49 @@ def test_resume_clears(tmp_path):
         )
     conn.commit()
     apply_hard_freeze_flags(conn, [code], n=3)
-    got = dict(conn.execute(
-        "SELECT trade_date, hard_freeze_flag FROM bars WHERE ts_code=? ORDER BY trade_date",
-        (code,),
-    ))
+    got = dict(
+        conn.execute(
+            "SELECT trade_date, hard_freeze_flag FROM bars WHERE ts_code=? ORDER BY trade_date",
+            (code,),
+        )
+    )
     assert got["2024-01-04"] == 1
     assert got["2024-01-05"] == 0
 
 
 def test_n_change_requires_rewrite(tmp_path):
+    days = _consec(date(2024, 2, 1), 25)
+    load_trade_dates_from_list(days)
     conn = bars_conn(str(tmp_path / "b.db"))
+    ensure_bars_columns(conn)
     code = "000002.SZ"
-    for i in range(1, 26):
+    for td in days:
         conn.execute(
             "INSERT INTO bars (ts_code, trade_date, is_suspended, flag_source, hard_freeze_flag)"
             " VALUES (?,?,1,'baostock',0)",
-            (code, f"2024-02-{i:02d}"),
+            (code, td),
         )
     conn.commit()
     apply_hard_freeze_flags(conn, [code], n=20)
-    asof = "2024-02-25"
-    assert conn.execute(
-        "SELECT hard_freeze_flag FROM bars WHERE ts_code=? AND trade_date=?",
-        (code, asof),
-    ).fetchone()[0] == 1
-    # bump N without rewrite → stale 1 (simulate by not calling apply)
-    stale = conn.execute(
-        "SELECT hard_freeze_flag FROM bars WHERE ts_code=? AND trade_date=?",
-        (code, asof),
-    ).fetchone()[0]
-    assert stale == 1
+    asof = days[-1]
+    assert (
+        conn.execute(
+            "SELECT hard_freeze_flag FROM bars WHERE ts_code=? AND trade_date=?",
+            (code, asof),
+        ).fetchone()[0]
+        == 1
+    )
     apply_hard_freeze_flags(conn, [code], n=60)
-    assert conn.execute(
-        "SELECT hard_freeze_flag FROM bars WHERE ts_code=? AND trade_date=?",
-        (code, asof),
-    ).fetchone()[0] == 0
+    assert (
+        conn.execute(
+            "SELECT hard_freeze_flag FROM bars WHERE ts_code=? AND trade_date=?",
+            (code, asof),
+        ).fetchone()[0]
+        == 0
+    )
 ```
 
-Fix February day count in the loop if needed (use 25 consecutive ISO dates via a list). Prefer building dates with `datetime` to avoid invalid calendar days.
+Note: `_consec` uses calendar days for a compact fixture; pair with `load_trade_dates_from_list` so `prev_trade_date` matches the inserted spine (weekend-free list).
 
 - [ ] **Step 2: Run — FAIL**
 
@@ -439,10 +522,13 @@ Expected: FAIL import
 """Spec E: consecutive is_suspended → bars.hard_freeze_flag."""
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Optional, Sequence
 
 import yaml
+
+from scripts.common.calendar import prev_trade_date
 
 _ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_METRICS = _ROOT / "config" / "metrics" / "a_share_daily.yaml"
@@ -454,38 +540,6 @@ def load_hard_freeze_min_suspend_days(path: Optional[Path] = None) -> int:
     return int(raw.get("hard_freeze_min_suspend_days") or 20)
 
 
-def streak_flags(
-    rows: Sequence[Tuple[str, int, Optional[str]]], n: int
-) -> List[int]:
-    """rows: (trade_date, is_suspended, flag_source) ascending by trade_date.
-
-    Calendar holes are the caller's responsibility (omit missing days).
-    A day without flag_source does not count and resets streak.
-    """
-    out: List[int] = []
-    streak = 0
-    prev_td: Optional[str] = None
-    for td, sus, src in rows:
-        # If caller includes only existing rows, "hole" = non-consecutive calendar
-        # is NOT detected here — apply_* must only feed contiguous trade-calendar
-        # rows OR reset when prev trade-calendar day missing.
-        if not src:
-            streak = 0
-            out.append(0)
-            prev_td = td
-            continue
-        if int(sus) == 1:
-            streak += 1
-        else:
-            streak = 0
-        out.append(1 if streak >= int(n) else 0)
-        prev_td = td
-    return out
-```
-
-**Important:** In `apply_hard_freeze_flags`, load each symbol's rows ordered by `trade_date`, and **reset streak when `prev_trade_date(td) != previous row's date`** (use `scripts.common.calendar.prev_trade_date`). That implements "空洞不计 / 不跨洞虚增".
-
-```python
 def apply_hard_freeze_flags(
     conn,
     ts_codes: Sequence[str],
@@ -493,9 +547,7 @@ def apply_hard_freeze_flags(
     n: int,
     commit: bool = True,
 ) -> int:
-    from datetime import date
-    from scripts.common.calendar import prev_trade_date
-
+    """Rewrite hard_freeze_flag for each ts_code. Returns number of rows touched."""
     written = 0
     for ts in ts_codes:
         rows = conn.execute(
@@ -532,8 +584,6 @@ def apply_hard_freeze_flags(
         conn.commit()
     return written
 ```
-
-Keep `streak_flags` for pure unit tests; either duplicate hole logic there with explicit missing days, or unit-test holes only via `apply_*` + calendar monkeypatch (`load_trade_dates_from_list`).
 
 - [ ] **Step 4: Pytest PASS**
 
@@ -737,15 +787,15 @@ def apply_board_calc(
 ) -> int:
     if str(limit_rule) != "board_calc_v1":
         return 0
-    asof_s = session_asof.isoformat()
     n_write = 0
     for ts in ts_codes:
+        ts_n = to_ts_code(ts)
         rows = conn.execute(
             """
             SELECT trade_date, close_raw, is_st, limit_up, limit_down
             FROM bars WHERE ts_code=? ORDER BY trade_date ASC
             """,
-            (to_ts_code(ts),),
+            (ts_n,),
         ).fetchall()
         by_td = {str(r[0])[:10]: r for r in rows}
         for td_s, close_raw, is_st, up, down in rows:
@@ -767,25 +817,22 @@ def apply_board_calc(
                 continue
             if basis_f <= 0 or basis_f != basis_f:
                 continue
-            pct = board_pct(ts, int(is_st or 0))
+            pct = board_pct(ts_n, int(is_st or 0))
             lu, ld = limit_prices(basis_f, pct)
-            conn.execute(
+            cur = conn.execute(
                 """
                 UPDATE bars
                 SET limit_up=?, limit_down=?, limit_source=?, preclose_raw=?
                 WHERE ts_code=? AND trade_date=?
                   AND limit_up IS NULL AND limit_down IS NULL
                 """,
-                (lu, ld, LIMIT_SOURCE_BOARD_CALC, basis_f, to_ts_code(ts), td_s),
+                (lu, ld, LIMIT_SOURCE_BOARD_CALC, basis_f, ts_n, td_s),
             )
-            if conn.total_changes:  # careful: better use cursor.rowcount
-                n_write += 1
+            n_write += int(cur.rowcount or 0)
     if commit:
         conn.commit()
     return n_write
 ```
-
-Use `cur = conn.execute(...); n_write += cur.rowcount` instead of `total_changes`.
 
 - [ ] **Step 4: Pytest PASS**
 
@@ -815,127 +862,165 @@ EOF
 - Consumes: `ensure_bars_columns`, `apply_hard_freeze_flags`, `load_hard_freeze_min_suspend_days`, `apply_board_calc`, `load_costs`
 - Produces: CLI `--asof`; after OHLC/flags (+ limits), always run both passes; `session_asof` from `--asof` or `latest_trade_day()`
 
-- [ ] **Step 1: Failing integration test**
+- [ ] **Step 1: Extract helper + failing tests**
+
+Add to `scripts/sync_bars_sample.py` (before `main`):
 
 ```python
-# tests/test_sync_spec_e_passes.py
-import datetime as dt
-from scripts.common.bars import bars_conn
-from scripts.common.calendar import load_trade_dates_from_list
-import scripts.sync_bars_sample as sync_mod
-
-
-def test_passes_run_when_complete_false(tmp_path, monkeypatch):
-    load_trade_dates_from_list(["2024-01-05", "2024-01-08", "2024-01-09"])
-    db = tmp_path / "b.db"
-    conn = bars_conn(str(db))
-    code = "600000.SH"
-    for i in range(20):
-        # build 20 suspended days ending 2024-01-08 via helper dates list
-        pass  # implement with explicit date list of length 20 + clear day
-    # ... insert flags + prior close for board_calc ...
-    conn.close()
-
-    calls = {"freeze": 0, "board": 0}
-
-    def fake_freeze(conn, codes, *, n, commit=True):
-        calls["freeze"] += 1
-        return 0
-
-    def fake_board(conn, codes, *, session_asof, limit_rule, commit=True):
-        calls["board"] += 1
-        return 0
-
-    monkeypatch.setattr(sync_mod, "apply_hard_freeze_flags", fake_freeze)
-    monkeypatch.setattr(sync_mod, "apply_board_calc", fake_board)
-    monkeypatch.setattr(sync_mod, "bars_conn", lambda: bars_conn(str(db)))
-    monkeypatch.setattr(sync_mod, "codes_from_universe", lambda *a, **k: [code])
-    monkeypatch.setattr(sync_mod, "sync_symbol_bars", lambda *a, **k: 0)
-    monkeypatch.setattr(sync_mod, "sync_baostock_flags", lambda *a, **k: 0)
-    # force budget hit immediately
-    monkeypatch.setattr(
-        sync_mod.dt, "datetime",
-        type("X", (), {
-            "utcnow": staticmethod(lambda: dt.datetime(2024, 1, 1)),
-            "strptime": dt.datetime.strptime,
-        }),
-    )
-    # Simpler: pass --time-budget-min 0.0001 and make first code need work —
-    # OR call an extracted run_post_sync_passes(conn, codes, session_asof) unit.
-
-```
-
-**Prefer extract** for testability:
-
-```python
-# in sync_bars_sample.py
 def run_spec_e_passes(conn, codes, *, session_asof: dt.date) -> None:
+    from scripts.common.bars import ensure_bars_columns
+    from scripts.common.board_calc import apply_board_calc
     from scripts.common.hard_freeze import (
         apply_hard_freeze_flags,
         load_hard_freeze_min_suspend_days,
     )
-    from scripts.common.board_calc import apply_board_calc
     from scripts.eval.costs import load_costs
-    from scripts.common.bars import ensure_bars_columns
 
     ensure_bars_columns(conn)
     try:
         n = load_hard_freeze_min_suspend_days()
         apply_hard_freeze_flags(conn, codes, n=n)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print("[sync_bars] warn: hard_freeze skipped: %s" % e, file=sys.stderr)
     try:
         costs = load_costs()
         apply_board_calc(
             conn, codes, session_asof=session_asof, limit_rule=costs.limit_rule
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print("[sync_bars] warn: board_calc skipped: %s" % e, file=sys.stderr)
 ```
 
-Test:
-
 ```python
+# tests/test_sync_spec_e_passes.py
+import datetime as dt
+
+from scripts.common.bars import bars_conn
+from scripts.sync_bars_sample import main, run_spec_e_passes
+
+
 def test_run_spec_e_passes_invokes_both(tmp_path, monkeypatch):
     conn = bars_conn(str(tmp_path / "b.db"))
-    seen = []
+    seen: list[str] = []
+
     monkeypatch.setattr(
-        "scripts.sync_bars_sample.apply_hard_freeze_flags",
-        lambda *a, **k: seen.append("f") or 0,
+        "scripts.common.hard_freeze.apply_hard_freeze_flags",
+        lambda *a, **k: seen.append("freeze") or 0,
     )
-    # import inside function — patch hard_freeze/board_calc modules instead
+    monkeypatch.setattr(
+        "scripts.common.board_calc.apply_board_calc",
+        lambda *a, **k: seen.append("board") or 0,
+    )
+    monkeypatch.setattr(
+        "scripts.common.hard_freeze.load_hard_freeze_min_suspend_days",
+        lambda: 20,
+    )
+    monkeypatch.setattr(
+        "scripts.eval.costs.load_costs",
+        lambda: type("C", (), {"limit_rule": "board_calc_v1"})(),
+    )
+    run_spec_e_passes(conn, ["600000.SH"], session_asof=dt.date(2024, 1, 9))
+    assert seen == ["freeze", "board"]
+
+
+def test_incomplete_still_calls_passes(tmp_path, monkeypatch):
+    """Budget abort (complete=false) must still invoke run_spec_e_passes once."""
+    db = tmp_path / "b.db"
+    calls = {"n": 0}
+
+    def _passes(conn, codes, *, session_asof):
+        calls["n"] += 1
+
+    monkeypatch.setattr("scripts.sync_bars_sample.run_spec_e_passes", _passes)
+    monkeypatch.setattr(
+        "scripts.sync_bars_sample.bars_conn", lambda: bars_conn(str(db))
+    )
+    monkeypatch.setattr(
+        "scripts.sync_bars_sample.codes_from_universe",
+        lambda *a, **k: ["600000.SH", "600001.SH"],
+    )
+    monkeypatch.setattr(
+        "scripts.sync_bars_sample.skip_ohlc", lambda *a, **k: False
+    )
+    monkeypatch.setattr(
+        "scripts.sync_bars_sample.skip_flags", lambda *a, **k: True
+    )
+
+    # First code works; budget exhausted before second — complete=False path.
+    state = {"t0": dt.datetime(2024, 1, 1, 0, 0, 0)}
+
+    class _DT:
+        @staticmethod
+        def utcnow():
+            # first call in loop: 0 min; after first code bump clock past budget
+            return state["t0"]
+
+        strptime = staticmethod(dt.datetime.strptime)
+
+    real_sync = lambda *a, **k: state.__setitem__(
+        "t0", dt.datetime(2024, 1, 1, 1, 0, 0)
+    ) or 1
+    monkeypatch.setattr("scripts.sync_bars_sample.dt", _DT)
+    monkeypatch.setattr("scripts.sync_bars_sample.datetime", _DT, raising=False)
+    # sync_bars_sample imports datetime as dt — patch sync_mod.dt.datetime.utcnow
+    monkeypatch.setattr(
+        "scripts.sync_bars_sample.dt.datetime",
+        type(
+            "D",
+            (),
+            {
+                "utcnow": staticmethod(lambda: state["t0"]),
+                "strptime": staticmethod(dt.datetime.strptime),
+            },
+        ),
+    )
+    monkeypatch.setattr("scripts.sync_bars_sample.sync_symbol_bars", real_sync)
+    monkeypatch.setattr(
+        "scripts.sync_bars_sample.latest_trade_day",
+        lambda: dt.date(2024, 1, 9),
+    )
+    monkeypatch.setattr(
+        "scripts.sync_bars_sample.write_sync_complete",
+        lambda complete, elapsed_min=0.0: None,
+    )
+
+    rc = main(
+        [
+            "--end",
+            "2024-01-09",
+            "--time-budget-min",
+            "0.5",
+            "--skip-flags",
+        ]
+    )
+    assert rc == 0
+    assert calls["n"] == 1
 ```
 
-Patch `scripts.common.hard_freeze.apply_hard_freeze_flags` and `scripts.common.board_calc.apply_board_calc` before calling `run_spec_e_passes`.
+If the budget monkeypatch is brittle in-repo, keep `test_run_spec_e_passes_invokes_both` mandatory and implement `test_incomplete_still_calls_passes` by asserting `main` source order: after the `complete = False` budget `break`, `run_spec_e_passes` is still reached (structural test via reading call placement). Prefer the behavioral test above; fix clock bump so elapsed ≥ `time_budget_min` after first symbol.
 
-Also:
-
-```python
-def test_incomplete_still_calls_passes(monkeypatch, tmp_path):
-    # main() with time budget forcing complete=False still calls run_spec_e_passes once
-    ...
-```
-
-- [ ] **Step 2: Implement CLI + call site**
+- [ ] **Step 2: Wire CLI + call site**
 
 In `main()`:
 
 ```python
-p.add_argument("--asof", default="", help="session_asof YYYY-MM-DD (default: latest_trade_day)")
-# after parsing:
+p.add_argument(
+    "--asof",
+    default="",
+    help="session_asof YYYY-MM-DD (default: latest_trade_day); never use --end",
+)
 session_asof = (
     dt.datetime.strptime(args.asof, "%Y-%m-%d").date()
     if args.asof
     else latest_trade_day()
 )
 # after OHLC/flags loop and with_limits block, BEFORE write_sync_complete:
-try:
-    run_spec_e_passes(conn, codes, session_asof=session_asof)
-except Exception as e:
-    print("[sync_bars] warn: spec_e passes: %s" % e, file=sys.stderr)
-# do not modify `complete` here
+run_spec_e_passes(conn, codes, session_asof=session_asof)
+# do not modify `complete` based on pass outcomes
 write_sync_complete(complete, elapsed_min)
 ```
+
+**Actions:** leave `.github/workflows/daily-trend.yml` unchanged — default `latest_trade_day()` is correct `session_asof` even when `--end=$DATE` for `only_date`.
 
 - [ ] **Step 3: Pytest PASS**
 
@@ -966,56 +1051,56 @@ EOF
 - Consumes: bar dict field `hard_freeze_flag`
 - Produces: `hard_frozen = bool(is_st) or bool(hard_freeze_flag)`
 
-- [ ] **Step 1: Failing test**
+- [ ] **Step 1: Failing tests**
 
 ```python
 # tests/test_pipeline_hard_freeze_flag.py
-from scripts.metrics.params import load_params
-from scripts.metrics.pipeline import replay_from_ohlc
+import datetime as dt
+
+from scripts.common.bars import bars_conn, ensure_bars_columns
+from scripts.daily_run import _load_symbol_bars
+from scripts.metrics.fsm import (
+    EVENT_EXIT,
+    EXIT_KIND_UNTRADABLE,
+    RightSideFsm,
+)
+from scripts.metrics.pipeline import bar_hard_frozen
 
 
-def _rec(td, close, is_st=0, hard_freeze_flag=0):
-    return {
-        "trade_date": td,
-        "close_qfq": close,
-        "high_qfq": close,
-        "low_qfq": close,
-        "is_st": is_st,
-        "is_suspended": 0,
-        "hard_freeze_flag": hard_freeze_flag,
-    }
-
-
-def test_hard_freeze_flag_ors_into_hard_frozen():
-    params = load_params()
-    # Need enough history for features — reuse pattern from existing pipeline tests
-    # Minimal: monkeypatch decide/features OR build 300-day series ending with flag=1
-    ...
-```
-
-Faster path — unit the assignment line via a tiny pure helper if you extract:
-
-```python
-# scripts/metrics/pipeline.py
-def bar_hard_frozen(bar) -> bool:
-    return bool(int(bar.get("is_st") or 0)) or bool(int(bar.get("hard_freeze_flag") or 0))
-```
-
-```python
 def test_bar_hard_frozen_or():
-    from scripts.metrics.pipeline import bar_hard_frozen
     assert bar_hard_frozen({"is_st": 0, "hard_freeze_flag": 1}) is True
     assert bar_hard_frozen({"is_st": 1, "hard_freeze_flag": 0}) is True
     assert bar_hard_frozen({"is_st": 0, "hard_freeze_flag": 0}) is False
-```
 
-Plus FSM integration already covered by `test_hard_frozen_*` when `hard_frozen=True` is passed — add one `replay_from_ohlc` test with flag set on last day if cheap.
 
-`daily_run` load test:
+def test_hard_freeze_flag_forces_exit_untradable():
+    """Spec §5.2#5: flag set + R → EXIT_RIGHT / forced_exit_untradable."""
+    fsm = RightSideFsm()
+    fsm.step_trade_day("热")
+    events = fsm.step_trade_day(
+        "热",
+        hard_frozen=bar_hard_frozen({"is_st": 0, "hard_freeze_flag": 1}),
+    )
+    assert fsm.R is False
+    assert [e["event"] for e in events] == [EVENT_EXIT]
+    assert events[0]["detail"]["exit_kind"] == EXIT_KIND_UNTRADABLE
 
-```python
-def test_load_symbol_bars_includes_flag(tmp_path, monkeypatch):
-    # insert bar with hard_freeze_flag=1, call _load_symbol_bars, assert key present
+
+def test_load_symbol_bars_includes_flag(tmp_path):
+    db = tmp_path / "b.db"
+    conn = bars_conn(str(db))
+    ensure_bars_columns(conn)
+    conn.execute(
+        """
+        INSERT INTO bars (
+          ts_code, trade_date, open_qfq, high_qfq, low_qfq, close_qfq,
+          is_st, is_suspended, hard_freeze_flag
+        ) VALUES ('000001.SZ','2024-01-08',1,1,1,1,0,0,1)
+        """
+    )
+    conn.commit()
+    rows = _load_symbol_bars(conn, "000001.SZ", dt.date(2024, 1, 8))
+    assert rows and int(rows[-1]["hard_freeze_flag"]) == 1
 ```
 
 - [ ] **Step 2: Implement**
@@ -1023,10 +1108,16 @@ def test_load_symbol_bars_includes_flag(tmp_path, monkeypatch):
 `pipeline.py`:
 
 ```python
-hard = bool(int(bar.get("is_st") or 0)) or bool(int(bar.get("hard_freeze_flag") or 0))
+def bar_hard_frozen(bar) -> bool:
+    return bool(int(bar.get("is_st") or 0)) or bool(
+        int(bar.get("hard_freeze_flag") or 0)
+    )
+
+# in replay_from_ohlc loop:
+hard = bar_hard_frozen(bar)
 ```
 
-Update docstring that currently says ``hard_frozen`` is ``bool(is_st)`` only.
+Update docstring: ``hard_frozen`` is ``is_st OR hard_freeze_flag``.
 
 `daily_run.py`:
 
@@ -1038,7 +1129,7 @@ FROM bars
 WHERE ts_code=? AND trade_date<=?
 ORDER BY trade_date ASC
 """
-# in _load_symbol_bars:
+# in _load_symbol_bars out.append:
 "hard_freeze_flag": r[9],
 ```
 
@@ -1060,47 +1151,124 @@ EOF
 
 ---
 
-### Task 6: Pass `limit_up_unfillable` from costs into fill callers
+### Task 6: Pass `limit_up_unfillable` + write `limit_rule` on summary
 
 **Files:**
 - Modify: `scripts/eval/live_shadow_step.py`
-- Modify: `scripts/eval/paper_book.py` (every `fill_day(...)` call)
-- Test: extend `tests/test_fill_day.py` — assert default false keeps sell-on-limit-up attempt; optional true defers
+- Modify: `scripts/eval/paper_book.py` (`fill_day` calls + `window_kpis` / `_write_out`)
+- Modify: `scripts/eval/fill_day.py` only if `round_kpis` is the summary path used — prefer attaching meta on `window_kpis` / `_write_out`
+- Test: `tests/test_fill_day.py`, `tests/test_eval_costs_book.py` or new assert on summary keys
 
 **Interfaces:**
-- Consumes: `EvalCosts.limit_up_unfillable`
-- Produces: `fill_day(..., limit_up_unfillable=costs.limit_up_unfillable)`
+- Consumes: `EvalCosts.limit_up_unfillable`, `EvalCosts.limit_rule`, `EvalCosts.cost_version`
+- Produces: `fill_day(..., limit_up_unfillable=costs.limit_up_unfillable)`; `summary.json` includes `limit_rule` + `cost_version`
 
 - [ ] **Step 1: Grep callers**
 
 ```bash
-rg -n "fill_day\(" scripts/eval tests --glob '*.py'
+rg -n "fill_day\(" scripts/eval --glob '*.py'
 ```
 
-- [ ] **Step 2: Wire**
+- [ ] **Step 2: Wire fill_day**
+
+In `live_shadow_step.py` and `paper_book.replay_window` (and any other production caller):
 
 ```python
 fills = fill_day(
-    ...,
+    T.isoformat(),  # or existing first args
+    sigs,
+    book,
+    bars,
     costs,
+    track="H",  # or existing
+    run_id=run_id,
     limit_up_unfillable=costs.limit_up_unfillable,
 )
 ```
 
-- [ ] **Step 3: Test sell still fills at limit-up when false** (existing behavior)
+- [ ] **Step 3: Summary meta**
+
+In `paper_book._write_out` (or when building `kpi`), merge:
+
+```python
+kpi = dict(payload["kpi"])
+costs = payload.get("costs")  # thread costs through replay_window return
+kpi["limit_rule"] = costs.limit_rule
+kpi["cost_version"] = costs.cost_version
+json.dump(kpi, f, ensure_ascii=False, indent=2)
+```
+
+Minimal threading: change `replay_window` to `return {"fills", "kpi", "book", "costs": costs}` and read in `_write_out`. Shadow path: if it does not write summary.json, still ensure paper/H summary satisfies Spec §3.3.
+
+- [ ] **Step 4: Tests**
 
 ```python
 def test_limit_up_sell_still_fills_when_unfillable_false():
-    # open_raw >= limit_up, limit_up_unfillable=False → filled sell
-    ...
+    from scripts.eval.book import BookState, Position
+    from scripts.eval.fill_day import fill_day
+    from scripts.eval.costs import load_costs
+
+    costs = load_costs()
+    assert costs.limit_up_unfillable is False
+    book = BookState(cash=0, last_equity=0)
+    book.positions["000001.SZ"] = Position(
+        shares=100, entry_date="2024-01-05", entry_px=10.0, signal_date="2024-01-05"
+    )
+    # Adjust Position ctor to match scripts/eval/book.py exactly if fields differ.
+    fills = fill_day(
+        "2024-01-08",
+        [{
+            "event": "EXIT_RIGHT",
+            "ts_code": "000001.SZ",
+            "trade_date": "2024-01-05",
+            "id": 9,
+            "detail": {"exit_kind": "temperature"},
+        }],
+        book,
+        {"000001.SZ": {
+            "open_raw": 11.0,
+            "close_raw": 11.0,
+            "limit_up": 11.0,
+            "limit_down": 9.0,
+            "is_suspended": 0,
+        }},
+        costs,
+        limit_up_unfillable=False,
+    )
+    sold = [f for f in fills if f["side"] == "sell" and f["status"] == "filled"]
+    assert len(sold) == 1
+
+
+def test_summary_includes_limit_rule_and_cost_version(tmp_path):
+    # Call the same helper _write_out uses after a tiny replay_window,
+    # or unit-test the kpi merge function.
+    from scripts.eval.costs import load_costs
+    from scripts.eval.paper_book import window_kpis, _write_out
+    from scripts.eval.book import BookState
+
+    costs = load_costs()
+    book = BookState(cash=costs.initial_cash, last_equity=costs.initial_cash)
+    kpi = window_kpis([], book)
+    kpi["limit_rule"] = costs.limit_rule
+    kpi["cost_version"] = costs.cost_version
+    _write_out(str(tmp_path), "t", {"fills": [], "kpi": kpi, "book": book})
+    import json
+    summary = json.loads((tmp_path / "t" / "summary.json").read_text())
+    assert summary["limit_rule"] == "board_calc_v1"
+    assert summary["cost_version"] == "v2"
 ```
 
-- [ ] **Step 4: Pytest + commit**
+If `Position` import/fields differ, copy the setup from `tests/test_fill_day.py::test_fill_forced_exit_st` and only change the open/limit relationship.
+
+- [ ] **Step 5: Pytest + commit**
+
+Run: `.venv/bin/pytest tests/test_fill_day.py -q`  
+Expected: PASS
 
 ```bash
 git add scripts/eval/live_shadow_step.py scripts/eval/paper_book.py tests/test_fill_day.py
 git commit -m "$(cat <<'EOF'
-feat(fill): thread limit_up_unfillable from costs.yaml
+feat(fill): thread limit_up_unfillable and summary limit_rule
 
 EOF
 )"
@@ -1159,12 +1327,14 @@ EOF
 | `limit_rule` gate / no vendor overwrite | 3 |
 | prior `close_raw` + HALF_UP + 300/301/688/ST | 3 |
 | `limit_up_unfillable` explicit false + loader | 0, 6 |
-| `cost_version` / `param_version` bump | 0 |
+| summary `limit_rule` + `cost_version` | 6 |
+| `cost_version` / `param_version` bump | 0 (whitelist pins) |
 | `hard_freeze_flag` ensure + CREATE | 1 |
-| streak N=20, holes, resume clear | 2 |
+| streak N=20, holes, resume clear | 2 (`apply_*` only) |
 | full-U rewrite; N change protocol B fixture | 2 |
 | passes after loop; incomplete still runs | 4 |
-| metrics OR flag; daily_run SELECT | 5 |
+| metrics OR flag; daily_run SELECT; flag→forced_exit | 5 |
 | docs touchpoints | 7 |
+| Actions workflow | no change |
 
-No TBD placeholders. Types: `apply_*` return `int` row counts; `session_asof: date`; `limit_rule: str`.
+Plan CR patch (2026-10-08): removed contradictory `streak_flags` hole test; closed Task 4/5/6 placeholders; whitelist `p05-v3` pins; summary `limit_rule`.
