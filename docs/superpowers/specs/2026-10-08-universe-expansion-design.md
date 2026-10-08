@@ -43,7 +43,7 @@
 
 ### 2.1 流水线顺序
 
-对 **每次** `daily-trend` 运行都执行步骤 2（含 `only_date`）：分类快照是 vendor「今日」截面，非 PIT。  
+对 **每次** `daily-trend` 运行都执行 taxonomy refresh（含 `only_date`）：分类快照是 vendor「今日」截面，非 PIT。  
 **接受：** catch-up 用**今日** YAML/`clist` 重算队列内历史日的成员与引擎行；但 **`unmapped_count` / IPO 字段只写入 `session_asof` 那一行 `run_meta`**，不拿今日 clist 去盖历史日的计数（clist 失败时历史行保持原值）。
 
 ```text
