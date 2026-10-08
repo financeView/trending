@@ -53,6 +53,17 @@
 
 catch-up / 历史追赶日：`session_asof` = 当日 cron 会话 asof；队列内每个 `D` 相对该 asof 判定是否允许 board_calc。
 
+**挂点：** 两 pass 接在 `scripts/sync_bars_sample.py`（或同 job 等价 sync 入口）**flags/limits 同步之后**、`daily_run` **之前**；可抽 helper，但 cron 必须同 job 跑完。
+
+**回填范围（可重入）：** 每个 sync 会话对 **mapped U（−quarantine）** 全量扫描 bars：
+
+| pass | 行集 |
+|------|------|
+| `hard_freeze_flag` | 该票有 `flag_source` 的全部交易日行（含 asof）；按票时间序重算 streak 并覆盖写 `0/1` |
+| `board_calc` | 仅当 `costs.limit_rule == board_calc_v1`；且 `D < session_asof` ∧ 双侧 `limit_*` 空；不限本次 OHLC 拉取窗口 |
+
+首跑加列后依赖上述全量重算，**禁止**只更新「本次 fetch 窗口」而留下历史 `hard_freeze_flag` 全 0。
+
 ---
 
 ## 3. `board_calc_v1` 与 `limit_source`
@@ -61,10 +72,17 @@ catch-up / 历史追赶日：`session_asof` = 当日 cron 会话 asof；队列�
 
 | 条件 | 行为 |
 |------|------|
-| `D < session_asof` ∧ `limit_up` 与 `limit_down` **皆空** ∧ `preclose_raw` 有限且 >0 | 推算并 UPSERT 到该 bar |
+| `limit_rule != board_calc_v1` | **整 pass 跳过**（不写盘） |
+| `D < session_asof` ∧ `limit_up` 与 `limit_down` **皆空** ∧ 基准价有限且 >0 | 推算并 UPSERT 到该 bar |
 | `D = session_asof` | **禁止** board_calc；缺 vendor → 个股意图日仍 `data_gap` |
 | 已有任一非空 `limit_*`（含 `em_f51f52` 等） | **不覆盖** |
-| `preclose_raw` 缺失 / 非有限正数 | 跳过；保持空 → `data_gap` |
+| 基准价缺失 / 非有限正数 | 跳过；保持空 → `data_gap` |
+
+**基准价（钉死）：** 今日代码库 **从不写入** `preclose_raw`（列在 schema、OHLC upsert 未填）。本 slice：
+
+1. 取该票 **上一交易日**（交易日历）的 `close_raw` 作为算板基准；若有限且 >0，可顺带写回当日 `preclose_raw`（便于审计）。  
+2. 无上一交易日行或 `close_raw` 无效 → 跳过。  
+3. **已知偏差：** 除权除息日交易所「前收盘」可能是除权参考价，≠ 昨日 `close_raw`；v1 接受，且 **永不**用 board_calc 覆盖已有 vendor `limit_*`。
 
 ### 3.2 怎么算
 
@@ -72,18 +90,20 @@ catch-up / 历史追赶日：`session_asof` = 当日 cron 会话 asof；队列�
 
 板幅（v1，按代码前缀 + `is_st`；mapped U 为 SH/SZ，北交所本 slice 不进宇宙）：
 
-| 条件 | 板幅 pct |
+| 条件（自上而下，先匹配先生效） | 板幅 pct |
 |------|----------|
 | `is_st = 1` | 5% |
-| 代码 `300*` / `688*` | 20% |
+| 代码前缀 `300` / `301` / `688`（`ts_code` 数字段） | 20% |
 | 其余（主板等） | 10% |
 
 ```text
-limit_up   = round(preclose_raw * (1 + pct), 2)
-limit_down = round(preclose_raw * (1 - pct), 2)
+limit_up   = ROUND_HALF_UP(preclose_basis * (1 + pct), 2)   # 分位四舍五入；禁止用银行家 round
+limit_down = ROUND_HALF_UP(preclose_basis * (1 - pct), 2)
 ```
 
-夹具钉死边界（含 ST 优先于 300/688 前缀）。
+夹具钉死边界（含 ST 优先于 300/301/688；`.xx5` 进位与 `round()` 分叉样例）。
+
+**已知近似（不特判）：** 上市初期无涨跌幅限制日、复牌首日等，board_calc 仍可能写出限价；v1 接受。创业板/科创 **ST** 现行多为 ±20%，本 slice 仍 **ST→5%**（简化）；与 vendor 冲突时不覆盖。
 
 ### 3.3 落库与成交配置
 
@@ -93,11 +113,11 @@ limit_down = round(preclose_raw * (1 - pct), 2)
   - `limit_up_unfillable: false`（显式）
   - **bump `cost_version`**（如 `v1` → `v2`）
 - `Costs` loader 须解析 `limit_up_unfillable` 并传入 fill；summary 写 `limit_rule` + `cost_version`。  
-- 有限价后：fill 用既有路径比较 `open_raw` vs `limit_*`（与 vendor 行同一套）。
+- **fill 不按 `limit_rule` 重算板价**，只读 bars 上已有 `limit_*`（vendor 与 board_calc 同源比较：`open_raw` vs `limit_*`）。
 
 ### 3.4 不做
 
-asof 自动重拉 limit；付费 `stk_limit`；一字板形态代理当限价；静默改 `limit_rule` 却不 bump `cost_version`。
+asof 自动重拉 limit；付费 `stk_limit`；一字板形态代理当限价；静默改 `limit_rule` 却不 bump `cost_version`；在 `limit_rule=vendor_fields` 时仍写 `board_calc` 限价。
 
 ---
 
@@ -154,19 +174,22 @@ EM tfp 写入历史；退市/暂停上市 OR 进旗（v1.1）；用「无 bar」
 
 ### 5.2 测试夹具（最少集）
 
-1. **hist board_calc：** `D < asof`、limit 空、有 `preclose_raw` → 写入 `limit_*` 且 `limit_source=board_calc_v1`。  
+1. **hist board_calc：** `D < asof`、limit 空、有上一交易日 `close_raw` → 写入 `limit_*` 且 `limit_source=board_calc_v1`（可断言 `preclose_raw` 被回填）。  
 2. **asof 不填：** `D = asof` 缺 limit → 不写；fill 仍 `data_gap`。  
 3. **不覆盖 vendor：** 已有 `em_*` → board_calc 跳过。  
-4. **硬冻边界：** streak = N−1 → `flag=0`、无 forced_exit；streak = N ∧ `R` → `EXIT_RIGHT` / `forced_exit_untradable`。  
-5. **空洞不计：** 中间缺 bar / 无 `flag_source` → streak 不跨洞虚增。  
-6. **复牌清旗：** `is_suspended=0` → `hard_freeze_flag=0`。  
-7. **costs：** YAML 含 `limit_up_unfillable: false`；loader 可读并传入 fill。  
-8. **板幅：** ST 优先；`300`/`688` = 20%；主板 = 10%；raw 取整到分。
+4. **`limit_rule` 门闩：** `vendor_fields` 时 pass 不写任何 `board_calc` 限价。  
+5. **硬冻边界：** streak = N−1 → `flag=0`、无 forced_exit；streak = N ∧ `R` → `EXIT_RIGHT` / `forced_exit_untradable`。  
+6. **空洞不计：** 中间缺 bar / 无 `flag_source` → streak 不跨洞虚增。  
+7. **复牌清旗：** `is_suspended=0` → `hard_freeze_flag=0`。  
+8. **全量重算：** 历史窗口外已有长停牌 streak，首跑 pass 后 asof 行 `hard_freeze_flag=1`（非仅本次 sync 窗口）。  
+9. **costs：** YAML 含 `limit_up_unfillable: false`；loader 可读并传入 fill。  
+10. **板幅 / 取整：** ST 优先；`300`/`301`/`688` = 20%；主板 = 10%；`ROUND_HALF_UP` 与银行家 `round` 分叉样例。
 
 ### 5.3 文档触点（落地时改）
 
-- market-data-contract §5.2：启用路径；`hard_freeze_flag` 正式化；N 旋钮。  
+- market-data-contract §5.2：启用路径；`hard_freeze_flag` 正式化；N 旋钮；`preclose` 基准（昨 `close_raw`）。  
 - metrics §5.5：`hard_frozen` 并入旗；删「N 日后放」。  
+- backtest-eval §4.2 / §4.3：历史可含 `board_calc_v1` 限价；`costs.yaml` 示例与 `limit_up_unfillable`。  
 - `todo.md` §2.5 / §2.6：标完成。  
 - 本文件状态 → 已落地 + plan 链接（plan 另写）。
 
@@ -177,3 +200,4 @@ EM tfp 写入历史；退市/暂停上市 OR 进旗（v1.1）；用「无 bar」
 | 日期 | 说明 |
 |------|------|
 | 2026-10-08 | 初版：Approach 1；hist board_calc + asof vendor；N=20 持久化冻旗；`limit_up_unfillable=false` 显式 |
+| 2026-10-08 | CR：真项修补——昨 `close_raw` 基准、`301`、HALF_UP、全量重算范围、`limit_rule` 门闩、backtest-eval 触点；次新/创业板 ST 为已知近似 |
