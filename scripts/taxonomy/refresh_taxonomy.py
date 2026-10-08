@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Taxonomy refresh: fetch → guard → write YAML (+ optional git publish).
+"""Taxonomy refresh: fetch → guard → write YAML → step f (unmapped/heartbeat).
 
-Step f (unmapped / heartbeat / first_seen) is Task 3 — not implemented here.
 CLI always exits 0; status via GITHUB_OUTPUT + return dict.
 """
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
-from datetime import date, datetime
-from typing import Callable, Optional
+from datetime import date, datetime, timezone
+from typing import Any, Callable, Optional
 
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if _ROOT not in sys.path:
@@ -30,12 +30,16 @@ from scripts.taxonomy.membership import (
     semantic_equal,
 )
 from scripts.taxonomy.patch_stock_names import _name_map
+from scripts.taxonomy.unmapped import compute_unmapped_metrics
 
 _TAXONOMY_FILES = (
     "config/taxonomy/stock_sw_l2.yaml",
     "config/taxonomy/sw_l2_to_l1.yaml",
     "config/taxonomy/l1_buckets.yaml",
 )
+_HEARTBEAT_REL = os.path.join("data", "heartbeat.json")
+_FIRST_SEEN_REL = os.path.join("data", "unmapped_first_seen.json")
+_HEARTBEAT_PUBLISH_FILES = (_HEARTBEAT_REL, _FIRST_SEEN_REL)
 
 
 def _status(
@@ -152,6 +156,131 @@ def _publish_taxonomy_yaml(repo_root: str) -> tuple[str, str]:
         return "push_fail", ""
 
 
+def merge_heartbeat_taxonomy(
+    fields: dict[str, Any],
+    path: Optional[str] = None,
+) -> None:
+    """Set ``data['taxonomy']=fields`` without ``write_heartbeat`` / last_success."""
+    path = path or os.path.join(_ROOT, _HEARTBEAT_REL)
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    data: dict[str, Any] = {}
+    if os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                old = json.load(f)
+            if isinstance(old, dict):
+                data = old
+        except Exception:
+            data = {}
+    data["taxonomy"] = dict(fields)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+
+
+def _publish_heartbeat_paths(repo_root: str) -> bool:
+    """Commit+push heartbeat/first_seen. Never updates TAXONOMY_HEAD_SHA.
+
+    On fail: restore workspace to pre-commit tip (same hard-reset contract as YAML).
+    Returns True on success (or nothing staged), False on push/rebase fail.
+    """
+    pre_sha = ""
+    try:
+        _git(repo_root, "config", "user.email", "taxonomy-bot@users.noreply.github.com")
+        _git(repo_root, "config", "user.name", "taxonomy-bot")
+        _git(repo_root, "add", "--", *_HEARTBEAT_PUBLISH_FILES)
+        staged = _git(repo_root, "diff", "--cached", "--quiet", check=False)
+        if staged.returncode == 0:
+            return True
+        pre = _git(repo_root, "rev-parse", "HEAD", check=False)
+        if pre.returncode == 0:
+            pre_sha = (pre.stdout or "").strip()
+        msg = "chore(taxonomy): heartbeat unmapped metrics"
+        _git(repo_root, "commit", "-m", msg)
+        pull = _git(
+            repo_root,
+            "pull",
+            "--rebase",
+            "--autostash",
+            check=False,
+        )
+        if pull.returncode != 0:
+            _git(repo_root, "rebase", "--abort", check=False)
+            _restore_taxonomy_to_published(repo_root, pre_sha)
+            return False
+        push = _git(repo_root, "push", check=False)
+        if push.returncode != 0:
+            _restore_taxonomy_to_published(repo_root, pre_sha)
+            return False
+        # Intentionally do NOT set TAXONOMY_HEAD_SHA / taxonomy_head_sha.
+        return True
+    except Exception:
+        _git(repo_root, "rebase", "--abort", check=False)
+        _restore_taxonomy_to_published(repo_root, pre_sha)
+        return False
+
+
+def _step_f_unmapped_heartbeat(
+    status: dict,
+    *,
+    repo_root: str,
+    session_asof: date,
+    git: bool,
+    clist_rows: Optional[list] = None,
+    clist_fetch: Optional[Callable[..., Any]] = None,
+) -> dict:
+    """Step f: clist metrics → first_seen → merge heartbeat.taxonomy; optional publish."""
+    root = os.path.abspath(repo_root)
+    hb_path = os.path.join(root, _HEARTBEAT_REL)
+    fs_path = os.path.join(root, _FIRST_SEEN_REL)
+
+    kwargs: dict[str, Any] = {
+        "session_asof": session_asof,
+        "first_seen_path": fs_path,
+    }
+    if clist_rows is not None:
+        kwargs["clist_rows"] = clist_rows
+    elif clist_fetch is not None:
+        kwargs["clist_fetch"] = clist_fetch
+
+    try:
+        metrics = compute_unmapped_metrics(**kwargs)
+    except Exception:
+        from scripts.taxonomy.unmapped import UnmappedMetrics
+
+        metrics = UnmappedMetrics(
+            unmapped_count=None,
+            ipo_unmapped_alert_count=None,
+            yaml_quarantine_size=0,
+            clist_fetch="fail",
+        )
+
+    updated_at = (
+        datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    )
+    fields = {
+        "taxonomy_fetch": status.get("taxonomy_fetch") or "fail",
+        "clist_fetch": metrics.clist_fetch,
+        "unmapped_count": metrics.unmapped_count,
+        "ipo_unmapped_alert_count": metrics.ipo_unmapped_alert_count,
+        "yaml_quarantine_size": metrics.yaml_quarantine_size,
+        "map_version": status.get("map_version") or "",
+        "taxonomy_commit": status.get("taxonomy_commit") or "",
+        "updated_at": updated_at,
+    }
+    merge_heartbeat_taxonomy(fields, path=hb_path)
+
+    status = dict(status)
+    status["clist_fetch"] = metrics.clist_fetch
+    status["unmapped_count"] = metrics.unmapped_count
+    status["ipo_unmapped_alert_count"] = metrics.ipo_unmapped_alert_count
+    status["yaml_quarantine_size"] = metrics.yaml_quarantine_size
+
+    if git:
+        _publish_heartbeat_paths(root)
+    return status
+
+
 def refresh_taxonomy_once(
     *,
     fetch_rows: Callable[[], list],
@@ -160,9 +289,10 @@ def refresh_taxonomy_once(
     session_asof: date,
     git: bool = False,
     allowed: Optional[set[str]] = None,
+    clist_rows: Optional[list] = None,
+    clist_fetch: Optional[Callable[..., Any]] = None,
 ) -> dict:
-    """Fetch → guard → write YAML. ``session_asof`` required (used by Task 3 step f)."""
-    del session_asof  # reserved for Task 3 step f; required in signature now
+    """Fetch → guard → write YAML → step f (unmapped / heartbeat / first_seen)."""
     root = os.path.abspath(repo_root)
     tax = os.path.join(root, "config", "taxonomy")
     stock_path = os.path.join(tax, "stock_sw_l2.yaml")
@@ -180,10 +310,20 @@ def refresh_taxonomy_once(
         if n not in (None, ""):
             prior_names[m["ts_code"]] = str(n)
 
+    def _finish(st: dict) -> dict:
+        return _step_f_unmapped_heartbeat(
+            st,
+            repo_root=root,
+            session_asof=session_asof,
+            git=git,
+            clist_rows=clist_rows,
+            clist_fetch=clist_fetch,
+        )
+
     try:
         rows = list(fetch_rows() or [])
     except Exception:
-        return _status("fail", map_version=head_version, head_mapped=head_mapped)
+        return _finish(_status("fail", map_version=head_version, head_mapped=head_mapped))
 
     cand_norms = []
     for row in rows:
@@ -220,42 +360,19 @@ def refresh_taxonomy_once(
 
     # empty mapped after normalize → fail (空帧 / 全未映射)
     if cand_mapped == 0:
-        return _status(
-            "fail",
-            map_version=head_version,
-            head_mapped=head_mapped,
-            cand_mapped=cand_mapped,
+        return _finish(
+            _status(
+                "fail",
+                map_version=head_version,
+                head_mapped=head_mapped,
+                cand_mapped=cand_mapped,
+            )
         )
 
     adds, deletes, changes = membership_delta(head_members, cand_members)
     if not guard_ok(head_mapped, cand_mapped, adds, deletes, changes):
-        return _status(
-            "fail",
-            map_version=head_version,
-            adds=adds,
-            deletes=deletes,
-            changes=changes,
-            head_mapped=head_mapped,
-            cand_mapped=cand_mapped,
-        )
-
-    if semantic_equal(head_members, cand_members):
-        return _status(
-            "skipped_no_diff",
-            map_version=head_version,
-            adds=adds,
-            deletes=deletes,
-            changes=changes,
-            head_mapped=head_mapped,
-            cand_mapped=cand_mapped,
-        )
-
-    membership_changed = (adds + deletes + changes) > 0
-    if membership_changed:
-        try:
-            new_version = bump_map_version(head_version)
-        except ValueError:
-            return _status(
+        return _finish(
+            _status(
                 "fail",
                 map_version=head_version,
                 adds=adds,
@@ -263,6 +380,37 @@ def refresh_taxonomy_once(
                 changes=changes,
                 head_mapped=head_mapped,
                 cand_mapped=cand_mapped,
+            )
+        )
+
+    if semantic_equal(head_members, cand_members):
+        return _finish(
+            _status(
+                "skipped_no_diff",
+                map_version=head_version,
+                adds=adds,
+                deletes=deletes,
+                changes=changes,
+                head_mapped=head_mapped,
+                cand_mapped=cand_mapped,
+            )
+        )
+
+    membership_changed = (adds + deletes + changes) > 0
+    if membership_changed:
+        try:
+            new_version = bump_map_version(head_version)
+        except ValueError:
+            return _finish(
+                _status(
+                    "fail",
+                    map_version=head_version,
+                    adds=adds,
+                    deletes=deletes,
+                    changes=changes,
+                    head_mapped=head_mapped,
+                    cand_mapped=cand_mapped,
+                )
             )
     else:
         new_version = head_version
@@ -285,28 +433,32 @@ def refresh_taxonomy_once(
     if git:
         pub, sha = _publish_taxonomy_yaml(root)
         if pub == "push_fail":
-            return _status(
-                "push_fail",
-                map_version=new_version,
-                taxonomy_commit="unpushed",
-                adds=adds,
-                deletes=deletes,
-                changes=changes,
-                head_mapped=head_mapped,
-                cand_mapped=cand_mapped,
+            return _finish(
+                _status(
+                    "push_fail",
+                    map_version=new_version,
+                    taxonomy_commit="unpushed",
+                    adds=adds,
+                    deletes=deletes,
+                    changes=changes,
+                    head_mapped=head_mapped,
+                    cand_mapped=cand_mapped,
+                )
             )
         taxonomy_commit = sha or "unpushed"
         fetch_status = "ok"
 
-    return _status(
-        fetch_status,
-        map_version=new_version,
-        taxonomy_commit=taxonomy_commit,
-        adds=adds,
-        deletes=deletes,
-        changes=changes,
-        head_mapped=head_mapped,
-        cand_mapped=cand_mapped,
+    return _finish(
+        _status(
+            fetch_status,
+            map_version=new_version,
+            taxonomy_commit=taxonomy_commit,
+            adds=adds,
+            deletes=deletes,
+            changes=changes,
+            head_mapped=head_mapped,
+            cand_mapped=cand_mapped,
+        )
     )
 
 

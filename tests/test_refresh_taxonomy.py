@@ -1,6 +1,9 @@
+import json
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 from scripts.taxonomy.fetch_sw_members import dump_yaml
 from scripts.taxonomy.refresh_taxonomy import refresh_taxonomy_once
@@ -8,6 +11,15 @@ from scripts.taxonomy.refresh_taxonomy import refresh_taxonomy_once
 
 def _cp(rc=0, stdout="", stderr=""):
     return SimpleNamespace(returncode=rc, stdout=stdout, stderr=stderr)
+
+
+@pytest.fixture(autouse=True)
+def _no_clist_network(monkeypatch):
+    """Step f must not hit Eastmoney during unit tests."""
+    monkeypatch.setattr(
+        "scripts.taxonomy.unmapped.fetch_clist_all_a",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no network in unit test")),
+    )
 
 
 def test_dump_yaml_keeps_name_zh_and_version():
@@ -212,3 +224,44 @@ def test_publish_fail_resets_to_pre_sha_not_orig_head(monkeypatch):
     assert not any("ORIG_HEAD" in c for c in calls)
     assert not any(c[0] == "checkout" for c in calls)
     assert not rt.os.environ.get("TAXONOMY_HEAD_SHA")
+
+
+def test_step_f_writes_heartbeat_taxonomy_no_last_success(tmp_path, monkeypatch):
+    """Step f merges heartbeat.taxonomy without write_heartbeat last_success."""
+    _seed_taxonomy_tree(tmp_path)
+    (tmp_path / "data").mkdir(parents=True)
+    (tmp_path / "data" / "unmapped_first_seen.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        "scripts.taxonomy.unmapped.load_universe_codes",
+        lambda: ["000001.SZ"],
+    )
+    monkeypatch.setattr(
+        "scripts.taxonomy.unmapped.load_quarantine_codes",
+        lambda: set(),
+    )
+    rows = [{"ts_code": "000001.SZ", "industry_code": "370100", "industry_name": "银行"}]
+    st = refresh_taxonomy_once(
+        fetch_rows=lambda: rows,
+        name_map=lambda: {},
+        repo_root=str(tmp_path),
+        session_asof=date(2024, 1, 10),
+        git=False,
+        allowed={"370100"},
+        clist_rows=[
+            {"ts_code": "000001.SZ", "f26": "20200101"},
+            {"ts_code": "000002.SZ", "f26": "20200101"},
+        ],
+    )
+    assert st["taxonomy_fetch"] == "skipped_no_diff"
+    assert st["clist_fetch"] == "ok"
+    assert st["unmapped_count"] == 1
+    hb = json.loads(
+        (tmp_path / "data" / "heartbeat.json").read_text(encoding="utf-8")
+    )
+    tax = hb["taxonomy"]
+    assert tax["taxonomy_fetch"] == "skipped_no_diff"
+    assert tax["clist_fetch"] == "ok"
+    assert tax["unmapped_count"] == 1
+    assert tax["yaml_quarantine_size"] == 0
+    assert "last_success" not in tax
+    assert tax["taxonomy_commit"] in ("", "unpushed")
