@@ -1,6 +1,9 @@
 import datetime as dt
+from datetime import date, timedelta
 
 from scripts.common.bars import bars_conn, ensure_bars_columns
+from scripts.common.calendar import load_trade_dates_from_list
+from scripts.common.hard_freeze import apply_hard_freeze_flags
 from scripts.daily_run import _load_symbol_bars
 from scripts.metrics.fsm import (
     EVENT_EXIT,
@@ -27,6 +30,42 @@ def test_hard_freeze_flag_forces_exit_untradable():
     assert fsm.R is False
     assert [e["event"] for e in events] == [EVENT_EXIT]
     assert events[0]["detail"]["exit_kind"] == EXIT_KIND_UNTRADABLE
+
+
+def test_streak_n_minus_1_no_forced_exit(tmp_path):
+    """Spec §5.2#5: streak=N−1 → flag=0 → in R 无 forced_exit."""
+    days = []
+    d = date(2024, 1, 2)
+    for _ in range(19):
+        days.append(d.isoformat())
+        d += timedelta(days=1)
+    load_trade_dates_from_list(days)
+    conn = bars_conn(str(tmp_path / "b.db"))
+    ensure_bars_columns(conn)
+    code = "000001.SZ"
+    for td in days:
+        conn.execute(
+            "INSERT INTO bars (ts_code, trade_date, is_suspended, flag_source, hard_freeze_flag)"
+            " VALUES (?,?,1,'baostock',0)",
+            (code, td),
+        )
+    conn.commit()
+    apply_hard_freeze_flags(conn, [code], n=20)
+    flag = conn.execute(
+        "SELECT hard_freeze_flag FROM bars WHERE ts_code=? AND trade_date=?",
+        (code, days[-1]),
+    ).fetchone()[0]
+    assert flag == 0
+
+    fsm = RightSideFsm()
+    fsm.step_trade_day("热")
+    assert fsm.R is True
+    events = fsm.step_trade_day(
+        "热",
+        hard_frozen=bar_hard_frozen({"is_st": 0, "hard_freeze_flag": flag}),
+    )
+    assert fsm.R is True
+    assert not any(e["event"] == EVENT_EXIT for e in events)
 
 
 def test_load_symbol_bars_includes_flag(tmp_path):
