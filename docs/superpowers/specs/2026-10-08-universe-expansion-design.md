@@ -1,7 +1,7 @@
 # Spec D：宇宙扩张（YAML 日拉 + unmapped 可见）
 
 **日期：** 2026-10-08  
-**状态：** 设计稿（indep-CR 真项已补丁；待用户审）  
+**状态：** 设计稿（final review 已补丁；待用户审 / 可进 plan）  
 **范围：** todo §2.4 成分 YAML 每日 vendor 拉新（Actions 直推 main）+ §2.3 未映射**计数与 IPO 告警**（软门、**不做**树外 bars 预热）。  
 **后放（禁止混入本 slice）：** 树外票 `sync_bars` 预热（仍留 todo §2.3 一行遗留，**不**算 Spec D 做完就消失）；fetch 失败杀死日更；PR 审合后再用新宇宙；`unmapped_count>0` → `evaluate_ok` partial；Spec E `board_calc` / `limit_up_unfillable` / 显式硬冻；L2/L1 `engine_state`；改温度 / RS / peer 语义；北交所进树（本 slice **丢弃** BJ，收窄 SW YAML「丢弃或 quarantine」）。
 
@@ -48,7 +48,9 @@
 
 ```text
 1. checkout（既有 permissions.contents: write，不另开凭证）
-2. Taxonomy refresh（新；步骤始终 exit 0，见 §3.6）
+2. Unit tests（保持在 refresh **之前**：校验的是本次 checkout，避免同 job
+   中途 bump 与测试夹具缠在一起；unpin sw2021-v1 后次日 cron 仍绿）
+3. Taxonomy refresh（新；步骤始终 exit 0，见 §3.6）
    a. fetch_sw_members → 候选成员（§4 归一；BJ 丢弃；禁 801xxx）
       - 异常 / 空帧 → taxonomy_fetch=fail；不改文件；跳到 f
    b. fetch 成功后：patch_stock_names
@@ -56,32 +58,36 @@
    c. 语义 diff（见 §2.3）：按 ts_code 排序后比较多重集
       (ts_code, sw_l2_code, name_zh) + 三文件 map_version 头
    c′. 护栏（相对 HEAD mapped；任一失败 → 等同 fetch fail：不写盘不 push，
-      taxonomy_fetch=fail，继续 3）：
+      taxonomy_fetch=fail，跳到 f）：
       - candidate |mapped| ≥ 0.80 × HEAD |mapped|
       - |adds| + |deletes| + |sw_l2 变更| ≤ 80（实现常量；日志打出三计数）
+        （申万年度大调可能超帽 → 当日保留旧快照 + fail；人工放宽/分批后放）
    d. 护栏通过且有实质 diff：
       - membership/sw_l2 变更 → bump（§2.3）后 **只改三文件头行**（禁止整文件
         YAML dump 打乱 sw_l2_to_l1 / l1_buckets 表体）
       - 仅 name_zh → 不 bump
-      - git config user（taxonomy 步自备，勿依赖后置 db 步）
-      - git add 仅：config/taxonomy/stock_sw_l2.yaml、sw_l2_to_l1.yaml、
-        l1_buckets.yaml，以及 data/unmapped_first_seen.json（若更新）
+      - git config user（本步自备）
+      - git add 仅 taxonomy 三文件（+ 若本步已更新 first_seen 则一并）
       - git commit；git pull --rebase --autostash；冲突 → rebase --abort，
-        工作区恢复为 HEAD 旧 YAML，taxonomy_fetch=push_fail，继续 3
-      - git push（**禁止** --force）；成功则记 taxonomy_commit=HEAD
-   e. 无实质 diff → 不 commit；taxonomy_fetch=skipped_no_diff
-   f. merge 写 heartbeat.taxonomy；若将 run_deferred / 无 db commit：
-      **本步单独** commit+push data/heartbeat.json（及已更新的
-      data/unmapped_first_seen.json），保证 main 上可见
-3. Sync mapped bars（load_universe_codes()；无树外预热）
-4. daily_run → shadow → commit trend.db + heartbeat → Issues
+        工作区恢复为 HEAD 旧 YAML，taxonomy_fetch=push_fail
+      - git push（**禁止** --force）；成功则 taxonomy_commit=HEAD
+   e. 无实质 diff → 不 commit YAML；taxonomy_fetch=skipped_no_diff
+   f. **本步内**拉 clist（或复用缓存）、更新 first_seen、算 unmapped/IPO，
+      merge 写 heartbeat.taxonomy（失败则字段 null + clist_fetch=fail）
+      - **无论** d/e/fail：只要 heartbeat.json 有变更 → 本步 commit+push
+        `data/heartbeat.json`（及 `data/unmapped_first_seen.json`）
+        （不依赖后续是否 run_deferred；步骤 3 时尚不知 defer）
+4. Sync mapped bars（load_universe_codes()；无树外预热）
+5. daily_run → shadow → commit trend.db + heartbeat → Issues
+      （daily_run 再写 asof run_meta 计数时调用同一 helper；可刷新
+       heartbeat.taxonomy 数字，由步骤 5 的 db commit 带走）
 ```
 
-步骤 3–4 读步骤 2 后工作区 YAML。`run_meta.map_version` = `load_map_version()`（`sw_l2_to_l1` 头）。
+步骤 4–5 读步骤 3 后工作区 YAML。`run_meta.map_version` = `load_map_version()`（`sw_l2_to_l1` 头）。
 
-**`run_meta.git_sha`：** taxonomy push **成功**后，`daily_run` 写入 `git rev-parse HEAD`（非启动时的 `GITHUB_SHA`）。push 失败 / unpushed：保留 checkout SHA，heartbeat `taxonomy_commit=unpushed`。
+**`run_meta.git_sha`：** taxonomy YAML push **成功**后，`daily_run` 写入 `git rev-parse HEAD`（非启动时的 `GITHUB_SHA`）。push 失败 / unpushed：保留 checkout SHA，heartbeat `taxonomy_commit=unpushed`。
 
-**双 commit：** 步骤 4 的 db commit **只** `git add data/trend.db data/heartbeat.json`（既有），不得 restage taxonomy。步骤 2 已推 YAML 而 3/4 失败 → 可接受。
+**多 commit：** 步骤 3 可能 push taxonomy 与/或 heartbeat；步骤 5 的 db commit **只** `git add data/trend.db data/heartbeat.json`，不得 restage taxonomy。步骤 3 已推而 4/5 失败 → 可接受。
 
 冷启动：票首次进 mapped U 时 sync 默认 `end−400` 自然日（≈盖 252 交易日）。预算仍走既有 `run_deferred`（200/300 min）；**本 slice 不另做摊销**。
 
@@ -100,11 +106,12 @@
 
 **IPO 告警（软）：**
 
-- 上市日源：东财 clist **上市日期字段**（实现钉具体 `fxx`；**不用**申万 hist `start_date`）。  
+- 上市日源：东财 clist 字段 **`f26`**（上市时间；按东财返回解析为 `date`，毫秒时间戳或 `YYYYMMDD` 均须覆盖）。**不用**申万 hist `start_date`。`f26` 缺失/不可解析 → 走 first_seen 回退。  
 - 交易日数 = 上海日历上 `[list_date, session_asof]` **含两端** 的交易日个数；≥ 3 → 计入告警。  
-- 无 list_date：`data/unmapped_first_seen.json`（**路径钉死，不在 `data/cache/`**——该目录 gitignore 且被 bars cache 覆盖）存 `ts_code → first_asof`；`first_asof` **永远是首次观察时的 `session_asof`**（不是补洞 `D`）；天数 = `[first_asof, session_asof]` 含端。  
+- 无 list_date：`data/unmapped_first_seen.json`（**路径钉死，不在 `data/cache/`**）存 `ts_code → first_asof`；`first_asof` **永远是首次观察时的 `session_asof`**（不是补洞 `D`）；天数 = `[first_asof, session_asof]` 含端。  
 - `ipo_unmapped_alert_count` = 仍落在 unmapped 且天数 ≥ 3 的个数。  
-- **不**使 `evaluate_ok` → partial。
+- **不**使 `evaluate_ok` → partial。  
+- 计数与 first_seen 更新在 **步骤 3.f**（及 daily_run 共用 helper）；不得只放在 daily_run 以致 `run_deferred` 日永不推进 IPO 钟。
 
 **写入：**
 
@@ -114,7 +121,8 @@
 | `heartbeat.taxonomy`（顶层对象，与 `daily_run` 并列） | `taxonomy_fetch`: `ok` \| `fail` \| `skipped_no_diff` \| `push_fail`；`clist_fetch`；`unmapped_count`；`ipo_unmapped_alert_count`；`yaml_quarantine_size`；`map_version`；`taxonomy_commit`（sha 或 `unpushed`） |
 | `run_meta.warn` | 将 taxonomy 短文案 **追加**到既有 `decision.reason`（Spec A limit warn），分隔符 `; `；**不替换** |
 
-`write_heartbeat(job=daily_run)` **不得抹掉**顶层 `taxonomy`。`run_deferred` 时靠步骤 2.f 单独提交 heartbeat。
+写 `heartbeat.taxonomy`：用保留顶层 dict 的 merge（现有 `write_heartbeat` 以 `job` 为键写入整对象即可：`job=taxonomy`，`status` 用 `ok`/`error` 以外的值时仍走 `last_success` 时间戳——或小 helper 只 set `data["taxonomy"]=...` 不注入 job 语义）。  
+`write_heartbeat(job=daily_run)` **不得抹掉**顶层 `taxonomy`（现实现已保留其它 dict 键）。heartbeat 持久化靠步骤 3.f 的 commit，不依赖 defer 预言。
 
 ### 2.3 `map_version` bump 与实质 diff
 
@@ -160,11 +168,11 @@
 
 ### 4.2 Done-when
 
-1. workflow：taxonomy 在 sync 前；始终 exit 0；护栏+直推；fail/push_fail 不杀日更。  
-2. `run_meta.unmapped_count` 真值/NULL；`heartbeat.taxonomy` 在 main 上可见（含 deferred）。  
+1. workflow：unit tests → taxonomy → sync；taxonomy 始终 exit 0；护栏+直推；fail/push_fail 不杀日更；heartbeat 在 taxonomy 步可单独进 main。  
+2. `run_meta.unmapped_count` 真值/NULL（仅 asof 行）；`heartbeat.taxonomy` 在 main 可见（含 deferred 日）。  
 3. 无树外 bars 预热；sync 仍 mapped。  
 4. `todo.md`：Spec D 行 → **YAML 日拉 + unmapped 计数/IPO 告警已完成**；§2.3 留「树外 bars 预热仍后放」；Next = Spec E。README Still out 同步。  
-5. 上表测试绿（含 unpin `sw2021-v1`）。
+5. 上表测试绿（含 unpin `sw2021-v1`）；上市日用 `f26`。
 
 ---
 
@@ -189,3 +197,4 @@
 | 2026-10-08 | 初版：Approach 1；§2.3 软门无预热；fetch 降级；bump 规则 |
 | 2026-10-08 | self-review：§5.2 覆盖；heartbeat 并列；clist≠假0；双 commit |
 | 2026-10-08 | indep-CR 真项：exit0+GITHUB_OUTPUT；first_seen 移出 cache；护栏；unpin v1；deferred 提交 heartbeat；git_sha；asof-only 计数；语义 diff/保留 name_zh；warn 追加；rebase abort；文档覆盖表；todo 预热遗留；push_fail 枚举 |
+| 2026-10-08 | final review：步骤序=tests→taxonomy→sync；3.f 内算 unmapped/IPO 并**总是**可 commit heartbeat（不预知 defer）；钉 clist `f26`；超帽大调人工后放注 |
