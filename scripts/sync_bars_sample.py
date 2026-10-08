@@ -73,6 +73,30 @@ def skip_flags(conn, ts_code: str, end: dt.date) -> bool:
     return bool(row and row[0])
 
 
+def run_spec_e_passes(conn, codes, *, session_asof: dt.date) -> None:
+    from scripts.common.bars import ensure_bars_columns
+    from scripts.common.board_calc import apply_board_calc
+    from scripts.common.hard_freeze import (
+        apply_hard_freeze_flags,
+        load_hard_freeze_min_suspend_days,
+    )
+    from scripts.eval.costs import load_costs
+
+    ensure_bars_columns(conn)
+    try:
+        n = load_hard_freeze_min_suspend_days()
+        apply_hard_freeze_flags(conn, codes, n=n)
+    except Exception as e:  # noqa: BLE001
+        print("[sync_bars] warn: hard_freeze skipped: %s" % e, file=sys.stderr)
+    try:
+        costs = load_costs()
+        apply_board_calc(
+            conn, codes, session_asof=session_asof, limit_rule=costs.limit_rule
+        )
+    except Exception as e:  # noqa: BLE001
+        print("[sync_bars] warn: board_calc skipped: %s" % e, file=sys.stderr)
+
+
 def write_sync_complete(complete: bool, elapsed_min: float = 0.0) -> None:
     flag = "true" if complete else "false"
     deferred = "true" if (complete and elapsed_min > 200) else "false"
@@ -114,10 +138,20 @@ def main(argv=None) -> int:
         action="store_true",
         help="跳过 BaoStock is_st / is_suspended",
     )
+    p.add_argument(
+        "--asof",
+        default="",
+        help="session_asof YYYY-MM-DD (default: latest_trade_day); never use --end",
+    )
     args = p.parse_args(argv)
     end = (
         dt.datetime.strptime(args.end, "%Y-%m-%d").date()
         if args.end
+        else latest_trade_day()
+    )
+    session_asof = (
+        dt.datetime.strptime(args.asof, "%Y-%m-%d").date()
+        if args.asof
         else latest_trade_day()
     )
     if args.from_universe:
@@ -167,18 +201,26 @@ def main(argv=None) -> int:
                 )
         worked += 1
     if args.with_limits and complete:
-        asof = latest_trade_day()
-        if end != asof:
+        if end != session_asof:
             print(
                 "[sync_bars] skip --with-limits (end=%s != asof %s)"
-                % (end, asof)
+                % (end, session_asof)
             )
         else:
             try:
                 nl = sync_em_limits_asof(conn, end, ts_codes=codes, limiter=lim)
                 print("[sync_bars] limits asof=%s rows=%d" % (end, nl))
-            except Exception as e:  # noqa: BLE001 — EM best-effort; OHLC/flags already persisted
+            except Exception as e:  # noqa: BLE001
                 print("[sync_bars] warn: limits skipped: %s" % e, file=sys.stderr)
+
+    # Spec E: full mapped U (ignore --codes subset); keep conn open
+    if args.from_universe:
+        pass_codes = codes_from_universe(args.from_universe)
+    else:
+        pass_codes = codes_from_universe()
+    pass_codes = sorted(set(pass_codes))
+    run_spec_e_passes(conn, pass_codes, session_asof=session_asof)
+
     conn.close()
     elapsed_min = (dt.datetime.utcnow() - started).total_seconds() / 60.0
     write_sync_complete(complete, elapsed_min)
