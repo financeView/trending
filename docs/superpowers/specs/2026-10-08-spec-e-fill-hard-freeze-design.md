@@ -16,7 +16,7 @@
 | market-data §5.1 | 缺 vendor `limit_*` → `data_gap` | **asof 日保持**；**历史日** `D < session_asof` 允许 `board_calc_v1` 填洞 |
 | market-data §5.2 | `board_calc_v1` 未启用；须 `limit_rule` + `cost_version` | **本 slice 启用**；`limit_source=board_calc_v1`，禁止冒充交易所 |
 | market-data bars 预留 | `hard_freeze_flag` 可选 | **建列并写入**；sync 据停牌 streak 置位 |
-| metrics §5.5 | MVP `hard_frozen := is_st`；连续 N 日后放 | **`hard_frozen := is_st ∨ hard_freeze_flag`**；N 默认 20，入 yaml + `param_version` bump |
+| metrics §5.5 | `hard_frozen := is_st ∨ explicit_hard_freeze_flag` 已钉；**连续 N 日阈值** MVP 未定 | 本 slice **定义 N=20 + 数据路径**（写 `hard_freeze_flag`）；读侧公式不变 |
 | backtest-eval | `limit_up_unfillable`；MVP 卖侧涨停仍尝试 | YAML **显式 `false`**；语义不变 |
 | costs.yaml 现状 | `limit_rule: vendor_fields`，无 `limit_up_unfillable` 键 | → `board_calc_v1` + 显式键；bump `cost_version` |
 
@@ -53,16 +53,24 @@
 
 catch-up / 历史追赶日：`session_asof` = 当日 cron 会话 asof；队列内每个 `D` 相对该 asof 判定是否允许 board_calc。
 
-**挂点：** 两 pass 接在 `scripts/sync_bars_sample.py`（或同 job 等价 sync 入口）**flags/limits 同步之后**、`daily_run` **之前**；可抽 helper，但 cron 必须同 job 跑完。
+**挂点：** 两 pass 接在 `scripts/sync_bars_sample.py`（或同 job 等价 sync 入口）里：**OHLC/flags 循环结束之后**（`with_limits` 若执行则在其后）、`write_sync_complete` **之前**；`daily_run` 仍只在 `sync_complete=true` 时跑（既有 workflow）。可抽 helper，但 cron 必须同 job 跑完。
+
+**`sync_complete=false`（预算未跑完宇宙）：** 两 pass **仍执行**（基于库内已有行全量重算）；不得因 pass 本身把 `sync_complete` 打成 false。pass 异常 → stderr warn + 非零计数日志，**不**抛死整个 sync（与单票 OHLC warn 同级），以便次日续跑；`daily_run` 仍按既有门闩跳过。
+
+**预算边界：** `--time-budget-min` **只约束** OHLC/flags 网络拉取循环；两 pass 为本地 SQLite 重算，**不计入**该预算。job 总超时仍受 workflow `timeout-minutes`（sync 步 ~330）约束。首跑全宇宙重算接受数分钟级墙钟；**不**另定「必须 <X min」硬帽——若接近 job 超时则 warn（实现可打 elapsed），不得静默截断半票宇宙（要么整票提交，要么该票跳过并记日志）。
 
 **回填范围（可重入）：** 每个 sync 会话对 **mapped U（−quarantine）** 全量扫描 bars：
 
 | pass | 行集 |
 |------|------|
-| `hard_freeze_flag` | 该票有 `flag_source` 的全部交易日行（含 asof）；按票时间序重算 streak 并覆盖写 `0/1` |
+| `hard_freeze_flag` | 该票有 `flag_source` 的全部交易日行（含 asof）；按票时间序、用**当前** `hard_freeze_min_suspend_days` 重算 streak 并覆盖写 `0/1` |
 | `board_calc` | 仅当 `costs.limit_rule == board_calc_v1`；且 `D < session_asof` ∧ 双侧 `limit_*` 空；不限本次 OHLC 拉取窗口 |
 
+**Schema 迁移（钉死）：** `bars_conn()`（或 sync 入口等价路径）须 **idempotent ensure-column**：若不存在则 `ALTER TABLE bars ADD COLUMN hard_freeze_flag INTEGER NOT NULL DEFAULT 0`（精神同 trend.db `_ensure_columns`）。`CREATE TABLE IF NOT EXISTS` **不够**——Actions 会 restore 已有 `data/cache/bars.db`。migrate 后立刻跑硬冻全量重算，方可依赖该列。
+
 首跑加列后依赖上述全量重算，**禁止**只更新「本次 fetch 窗口」而留下历史 `hard_freeze_flag` 全 0。
+
+**N 加载：** sync 侧 freeze pass **读取** `config/metrics/a_share_daily.yaml` 的 `hard_freeze_min_suspend_days`（仅此旋钮；不必加载全套 MetricsParams）。metrics 读 bars 列时 **不**再读 N 重算旗。
 
 ---
 
@@ -150,13 +158,24 @@ hard_frozen := is_st OR hard_freeze_flag
 
 ### 4.3 metrics
 
-- `replay_from_ohlc` / 截面组装：`hard_frozen = bool(is_st) or bool(hard_freeze_flag)`。  
-- **bump `param_version`**（如 `p05-v2` → `p05-v3`）：N 改变 EXIT 时点，须可追溯。  
-- 修订 metrics §5.5：「连续 N 日」由本 slice 落地；默认 N=20。
+- `replay_from_ohlc` / 截面组装：`hard_frozen = bool(is_st) or bool(hard_freeze_flag)`（**只读列**，不在引擎内按 N 现算 streak）。  
+- 修订 metrics §5.5：连续 N 日阈值由本 slice 落地；默认 N=20；列名与 `explicit_hard_freeze_flag` 同义。
+
+### 4.3.1 N 变更与 `param_version`（方案 B，与「persist + 读列」锁定一致）
+
+`bars.hard_freeze_flag` 是长期停牌硬冻的 **SoT**；N 是 **sync 写盘旋钮**，不是 metrics 现算输入。
+
+| 规则 | 约定 |
+|------|------|
+| 改 `hard_freeze_min_suspend_days` | **必须**同时 bump `param_version`，且在任何宣称新 `param_version` 的 H/L/`daily_run` 结果之前，同环境跑完 hard_freeze **全量重算**（覆盖写全历史旗） |
+| 只 bump yaml / 不重跑 pass | **非法**：summary 不得声称新 `param_version` 下的 EXIT 时点有效 |
+| 本 slice 不做 | metrics compute-on-read 双轨（研究笔记偏好后放）；禁止「新 N + 旧旗」静默混跑 |
+
+夹具须钉：旧旗在 N 上调后、未重算前 → 与重算后 asof 行不一致；重算后与新 N 一致。
 
 ### 4.4 不做
 
-EM tfp 写入历史；退市/暂停上市 OR 进旗（v1.1）；用「无 bar」推断停牌。
+EM tfp 写入历史；退市/暂停上市 OR 进旗（v1.1）；用「无 bar」推断停牌；改 N 却依赖旧 `hard_freeze_flag` 做评估。
 
 ---
 
@@ -182,8 +201,11 @@ EM tfp 写入历史；退市/暂停上市 OR 进旗（v1.1）；用「无 bar」
 6. **空洞不计：** 中间缺 bar / 无 `flag_source` → streak 不跨洞虚增。  
 7. **复牌清旗：** `is_suspended=0` → `hard_freeze_flag=0`。  
 8. **全量重算：** 历史窗口外已有长停牌 streak，首跑 pass 后 asof 行 `hard_freeze_flag=1`（非仅本次 sync 窗口）。  
-9. **costs：** YAML 含 `limit_up_unfillable: false`；loader 可读并传入 fill。  
-10. **板幅 / 取整：** ST 优先；`300`/`301`/`688` = 20%；主板 = 10%；`ROUND_HALF_UP` 与银行家 `round` 分叉样例。
+9. **ensure-column：** 预置无 `hard_freeze_flag` 的 bars.db → connect 后列存在且默认 0，再全量重算可置 1。  
+10. **N 变更原子性：** 同库先用 N=20 写旗，再改 N=60 **不**重算 → asof 旗仍按旧阈值；重算后与 N=60 一致。  
+11. **incomplete sync：** OHLC 循环提前 `complete=false` 后 pass 仍跑；`sync_complete` 不因 pass 成功而变 true。  
+12. **costs：** YAML 含 `limit_up_unfillable: false`；loader 可读并传入 fill。  
+13. **板幅 / 取整：** ST 优先；`300`/`301`/`688` = 20%；主板 = 10%；`ROUND_HALF_UP` 与银行家 `round` 分叉样例。
 
 ### 5.3 文档触点（落地时改）
 
@@ -201,3 +223,4 @@ EM tfp 写入历史；退市/暂停上市 OR 进旗（v1.1）；用「无 bar」
 |------|------|
 | 2026-10-08 | 初版：Approach 1；hist board_calc + asof vendor；N=20 持久化冻旗；`limit_up_unfillable=false` 显式 |
 | 2026-10-08 | CR：真项修补——昨 `close_raw` 基准、`301`、HALF_UP、全量重算范围、`limit_rule` 门闩、backtest-eval 触点；次新/创业板 ST 为已知近似 |
+| 2026-10-08 | 独立 CR 真项：bars ensure-column；N 变更方案 B（persist SoT + 全量重写）；pass 与 sync 预算/incomplete 语义；夹具补迁移与 N 原子性；覆盖表对齐 §5.5 |
