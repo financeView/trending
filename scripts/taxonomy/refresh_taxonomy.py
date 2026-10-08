@@ -82,17 +82,25 @@ def _set_taxonomy_head_sha(sha: str) -> None:
         _clear_taxonomy_head_sha()
 
 
-def _restore_taxonomy_to_published(repo_root: str) -> None:
-    """Restore taxonomy paths to published tip after a failed YAML publish."""
-    for ref in ("ORIG_HEAD", "@{upstream}", "HEAD"):
-        r = _git(repo_root, "rev-parse", "--verify", ref, check=False)
-        if r.returncode != 0:
-            continue
-        tip = r.stdout.strip()
-        if not tip:
-            continue
-        chk = _git(repo_root, "checkout", "-f", tip, "--", *_TAXONOMY_FILES, check=False)
-        if chk.returncode == 0:
+def _restore_taxonomy_to_published(repo_root: str, pre_sha: str = "") -> None:
+    """Drop unpushed YAML commit; restore workspace to pre-publish tip.
+
+    ``pre_sha`` must be captured via ``git rev-parse HEAD`` *before* ``git commit``.
+    Never prefer post-commit ORIG_HEAD/HEAD — after commit+rebase those can be the
+    new unpushed taxonomy commit. Fall back to ``@{upstream}`` only.
+    """
+    candidates: list[str] = []
+    if pre_sha:
+        candidates.append(pre_sha)
+    up = _git(repo_root, "rev-parse", "--verify", "@{upstream}", check=False)
+    if up.returncode == 0:
+        tip = (up.stdout or "").strip()
+        if tip and tip not in candidates:
+            candidates.append(tip)
+    for tip in candidates:
+        # Hard reset drops the local unpushed commit; file checkout alone is not enough.
+        r = _git(repo_root, "reset", "--hard", tip, check=False)
+        if r.returncode == 0:
             return
 
 
@@ -102,6 +110,7 @@ def _publish_taxonomy_yaml(repo_root: str) -> tuple[str, str]:
     Returns (taxonomy_fetch_suffix, sha_or_empty).
     On success: ("ok", sha). On failure: ("push_fail", "") after workspace restore.
     """
+    pre_sha = ""
     try:
         _git(repo_root, "config", "user.email", "taxonomy-bot@users.noreply.github.com")
         _git(repo_root, "config", "user.name", "taxonomy-bot")
@@ -110,6 +119,10 @@ def _publish_taxonomy_yaml(repo_root: str) -> tuple[str, str]:
         if staged.returncode == 0:
             # nothing staged
             return "ok", ""
+        # Capture tip *before* commit — post-commit ORIG_HEAD/HEAD are unsafe for restore.
+        pre = _git(repo_root, "rev-parse", "HEAD", check=False)
+        if pre.returncode == 0:
+            pre_sha = (pre.stdout or "").strip()
         msg = "chore(taxonomy): refresh stock_sw_l2 snapshot"
         _git(repo_root, "commit", "-m", msg)
         pull = _git(
@@ -121,12 +134,12 @@ def _publish_taxonomy_yaml(repo_root: str) -> tuple[str, str]:
         )
         if pull.returncode != 0:
             _git(repo_root, "rebase", "--abort", check=False)
-            _restore_taxonomy_to_published(repo_root)
+            _restore_taxonomy_to_published(repo_root, pre_sha)
             _clear_taxonomy_head_sha()
             return "push_fail", ""
         push = _git(repo_root, "push", check=False)
         if push.returncode != 0:
-            _restore_taxonomy_to_published(repo_root)
+            _restore_taxonomy_to_published(repo_root, pre_sha)
             _clear_taxonomy_head_sha()
             return "push_fail", ""
         sha = _git(repo_root, "rev-parse", "HEAD").stdout.strip()
@@ -134,7 +147,7 @@ def _publish_taxonomy_yaml(repo_root: str) -> tuple[str, str]:
         return "ok", sha
     except Exception:
         _git(repo_root, "rebase", "--abort", check=False)
-        _restore_taxonomy_to_published(repo_root)
+        _restore_taxonomy_to_published(repo_root, pre_sha)
         _clear_taxonomy_head_sha()
         return "push_fail", ""
 

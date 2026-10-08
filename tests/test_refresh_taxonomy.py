@@ -1,8 +1,13 @@
 from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
 
 from scripts.taxonomy.fetch_sw_members import dump_yaml
 from scripts.taxonomy.refresh_taxonomy import refresh_taxonomy_once
+
+
+def _cp(rc=0, stdout="", stderr=""):
+    return SimpleNamespace(returncode=rc, stdout=stdout, stderr=stderr)
 
 
 def test_dump_yaml_keeps_name_zh_and_version():
@@ -156,3 +161,54 @@ def test_refresh_name_map_raises_keeps_prior_name(tmp_path):
     text = (tmp_path / "config" / "taxonomy" / "stock_sw_l2.yaml").read_text(encoding="utf-8")
     assert "name_zh: 旧名" in text  # prior preserved; membership still wrote 000002
     assert "000002.SZ" in text
+
+
+def test_publish_fail_resets_to_pre_sha_not_orig_head(monkeypatch):
+    """Push-fail must hard-reset to pre-commit SHA; never prefer ORIG_HEAD."""
+    from scripts.taxonomy import refresh_taxonomy as rt
+
+    calls: list[tuple] = []
+    pre_sha = "aaa111pre"
+    new_sha = "bbb222new"  # post-commit / ORIG_HEAD would be this
+
+    def fake_git(repo_root, *args, check=True):
+        calls.append(args)
+        cmd = args[0] if args else ""
+        if cmd == "diff" and "--cached" in args:
+            return _cp(1)  # staged changes present
+        if cmd == "rev-parse" and args[-1:] == ("HEAD",):
+            # Before commit → pre_sha; after commit success path would see new_sha
+            if any(c[0] == "commit" for c in calls[:-1]):
+                return _cp(0, new_sha + "\n")
+            return _cp(0, pre_sha + "\n")
+        if cmd == "rev-parse" and "@{upstream}" in args:
+            return _cp(0, pre_sha + "\n")
+        if cmd == "rev-parse" and "ORIG_HEAD" in args:
+            return _cp(0, new_sha + "\n")
+        if cmd == "pull":
+            return _cp(0)
+        if cmd == "push":
+            return _cp(1, stderr="rejected")
+        if cmd == "reset":
+            return _cp(0)
+        return _cp(0)
+
+    monkeypatch.setattr(rt, "_git", fake_git)
+    monkeypatch.delenv("TAXONOMY_HEAD_SHA", raising=False)
+
+    status, sha = rt._publish_taxonomy_yaml("/tmp/fake-repo")
+    assert status == "push_fail"
+    assert sha == ""
+
+    # pre_sha captured before commit
+    commit_idx = next(i for i, c in enumerate(calls) if c[0] == "commit")
+    first_head_idx = next(
+        i for i, c in enumerate(calls) if c[0] == "rev-parse" and c[-1:] == ("HEAD",)
+    )
+    assert first_head_idx < commit_idx
+
+    # hard reset to pre_sha; never ORIG_HEAD / checkout-only restore
+    assert ("reset", "--hard", pre_sha) in calls
+    assert not any("ORIG_HEAD" in c for c in calls)
+    assert not any(c[0] == "checkout" for c in calls)
+    assert not rt.os.environ.get("TAXONOMY_HEAD_SHA")
