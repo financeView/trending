@@ -23,13 +23,14 @@
 - ensure-column + update `BARS_SCHEMA` CREATE; Actions restores existing `bars.db`
 - Out of slice: tree-out warmup, asof board_calc, paid limits, EM tfp history, §2.7 tags, temperature/RS changes
 - Do not commit dirty `data/cache/trade_dates.json` in feat commits
+- Task 0 sets `limit_rule: board_calc_v1` before the writer exists (Tasks 3–4); sequential commits OK — do not run production board_calc expecting fills until Task 4 lands
 
 ## File map
 
 | Path | Responsibility |
 |------|----------------|
 | `scripts/common/bars.py` | `hard_freeze_flag` in CREATE; `ensure_bars_columns`; `LIMIT_SOURCE_BOARD_CALC` |
-| `scripts/common/hard_freeze.py` | streak helper; `apply_hard_freeze_flags` full-U rewrite |
+| `scripts/common/hard_freeze.py` | `apply_hard_freeze_flags` only (calendar-aware streak; no separate helper) |
 | `scripts/common/board_calc.py` | pct / HALF_UP / `apply_board_calc` |
 | `scripts/sync_bars_sample.py` | `--asof`; call ensure + both passes after loop |
 | `scripts/eval/costs.py` | `limit_up_unfillable` on `EvalCosts` |
@@ -978,48 +979,57 @@ def test_incomplete_still_calls_passes_and_keeps_complete_false(
 
 - [ ] **Step 3: Wire `main()` call site (exact order)**
 
-Current tail of `main` today:
+After `p.add_argument("--skip-flags", ...)` add:
 
 ```python
-    if args.with_limits and complete:
-        asof = latest_trade_day()
-        ...
-    conn.close()
-    elapsed_min = ...
-    write_sync_complete(complete, elapsed_min)
+    p.add_argument(
+        "--asof",
+        default="",
+        help="session_asof YYYY-MM-DD (default: latest_trade_day); never use --end",
+    )
 ```
 
-Replace with:
+After `args = p.parse_args(argv)` / `end = ...` block, set:
 
 ```python
-    p.add_argument("--asof", default="", help="session_asof (default latest_trade_day)")
-    # after parse:
     session_asof = (
         dt.datetime.strptime(args.asof, "%Y-%m-%d").date()
         if args.asof
         else latest_trade_day()
     )
-    # OHLC loop still uses `codes` from --codes / --from-universe / universe
+```
 
+Replace the current tail (from `if args.with_limits and complete:` through `return 0`) with:
+
+```python
     if args.with_limits and complete:
-        if end != session_asof:  # was: latest_trade_day()
-            print("[sync_bars] skip --with-limits (end=%s != asof %s)" % (end, session_asof))
+        if end != session_asof:
+            print(
+                "[sync_bars] skip --with-limits (end=%s != asof %s)"
+                % (end, session_asof)
+            )
         else:
-            ... sync_em_limits_asof(conn, end, ...) ...
+            try:
+                nl = sync_em_limits_asof(conn, end, ts_codes=codes, limiter=lim)
+                print("[sync_bars] limits asof=%s rows=%d" % (end, nl))
+            except Exception as e:  # noqa: BLE001
+                print("[sync_bars] warn: limits skipped: %s" % e, file=sys.stderr)
 
-    # Spec E passes: full mapped U, open connection
-    pass_codes = codes_from_universe(args.from_universe) if args.from_universe else codes_from_universe()
+    # Spec E: full mapped U (ignore --codes subset); keep conn open
+    if args.from_universe:
+        pass_codes = codes_from_universe(args.from_universe)
+    else:
+        pass_codes = codes_from_universe()
+    pass_codes = sorted(set(pass_codes))
     run_spec_e_passes(conn, pass_codes, session_asof=session_asof)
-    # do not change `complete` here
 
     conn.close()
     elapsed_min = (dt.datetime.utcnow() - started).total_seconds() / 60.0
     write_sync_complete(complete, elapsed_min)
+    return 0
 ```
 
-When `--from-universe` is a fixture path, `pass_codes` may equal that fixture’s mapped set (tests). Production cron omits `--codes`/`--from-universe` → full mapped U.
-
-**Actions:** leave `.github/workflows/daily-trend.yml` unchanged.
+Production cron omits `--codes`/`--from-universe` → full mapped U. **Actions:** leave `.github/workflows/daily-trend.yml` unchanged.
 
 - [ ] **Step 4: Pytest PASS**
 
@@ -1337,17 +1347,40 @@ EOF
 ### Task 7: Docs done-when
 
 **Files:**
-- Modify: `docs/superpowers/specs/2026-10-01-market-data-contract-design.md` §5.2 + bars column
-- Modify: `docs/superpowers/specs/2026-09-29-trend-metrics-engine-design.md` §5.5 (N landed; column synonym)
+- Modify: `docs/superpowers/specs/2026-10-01-market-data-contract-design.md` §5.2 + bars `hard_freeze_flag`
+- Modify: `docs/superpowers/specs/2026-09-29-trend-metrics-engine-design.md` §5.5
 - Modify: `docs/superpowers/specs/2026-09-30-backtest-eval-design.md` §4.2–4.3
-- Modify: `docs/superpowers/specs/2026-10-08-spec-e-fill-hard-freeze-design.md` status → 已落地 + plan link
-- Modify: `todo.md` §2.5–2.6 / Spec E row → 已完成
+- Modify: `docs/superpowers/specs/2026-10-08-spec-e-fill-hard-freeze-design.md` status
+- Modify: `todo.md` Spec E row + §2.5–2.6
 
-- [ ] **Step 1: Edit market-data §5.2** — mark `board_calc_v1` enabled path; hist-only; prior `close_raw` basis; `hard_freeze_flag` formal; N knob name
+- [ ] **Step 1: market-data §5.2**
 
-- [ ] **Step 2: Edit metrics §5.5** — replace “MVP 不另定连续 N 日” with Spec E N=20 + persist column; note protocol B for N changes
+Replace heading/body of §5.2 from 「将来：`board_calc_v1`（未启用）」 with enabled path:
 
-- [ ] **Step 3: Edit backtest-eval** — hist may carry `board_calc_v1` limits; costs example `v2` / `limit_up_unfillable: false`
+```markdown
+### 5.2 `board_calc_v1`（Spec E 启用）
+
+历史日（`D < session_asof`）且双侧 `limit_*` 空时，可用昨交易日 `close_raw` 按板幅 `ROUND_HALF_UP` 推算并写入 bars，`limit_source=board_calc_v1`。asof 日禁止 board_calc。须 `limit_rule=board_calc_v1` 且 bump `cost_version`；summary 两者都写；禁止混称交易所限价。详见 Spec E。
+
+`bars.hard_freeze_flag`：连续 `is_suspended` 交易日 ≥ `hard_freeze_min_suspend_days`（默认 20）由 sync 置位；metrics `hard_frozen := is_st ∨ hard_freeze_flag`。
+```
+
+Also in §3/§4 schema list, ensure `hard_freeze_flag` is documented as written (not merely reserved).
+
+- [ ] **Step 2: metrics §5.5**
+
+Replace the bullet 「MVP **不**另定「停牌连续 N 日」阈值…」 with:
+
+```markdown
+- 长期停牌：`bars.hard_freeze_flag`（sync 据连续停牌 streak ≥ `hard_freeze_min_suspend_days`，默认 20）；与文中 `explicit_hard_freeze_flag` 同义。改 N 须 bump `param_version` 且全量重写旗后再宣称新版本（Spec E 方案 B）。
+```
+
+Keep `hard_frozen := is_st OR (explicit_hard_freeze_flag …)` formula.
+
+- [ ] **Step 3: backtest-eval §4.2 / §4.3**
+
+§4.2 涨跌停行：注明历史可含 `limit_source=board_calc_v1` 的推算限价（asof 仍仅 vendor）。  
+§4.3 `costs.yaml` 示例改为 `cost_version: v2`、`limit_rule: board_calc_v1`、`limit_up_unfillable: false`。
 
 - [ ] **Step 4: Spec E + todo**
 
@@ -1357,7 +1390,7 @@ Spec header:
 **状态：** 已落地；plan [`2026-10-08-spec-e-fill-hard-freeze.md`](../plans/2026-10-08-spec-e-fill-hard-freeze.md)
 ```
 
-`todo.md`: Spec E row **已完成**; §2.5–2.6 strike/complete like Spec D.
+`todo.md`: Spec E 表行 → **已完成** + spec/plan 链接；§2.5 / §2.6 标完成（同 Spec D 文体）。
 
 - [ ] **Step 5: Commit**
 
@@ -1398,3 +1431,5 @@ EOF
 | Actions workflow | no change |
 
 Indep plan CR patch (2026-10-08): `conn.close` order; full-U passes; #2b/#10/#11; drop brittle escape; defer `p05-v3`; non-tautological summary test.
+
+Final-nit patch (2026-10-08): file-map wording; full `with_limits`+`close` block; Task 7 concrete doc replacements; note Task 0 `limit_rule` ahead of writer.
