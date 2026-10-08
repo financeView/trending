@@ -273,7 +273,7 @@ hard_frozen := is_st
 ```
 
 - **不含**普通 1～数日 `is_suspended` / 单日 `T_raw=null`（那些走上一行软填）。  
-- MVP **不**另定「停牌连续 N 日」阈值；若以后要加，须进 data-contract + 新 `param_version`。  
+- 长期停牌：`bars.hard_freeze_flag`（sync 据连续停牌 streak ≥ `hard_freeze_min_suspend_days`，默认 20）；与文中 `explicit_hard_freeze_flag` 同义。改 N 须 bump `param_version` 且全量重写旗后再宣称新版本（Spec E 方案 B）。  
 - 一旦 `hard_frozen` 在 `R=true` 时成立：**结束本段右侧**（避免账本强平后 `R` 仍 true、无法再 `ENTER_RIGHT` 的死锁）。恢复可交易后须重新满足进入条件才会 `ENTER_RIGHT`。
 
 夹具：`fsm_untradable_freeze` 改为「短不可算软冻不立秋」；新增 `fsm_st_ends_right`：`R` 中变 ST → 当日 `EXIT_RIGHT` + 立秋 + `R=false`。

@@ -3,7 +3,7 @@
 > 日期：2026-10-08  
 > 已落地：P0 日更骨架 → P0.5 个股 FSM → P1 L1/Radar Issues → P2 纸面影子 → 申万 YAML 映射宇宙 → 2026-09-30 Actions 实跑（`run_meta=partial`，见 P1 缺口）。  
 > **§0 已落地**（L2 同引擎 + digest 名称/亿元）。**§2.1 已落地**（L1 同引擎 — Spec B）。**§1.3 / §2.2 已落地**（价格 RS + S_temp/C1 + 个股旁路 VOL — Spec C）。**§2.3–2.4 已落地**（YAML 日拉 + unmapped 计数/IPO 告警 — Spec D）。  
-> **落地顺序（已钉）：A → B → C → D → E**。**A、B、C、D 已落地**；**Next = Spec E**（§2.5 board_calc / limit_up_unfillable + §2.6 显式硬冻）。
+> **落地顺序（已钉）：A → B → C → D → E**。**A–E 已落地**（§2.5 board_calc / limit_up_unfillable + §2.6 显式硬冻 — Spec E）。
 
 ---
 
@@ -15,7 +15,7 @@
 | **B. L1 同引擎** | §2.1（replay 成本后放） | **已完成** — [`spec`](docs/superpowers/specs/2026-10-07-l1-same-engine-design.md) / [`plan`](docs/superpowers/plans/2026-10-07-l1-same-engine.md) |
 | **C. RS + C1** | §2.2 + §1.3 表头/排序与真 RS 同发（旁路 VOL；量不进 RS） | **已完成** — [`spec`](docs/superpowers/specs/2026-10-07-rs-c1-vol-design.md) / [`plan`](docs/superpowers/plans/2026-10-07-rs-c1-vol.md) |
 | **D. 宇宙扩张** | §2.3 unmapped 计数/IPO 告警 + §2.4 YAML 日拉（**不含**树外 bars 预热） | **已完成** — [`spec`](docs/superpowers/specs/2026-10-08-universe-expansion-design.md) / [`plan`](docs/superpowers/plans/2026-10-08-universe-expansion.md) |
-| **E. 成交与冻旗** | §2.5 board_calc / limit_up_unfillable + §2.6 显式硬冻 | 后放 |
+| **E. 成交与冻旗** | §2.5 board_calc / limit_up_unfillable + §2.6 显式硬冻 | **已完成** — [`spec`](docs/superpowers/specs/2026-10-08-spec-e-fill-hard-freeze-design.md) / [`plan`](docs/superpowers/plans/2026-10-08-spec-e-fill-hard-freeze.md) |
 
 §2.7–2.8、§3.* 仍不进 A–E。
 
@@ -112,14 +112,14 @@
 
 - Spec / plan 同上（Actions taxonomy 步：fetch + 语义 diff + `map_version` bump + push）。
 
-### 2.5 `board_calc_v1` 与 `limit_up_unfillable`
+### 2.5 ~~`board_calc_v1` 与 `limit_up_unfillable`~~（已完成 — Spec E）
 
-- 缺 vendor `limit_*` → `data_gap`，不成交、不猜板。显式 `limit_rule=board_calc_v1` 且 bump `cost_version` 才允许推算。
-- 涨停买不进：`limit_up_unfillable`（P2 Out）。
+- Spec：[`2026-10-08-spec-e-fill-hard-freeze-design.md`](docs/superpowers/specs/2026-10-08-spec-e-fill-hard-freeze-design.md) / plan [`2026-10-08-spec-e-fill-hard-freeze.md`](docs/superpowers/plans/2026-10-08-spec-e-fill-hard-freeze.md)
+- hist `board_calc_v1` + `cost_version` v2；`limit_up_unfillable: false` 显式进 YAML/summary。
 
-### 2.6 `hard_frozen` 扩到显式冻旗
+### 2.6 ~~`hard_frozen` 扩到显式冻旗~~（已完成 — Spec E）
 
-- MVP = `is_st`。`explicit_hard_freeze_flag` 列、软冻≠硬冻的完整数据路径仍缺。
+- Spec / plan 同上（`bars.hard_freeze_flag` + sync streak N=20；metrics OR；`param_version` p05-v3）。
 
 ### 2.7 止盈辅助标签 §11
 

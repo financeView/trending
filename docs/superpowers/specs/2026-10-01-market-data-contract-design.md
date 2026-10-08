@@ -73,7 +73,8 @@
 | `is_suspended` | BaoStock 日线 `tradestatus`（0=停） | 勿把「无 bar」直接当停牌 |
 | `is_st` | BaoStock 日线 `isST` | 当日可用名称/`stock_zh_a_st_em` 兜底快照 |
 | `limit_up` / `limit_down`（**当日**） | 东财 quote `f51` / `f52` | 写入当日 bar；`limit_source=em_f51f52` |
-| `limit_*`（**历史**） | MVP：**允许空** → 成交层 `data_gap` | 日后可选 `board_calc_v1`（§5） |
+| `limit_*`（**历史**） | MVP：**允许空** → 成交层 `data_gap` | Spec E：`board_calc_v1` 填洞（§5.2） |
+| `hard_freeze_flag` | sync 据连续 `is_suspended` streak 写入 bars | 默认 N=20（`hard_freeze_min_suspend_days`）；metrics 读列 |
 | `float_mv` | 东财 spot「流通市值」（元） | 见 §6；可空 |
 
 工程习惯继承 economy-strategy：`RateLimiter` + `call_with_retry`；`BARS_SOURCE` 钉死；全量冷启动靠分批，不靠单次拉完全宇宙多年。
@@ -102,7 +103,7 @@ bars (
   limit_up, limit_down,     -- 可空；§5
   is_suspended INTEGER,     -- 0/1；短停牌 → metrics 软填，不单独 hard_frozen
   is_st INTEGER,            -- 0/1；is_st=1 → metrics hard_frozen（结束右侧）
-  -- 可选预留：hard_freeze_flag INTEGER  # 长期停牌等显式旗；MVP 默认可不建，有则并入 hard_frozen
+  hard_freeze_flag INTEGER NOT NULL DEFAULT 0,  # sync 连续停牌 streak≥N 置位；metrics hard_frozen OR
   bar_source, flag_source, limit_source,
   fetched_at,
   PRIMARY KEY (ts_code, trade_date)
@@ -141,15 +142,11 @@ sync_meta (
 - 历史 H 轨 / 追赶日（`D < session asof`）：多年无 vendor 限价属预期；**不**因缺 `limit_*` 拒绝该日 `ok`（见 §7.2）。  
 - **session asof** 日：`limit_*` 覆盖率过低 → 仍可 `status=ok`+warn，`last_ok` 前移（§7.2 v1.2 / Spec A）；个股缺限价仍 `data_gap`，避免半截成交。
 
-### 5.2 将来：`board_calc_v1`（未启用）
+### 5.2 `board_calc_v1`（Spec E 启用）
 
-当需要加厚历史纸面样本时，可另开版本（**不是**改 MVP 默认偷换）：
+历史日（`D < session_asof`）且双侧 `limit_*` 空时，可用昨交易日 `close_raw` 按板幅 `ROUND_HALF_UP` 推算并写入 bars，`limit_source=board_calc_v1`。asof 日禁止 board_calc。须 `limit_rule=board_calc_v1` 且 bump `cost_version`；summary 两者都写；禁止混称交易所限价。详见 Spec E。
 
-- 规则示意：按板块/ST 对 `preclose_raw` 乘板幅并取整，得到推算涨跌停价。  
-- **必须同时** `limit_rule=board_calc_v1` **且** bump `cost_version`；summary 两者都写；禁止混称「交易所限价」。  
-- 启用前补夹具与修订记录；全样本拟合式「先算限价再调参」仍禁止。
-
-业界对照（备忘）：付费表（如 Tushare `stk_limit`）≈ vendor；开源回测常用 board_calc；更糙的用一字板形态代理。本项目路径是 **先 data_gap，后可选显式 board_calc**。
+`bars.hard_freeze_flag`：连续 `is_suspended` 交易日 ≥ `hard_freeze_min_suspend_days`（默认 20）由 sync 置位；metrics `hard_frozen := is_st ∨ hard_freeze_flag`。
 
 ---
 

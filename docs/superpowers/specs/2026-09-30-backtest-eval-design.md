@@ -170,10 +170,10 @@ MVP 触发与延期：
 |------|------|
 | 指标 / FSM / 信号 | **前复权**收盘 |
 | 意图成交价 | **`open_raw`**（未复权开盘）；库若无 raw，须全样本统一 `fill_price=adj_open` 并写入 summary |
-| 涨跌停 | 仅 vendor / 当日东财写入的 `limit_up`/`limit_down`；**禁止**对 300/688 静默套用主板 10% |
+| 涨跌停 | asof 日：仅 vendor / 当日东财写入的 `limit_up`/`limit_down`；历史日可含 `limit_source=board_calc_v1` 推算限价（§5.2）；**禁止**对 300/688 静默套用主板 10% |
 | 净值盯市 | `close_raw` |
 
-缺 `limit_*` → **`data_gap`**（MVP）。加厚历史样本时的可选推算见 market-data-contract **§5.2 `board_calc_v1`**（须显式改 `limit_rule`，本 MVP 默认不启用）。  
+缺 `limit_*` → **`data_gap`**（asof 日；历史日在 `limit_rule=board_calc_v1` 下可由 board_calc 填洞）。见 market-data-contract **§5.2 `board_calc_v1`**。  
 字段与源：[`2026-10-01-market-data-contract-design.md`](./2026-10-01-market-data-contract-design.md)。
 
 MVP：**推荐** bars 含前复权 OHLC + `open_raw/close_raw` + `limit_up/limit_down` + `is_suspended` + `is_st` + 可空 `float_mv`。
@@ -183,7 +183,7 @@ MVP：**推荐** bars 含前复权 OHLC + `open_raw/close_raw` + `limit_up/limit
 **路径钉死**：`config/eval/costs.yaml`（代码只读此路径）。
 
 ```yaml
-cost_version: v1
+cost_version: v2
 commission_rate: 0.0003
 min_commission: 0
 stamp_tax_sell: 0.0005
@@ -192,7 +192,8 @@ impact_bp_sell: 5
 lot_size: 100
 N_cap: 20
 initial_cash: 1000000
-limit_rule: vendor_fields      # MVP：缺字段 → data_gap；将来可选 board_calc_v1 见 market-data-contract §5.2
+limit_rule: board_calc_v1
+limit_up_unfillable: false
 fill_price: open_raw
 hs300_series: 000300.SH        # Tushare 式；summary 原样抄写
 ```

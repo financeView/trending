@@ -1,7 +1,7 @@
 # Spec E：成交加厚（board_calc）+ 显式硬冻旗
 
 **日期：** 2026-10-08  
-**状态：** plan 就绪；[`2026-10-08-spec-e-fill-hard-freeze.md`](../plans/2026-10-08-spec-e-fill-hard-freeze.md)  
+**状态：** 已落地；plan [`2026-10-08-spec-e-fill-hard-freeze.md`](../plans/2026-10-08-spec-e-fill-hard-freeze.md)  
 **范围：** todo §2.5 `board_calc_v1` / `limit_up_unfillable` + §2.6 显式硬冻（`hard_freeze_flag` / `hard_frozen`）。  
 **后放（禁止混入本 slice）：** 树外 bars 预热；asof 日用 board_calc 补洞或自动重拉 limit；付费限价/停牌表（Tushare `stk_limit` / `suspend_d`）；EM `stock_tfp_em` 写入历史 bars；止盈 tag（§2.7）；改温度决策树 / RS / peer；退市整理并入冻旗（taxonomy 已排）。
 
