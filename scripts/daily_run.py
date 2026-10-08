@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import os
+import re
 import sys
-from typing import Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 # repo root on sys.path
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -18,10 +20,12 @@ from scripts.common.bars import DEFAULT_BARS_DB, bars_conn
 from scripts.common.coverage import (
     CoverageMetrics,
     OK_PREDICATE_VERSION,
+    OkDecision,
     compute_coverage_from_bars,
     evaluate_ok,
 )
 from scripts.common.db import (
+    DEFAULT_DB,
     append_signal_events,
     first_unfinished_trade_date,
     get_conn,
@@ -33,6 +37,7 @@ from scripts.common.db import (
     upsert_rows,
     write_heartbeat,
 )
+from scripts.taxonomy.unmapped import UnmappedMetrics, compute_unmapped_metrics
 from scripts.common.universe import (
     l2_members_map,
     load_map_version,
@@ -56,6 +61,9 @@ from scripts.metrics.pipeline import replay_from_ohlc
 from scripts.metrics.vol_score import compute_vol_scores, turnover_from_bar
 
 _METRICS_YAML = os.path.join(_ROOT, "config", "metrics", "a_share_daily.yaml")
+_FIRST_SEEN_PATH = os.path.join(_ROOT, "data", "unmapped_first_seen.json")
+_HEARTBEAT_PATH = os.path.join(os.path.dirname(DEFAULT_DB), "heartbeat.json")
+_TAXONOMY_COMMIT_RE = re.compile(r"^[0-9a-f]{7,40}$")
 
 _BARS_SELECT = """
 SELECT trade_date, open_qfq, high_qfq, low_qfq, close_qfq,
@@ -68,6 +76,119 @@ ORDER BY trade_date ASC
 
 def _parse_date(s: str) -> dt.date:
     return dt.datetime.strptime(s, "%Y-%m-%d").date()
+
+
+def _heartbeat_path() -> str:
+    return os.environ.get("TREND_HEARTBEAT") or _HEARTBEAT_PATH
+
+
+def _load_heartbeat_taxonomy() -> dict:
+    path = _heartbeat_path()
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return {}
+    tax = data.get("taxonomy") if isinstance(data, dict) else None
+    return tax if isinstance(tax, dict) else {}
+
+
+def _env_nonempty(name: str) -> str:
+    val = os.environ.get(name)
+    return val if val else ""
+
+
+def _load_taxonomy_fetch() -> str:
+    env = _env_nonempty("TAXONOMY_FETCH")
+    if env:
+        return env
+    tax = _load_heartbeat_taxonomy()
+    fetch = tax.get("taxonomy_fetch")
+    return fetch if fetch else "ok"
+
+
+def _resolve_git_sha() -> str:
+    head = _env_nonempty("TAXONOMY_HEAD_SHA")
+    if head:
+        return head
+    gsha = _env_nonempty("GITHUB_SHA")
+    if gsha:
+        return gsha
+    tax = _load_heartbeat_taxonomy()
+    fetch = tax.get("taxonomy_fetch")
+    commit = str(tax.get("taxonomy_commit") or "")
+    # Only successful YAML publish (`ok`); never fail/push_fail/skipped_no_diff.
+    if fetch == "ok" and _TAXONOMY_COMMIT_RE.match(commit):
+        return commit
+    return ""
+
+
+def _run_meta_unmapped_fields(
+    *,
+    D: dt.date,
+    session_asof: dt.date,
+    um: Any,
+    prior_unmapped_count=None,
+) -> dict:
+    if D == session_asof:
+        return {"unmapped_count": um.unmapped_count}  # may be None → SQL NULL
+    return {"unmapped_count": prior_unmapped_count}
+
+
+def _append_taxonomy_warn(
+    base: str,
+    *,
+    ipo_alert: int | None = 0,
+    taxonomy_fetch: str = "ok",
+    clist_fetch: str = "ok",
+    unmapped_count: int | None = None,  # noqa: ARG001 — never warns on bare count
+) -> str:
+    bits: list[str] = []
+    if taxonomy_fetch in ("fail", "push_fail"):
+        bits.append("taxonomy_fetch=%s" % taxonomy_fetch)
+    if ipo_alert is not None and ipo_alert > 0:
+        bits.append("ipo_unmapped_alert=%s" % ipo_alert)
+    if clist_fetch == "fail":
+        bits.append("clist_fetch=fail")
+    if not bits:
+        return base or ""
+    tax = "taxonomy: " + ", ".join(bits)
+    if base:
+        return "%s; %s" % (base, tax)
+    return tax
+
+
+def _compose_asof_status_and_warn(
+    decision: OkDecision,
+    *,
+    ipo_alert: int | None,
+    taxonomy_fetch: str,
+    clist_fetch: str,
+) -> tuple[str, str]:
+    status = decision.status  # never flip for IPO / unmapped / clist
+    base = (
+        decision.reason
+        if decision.reason and decision.reason != "passed"
+        else ""
+    )
+    warn = _append_taxonomy_warn(
+        base,
+        ipo_alert=ipo_alert or 0,
+        taxonomy_fetch=taxonomy_fetch,
+        clist_fetch=clist_fetch,
+    )
+    return status, warn
+
+
+def _default_unmapped_metrics() -> UnmappedMetrics:
+    return UnmappedMetrics(
+        unmapped_count=None,
+        ipo_unmapped_alert_count=None,
+        yaml_quarantine_size=0,
+        clist_fetch="ok",
+    )
 
 
 def resolve_session(
@@ -510,6 +631,8 @@ def process_day(
     metrics: CoverageMetrics | None = None,
     stub_coverage: bool = False,
     bars_path: str | None = None,
+    um: UnmappedMetrics | None = None,
+    taxonomy_fetch: str | None = None,
 ) -> str:
     conn = get_conn()
     init_schema(conn)
@@ -535,6 +658,33 @@ def process_day(
     )
     decision = evaluate_ok(D, session_asof, metrics)
     finished = dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"
+
+    um = um if um is not None else _default_unmapped_metrics()
+    tf = taxonomy_fetch if taxonomy_fetch is not None else _load_taxonomy_fetch()
+
+    prior_u = None
+    if D != session_asof:
+        row = conn.execute(
+            "SELECT unmapped_count FROM run_meta WHERE trade_date=?",
+            (D.isoformat(),),
+        ).fetchone()
+        prior_u = row[0] if row else None
+
+    if D == session_asof:
+        status, warn = _compose_asof_status_and_warn(
+            decision,
+            ipo_alert=um.ipo_unmapped_alert_count,
+            taxonomy_fetch=tf,
+            clist_fetch=um.clist_fetch,
+        )
+    else:
+        status = decision.status
+        warn = (
+            decision.reason
+            if decision.reason and decision.reason != "passed"
+            else ""
+        )
+
     upsert_rows(
         conn,
         "run_meta",
@@ -545,7 +695,12 @@ def process_day(
                 "map_version": map_version,
                 "member_set": MEMBER_SET,
                 "universe_size": metrics.universe_size,
-                "unmapped_count": 0,
+                **_run_meta_unmapped_fields(
+                    D=D,
+                    session_asof=session_asof,
+                    um=um,
+                    prior_unmapped_count=prior_u,
+                ),
                 "tradable_count": metrics.tradable_count,
                 "bar_coverage": metrics.bar_coverage,
                 "computable_coverage": metrics.computable_coverage,
@@ -554,15 +709,11 @@ def process_day(
                 "mapped_size": metrics.mapped_size,
                 "mapped_sync_coverage": metrics.mapped_sync_coverage,
                 "ok_predicate_version": OK_PREDICATE_VERSION,
-                "git_sha": os.environ.get("GITHUB_SHA", ""),
+                "git_sha": _resolve_git_sha(),
                 "started_at": started,
                 "finished_at": finished,
-                "status": decision.status,
-                "warn": (
-                    decision.reason
-                    if decision.reason and decision.reason != "passed"
-                    else ""
-                ),
+                "status": status,
+                "warn": warn,
             }
         ],
     )
@@ -573,7 +724,7 @@ def process_day(
         % (
             D,
             session_asof,
-            decision.status,
+            status,
             decision.reason,
             decision.apply_limit_gate,
             metrics.bar_coverage,
@@ -582,7 +733,7 @@ def process_day(
             metrics.tradable_count,
         )
     )
-    return decision.status
+    return status
 
 
 def main(argv=None) -> int:
@@ -672,6 +823,20 @@ def main(argv=None) -> int:
             return 0
 
     print("[daily_run] queue=%s" % [d.isoformat() for d in queue])
+    # Spec D: one clist snapshot for session_asof; asof run_meta only.
+    try:
+        um = compute_unmapped_metrics(
+            session_asof=session_asof,
+            first_seen_path=_FIRST_SEEN_PATH,
+        )
+    except Exception:
+        um = UnmappedMetrics(
+            unmapped_count=None,
+            ipo_unmapped_alert_count=None,
+            yaml_quarantine_size=0,
+            clist_fetch="fail",
+        )
+    taxonomy_fetch = _load_taxonomy_fetch()
     statuses = []
     bars_path = args.bars_db or None
     for D in queue:
@@ -680,6 +845,8 @@ def main(argv=None) -> int:
             session_asof,
             stub_coverage=args.stub_coverage,
             bars_path=bars_path,
+            um=um,
+            taxonomy_fetch=taxonomy_fetch,
         )
         statuses.append(st)
         if st != "ok":
