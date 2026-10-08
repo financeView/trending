@@ -407,6 +407,7 @@ python scripts/eval/live_shadow_step.py --asof today
 | 2026-09-30 | review 修补：交易日滞后；ST 强制出清；ENTER_RIGHT only；未平仓 KPI；拒单分裂；vs_hs300；WF 主门槛；随机冲突；L 事件不可变；costs 路径钉死 |
 | 2026-09-30 | 二次修补：强制出清仅 ST/硬冻结；WF 对齐 vs_random；max_dd_random 曲线钉死；L 终态即消费；paper_fill∈trend.db |
 | 2026-10-01 | 交叉引用 market-data-contract：MVP data_gap；预留 board_calc_v1 |
+| 2026-10-08 | Spec E：§4.2 hist `board_calc_v1`；§4.3 `costs.yaml` v2（`limit_rule` / `limit_up_unfillable`） |
 | 2026-10-01 | §4.4 明确 limit 与 open_raw 同为 raw 空间 |
 | 2026-10-01 | 跨 spec：强制出清改走 metrics `EXIT_RIGHT`+`hard_frozen`（结束 R）；卖单只认 EXIT 事件 |
 | 2026-10-01 | 清歧义：§1 卖=唯一 `EXIT_RIGHT`；删 §4.5 独立强平步；L 须 `run_meta=ok` |

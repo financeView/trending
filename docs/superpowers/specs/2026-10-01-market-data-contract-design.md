@@ -15,9 +15,9 @@
 
 ## 0. 已拍板决策（全貌速查）
 
-| 决策 | MVP 结论 | 将来可选 |
-|------|----------|----------|
-| 缺 vendor `limit_*` | **严格 `data_gap`**（不成交、不猜限价） | 加厚历史样本时可显式开 **`board_calc_v1`**（须新 `cost_version` / summary 标注，不得静默冒充 vendor） |
+| 决策 | 当前结论 | 备注 |
+|------|----------|------|
+| 缺 vendor `limit_*` | **asof**：严格 `data_gap`；**hist**（`D < session_asof`）：§5.2 **`board_calc_v1`** 填洞（须 `limit_rule` + `cost_version`，不得静默冒充 vendor） | `limit_rule=vendor_fields` 时仍全程严格 gap（§5.1） |
 | `float_mv` | **落库**；当日 sync 可写 spot；**历史禁 spot 回刷**；空则 \(w=1\) 再归一 | 市值 vs 等权 A/B（metrics V4） |
 | 标的主键 | **Tushare 式** `ts_code`：`000001.SZ` / `600000.SH` | 北交所 `.BJ` 若扩宇宙再定 |
 | 调度 | 交易日 **北京 19:00**（UTC `0 11 * * 1-5`） | 可再延，不可早于 18:00 当「齐套」假设 |
@@ -39,7 +39,7 @@
 - 分钟级行情；盘中实时温度。  
 - MVP 默认付费 Tushare。  
 - 用「日历空洞」单独推断停牌。  
-- 历史多年完整 vendor 涨跌停表（接受 data_gap 或日后 board_calc）。
+- 历史多年完整 vendor 涨跌停表（hist 可 board_calc 填洞，不追付费全表）。
 
 ---
 
@@ -133,14 +133,16 @@ sync_meta (
 
 `limit_up` / `limit_down` **一律未复权（raw）价格空间**；成交判定 **只**与 `open_raw`（及同口径 raw 字段）比较，**禁止**与 qfq open/close 比较。
 
-### 5.1 MVP：`limit_rule = vendor_fields` + 严格 `data_gap`
+### 5.1 `limit_rule = vendor_fields` + 严格 `data_gap`
 
-与 backtest `costs.yaml` 一致：
+当 `limit_rule=vendor_fields`（或未启用 §5.2）时：
 
 - 仅当存在 vendor（或当日东财 f51/f52）写入的 `limit_up`/`limit_down` 时，才做开盘涨跌停可成交判定。  
 - **字段缺失** → 该票该意图日 **`data_gap`**，不得用收盘价顶开盘价，**不得**静默套用主板 10%（含 300/688）。  
 - 历史 H 轨 / 追赶日（`D < session asof`）：多年无 vendor 限价属预期；**不**因缺 `limit_*` 拒绝该日 `ok`（见 §7.2）。  
 - **session asof** 日：`limit_*` 覆盖率过低 → 仍可 `status=ok`+warn，`last_ok` 前移（§7.2 v1.2 / Spec A）；个股缺限价仍 `data_gap`，避免半截成交。
+
+**当前默认**（Spec E）：`config/eval/costs.yaml` 为 `limit_rule=board_calc_v1` — 见 §5.2。asof 日仍禁止 board_calc，缺限价走本条 gap。
 
 ### 5.2 `board_calc_v1`（Spec E 启用）
 

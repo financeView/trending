@@ -171,5 +171,6 @@
 | only_date heartbeat/Issues | §1.2 | 否 |
 | RS / Spearman / C1 | §2.2 | 否（Spec C 已落地） |
 | 未映射全 A、YAML 日拉 | §2.3–2.4 | 否 |
-| board_calc、硬冻旗、止盈 tag | §2.5–2.7 | 否 |
+| board_calc、硬冻旗 | §2.5–2.6 | 否（Spec E 已落地） |
+| 止盈 tag | §2.7 | 否 |
 | 因果 H、WF、P3、实盘 M | §3 | 否 |
