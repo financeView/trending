@@ -63,6 +63,14 @@ jobs:
       - name: Unit tests
         run: python -m pytest tests/ -q
 
+      - name: Refresh taxonomy YAML
+        id: taxonomy
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python scripts/taxonomy/refresh_taxonomy.py --git
+          # always exit 0; writes taxonomy_fetch= / taxonomy_head_sha= to GITHUB_OUTPUT
+
       - name: Sync mapped-universe bars
         id: sync
         timeout-minutes: 330
@@ -98,6 +106,9 @@ jobs:
       - name: daily_run
         if: ${{ success() && steps.sync.outputs.sync_complete == 'true' && steps.sync.outputs.run_deferred != 'true' }}
         timeout-minutes: 120
+        env:
+          TAXONOMY_HEAD_SHA: ${{ steps.taxonomy.outputs.taxonomy_head_sha }}
+          TAXONOMY_FETCH: ${{ steps.taxonomy.outputs.taxonomy_fetch }}
         run: |
           DATE="${{ github.event.inputs.date }}"
           ONLY="${{ github.event.inputs.only_date }}"
