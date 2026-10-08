@@ -26,7 +26,7 @@
 
 - 历史多年无 vendor 涨跌停 → 纸面/影子大量 `data_gap`，样本偏薄；契约已预留 `board_calc_v1` 未接线。  
 - asof 日若用推算补洞会掩盖东财/同步失败，半截成交风险上升 → **禁止**。  
-- `hard_frozen` 仅 `is_st`；长期停牌持仓不清 `R`，与 metrics §5.5 / 研究结论不符。  
+- 契约已有 `hard_frozen := is_st ∨ explicit_hard_freeze_flag`，但 **代码路径尚未读旗**（仅 `is_st`），且连续 N 日阈值未定 → 长期停牌持仓不清 `R`。  
 - `limit_up_unfillable` 在 fill 代码有默认，**未**进 `costs.yaml`，版本不可审计。
 
 ---
@@ -51,7 +51,9 @@
 → daily_run（metrics 读 hard_freeze_flag；fill 读 costs）
 ```
 
-catch-up / 历史追赶日：`session_asof` = 当日 cron 会话 asof；队列内每个 `D` 相对该 asof 判定是否允许 board_calc。
+catch-up / 历史追赶日：board_calc 的日期门闩用 **`session_asof`**，不是 sync 的 `--end`。
+
+**`session_asof`（钉死）：** 默认 `latest_trade_day()`（与现有 `with_limits` 的 asof 判定同源）；允许显式 `--asof YYYY-MM-DD` 覆盖。**禁止**把 `--end` 当作 `session_asof`——workflow 在 `only_date` 且 `DATE != ASOF` 时会设 `END=$DATE`，若误用则历史日被当成「当日」而禁写 board_calc。`--end` **只**约束 OHLC/flags 拉取窗口。
 
 **挂点：** 两 pass 接在 `scripts/sync_bars_sample.py`（或同 job 等价 sync 入口）里：**OHLC/flags 循环结束之后**（`with_limits` 若执行则在其后）、`write_sync_complete` **之前**；`daily_run` 仍只在 `sync_complete=true` 时跑（既有 workflow）。可抽 helper，但 cron 必须同 job 跑完。
 
@@ -66,7 +68,7 @@ catch-up / 历史追赶日：`session_asof` = 当日 cron 会话 asof；队列�
 | `hard_freeze_flag` | 该票有 `flag_source` 的全部交易日行（含 asof）；按票时间序、用**当前** `hard_freeze_min_suspend_days` 重算 streak 并覆盖写 `0/1` |
 | `board_calc` | 仅当 `costs.limit_rule == board_calc_v1`；且 `D < session_asof` ∧ 双侧 `limit_*` 空；不限本次 OHLC 拉取窗口 |
 
-**Schema 迁移（钉死）：** `bars_conn()`（或 sync 入口等价路径）须 **idempotent ensure-column**：若不存在则 `ALTER TABLE bars ADD COLUMN hard_freeze_flag INTEGER NOT NULL DEFAULT 0`（精神同 trend.db `_ensure_columns`）。`CREATE TABLE IF NOT EXISTS` **不够**——Actions 会 restore 已有 `data/cache/bars.db`。migrate 后立刻跑硬冻全量重算，方可依赖该列。
+**Schema 迁移（钉死）：** `bars_conn()`（或 sync 入口等价路径）须 **idempotent ensure-column**：若不存在则 `ALTER TABLE bars ADD COLUMN hard_freeze_flag INTEGER NOT NULL DEFAULT 0`（精神同 trend.db `_ensure_columns`）。`CREATE TABLE IF NOT EXISTS` **不够**——Actions 会 restore 已有 `data/cache/bars.db`。同步更新绿场 `BARS_SCHEMA` 的 `CREATE` 模板含该列（新库一步建齐；旧库仍靠 ALTER）。migrate 后立刻跑硬冻全量重算，方可依赖该列。
 
 首跑加列后依赖上述全量重算，**禁止**只更新「本次 fetch 窗口」而留下历史 `hard_freeze_flag` 全 0。
 
@@ -159,6 +161,7 @@ hard_frozen := is_st OR hard_freeze_flag
 ### 4.3 metrics
 
 - `replay_from_ohlc` / 截面组装：`hard_frozen = bool(is_st) or bool(hard_freeze_flag)`（**只读列**，不在引擎内按 N 现算 streak）。  
+- **加载路径：** 凡从 bars 组装 replay/截面的查询须选出 `hard_freeze_flag`（含 `daily_run._BARS_SELECT` 及等价 SQL）；缺列时走 ensure-column 之后再读，不得默默当 0 却跳过 migrate。  
 - 修订 metrics §5.5：连续 N 日阈值由本 slice 落地；默认 N=20；列名与 `explicit_hard_freeze_flag` 同义。
 
 ### 4.3.1 N 变更与 `param_version`（方案 B，与「persist + 读列」锁定一致）
@@ -194,7 +197,8 @@ EM tfp 写入历史；退市/暂停上市 OR 进旗（v1.1）；用「无 bar」
 ### 5.2 测试夹具（最少集）
 
 1. **hist board_calc：** `D < asof`、limit 空、有上一交易日 `close_raw` → 写入 `limit_*` 且 `limit_source=board_calc_v1`（可断言 `preclose_raw` 被回填）。  
-2. **asof 不填：** `D = asof` 缺 limit → 不写；fill 仍 `data_gap`。  
+2. **asof 不填：** `D = session_asof` 缺 limit → 不写；fill 仍 `data_gap`。  
+2b. **`session_asof` ≠ `--end`：** `--end` 为历史日、`session_asof` 为更新的 asof 时，该历史日仍可 board_calc（不因 `--end` 被误判为 asof）。  
 3. **不覆盖 vendor：** 已有 `em_*` → board_calc 跳过。  
 4. **`limit_rule` 门闩：** `vendor_fields` 时 pass 不写任何 `board_calc` 限价。  
 5. **硬冻边界：** streak = N−1 → `flag=0`、无 forced_exit；streak = N ∧ `R` → `EXIT_RIGHT` / `forced_exit_untradable`。  
@@ -224,3 +228,4 @@ EM tfp 写入历史；退市/暂停上市 OR 进旗（v1.1）；用「无 bar」
 | 2026-10-08 | 初版：Approach 1；hist board_calc + asof vendor；N=20 持久化冻旗；`limit_up_unfillable=false` 显式 |
 | 2026-10-08 | CR：真项修补——昨 `close_raw` 基准、`301`、HALF_UP、全量重算范围、`limit_rule` 门闩、backtest-eval 触点；次新/创业板 ST 为已知近似 |
 | 2026-10-08 | 独立 CR 真项：bars ensure-column；N 变更方案 B（persist SoT + 全量重写）；pass 与 sync 预算/incomplete 语义；夹具补迁移与 N 原子性；覆盖表对齐 §5.5 |
+| 2026-10-08 | Final nits：`session_asof`≠`--end`；daily_run 加载列；CREATE+ALTER；§1 区分契约/代码 |
