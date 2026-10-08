@@ -1,5 +1,7 @@
 import datetime as dt
+from dataclasses import replace
 from datetime import date, timedelta
+from pathlib import Path
 
 from scripts.common.bars import bars_conn, ensure_bars_columns
 from scripts.common.calendar import load_trade_dates_from_list
@@ -10,7 +12,8 @@ from scripts.metrics.fsm import (
     EXIT_KIND_UNTRADABLE,
     RightSideFsm,
 )
-from scripts.metrics.pipeline import bar_hard_frozen
+from scripts.metrics.params import load_params
+from scripts.metrics.pipeline import bar_hard_frozen, replay_from_ohlc
 
 
 def test_bar_hard_frozen_or():
@@ -83,3 +86,40 @@ def test_load_symbol_bars_includes_flag(tmp_path):
     conn.commit()
     rows = _load_symbol_bars(conn, "000001.SZ", dt.date(2024, 1, 8))
     assert rows and int(rows[-1]["hard_freeze_flag"]) == 1
+
+
+def test_replay_from_ohlc_ors_hard_freeze_flag():
+    """replay_from_ohlc snap.hard_frozen follows is_st ∨ hard_freeze_flag."""
+    root = Path(__file__).resolve().parents[1]
+    params = replace(
+        load_params(root / "config" / "metrics" / "a_share_daily.yaml"),
+        vol_hist=40,
+        ma_slow=10,
+        ma_fast=5,
+        slope_n=3,
+        adx_len=5,
+        atr_len=5,
+        vol_lookback=8,
+        ret_k=5,
+    )
+    n = 40
+    records = []
+    start = date(2024, 1, 2)
+    for i in range(n + 5):
+        close = 10.0 * (1.005**i)
+        d = start + timedelta(days=i)
+        records.append(
+            {
+                "trade_date": d.isoformat(),
+                "close_qfq": close,
+                "high_qfq": close * 1.01,
+                "low_qfq": close * 0.99,
+                "is_st": 0,
+                "is_suspended": 0,
+                "hard_freeze_flag": 1 if i == n + 4 else 0,
+            }
+        )
+    snaps = replay_from_ohlc(params, records, min_history=n)
+    assert snaps
+    assert snaps[-1]["hard_frozen"] is True
+    assert snaps[-2]["hard_frozen"] is False

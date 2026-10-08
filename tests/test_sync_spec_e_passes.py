@@ -6,16 +6,16 @@ from scripts.common.calendar import load_trade_dates_from_list
 from scripts.sync_bars_sample import main, run_spec_e_passes
 
 
-def test_run_spec_e_passes_invokes_both(tmp_path, monkeypatch):
+def test_run_spec_e_passes_invokes_both(tmp_path, monkeypatch, capsys):
     conn = bars_conn(str(tmp_path / "b.db"))
     seen: list[str] = []
     monkeypatch.setattr(
         "scripts.common.hard_freeze.apply_hard_freeze_flags",
-        lambda *a, **k: seen.append("freeze") or 0,
+        lambda *a, **k: seen.append("freeze") or 3,
     )
     monkeypatch.setattr(
         "scripts.common.board_calc.apply_board_calc",
-        lambda *a, **k: seen.append("board") or 0,
+        lambda *a, **k: seen.append("board") or 5,
     )
     monkeypatch.setattr(
         "scripts.common.hard_freeze.load_hard_freeze_min_suspend_days",
@@ -27,6 +27,9 @@ def test_run_spec_e_passes_invokes_both(tmp_path, monkeypatch):
     )
     run_spec_e_passes(conn, ["600000.SH"], session_asof=dt.date(2024, 1, 9))
     assert seen == ["freeze", "board"]
+    out = capsys.readouterr().out
+    assert "hard_freeze rows=3" in out
+    assert "board_calc rows=5" in out
 
 
 def test_main_passes_use_full_universe_not_codes_argv(tmp_path, monkeypatch):

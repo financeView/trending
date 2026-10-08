@@ -85,14 +85,18 @@ def run_spec_e_passes(conn, codes, *, session_asof: dt.date) -> None:
     ensure_bars_columns(conn)
     try:
         n = load_hard_freeze_min_suspend_days()
-        apply_hard_freeze_flags(conn, codes, n=n)
+        nf = apply_hard_freeze_flags(conn, codes, n=n)
+        if nf:
+            print("[sync_bars] hard_freeze rows=%d" % nf)
     except Exception as e:  # noqa: BLE001
         print("[sync_bars] warn: hard_freeze skipped: %s" % e, file=sys.stderr)
     try:
         costs = load_costs()
-        apply_board_calc(
+        nb = apply_board_calc(
             conn, codes, session_asof=session_asof, limit_rule=costs.limit_rule
         )
+        if nb:
+            print("[sync_bars] board_calc rows=%d" % nb)
     except Exception as e:  # noqa: BLE001
         print("[sync_bars] warn: board_calc skipped: %s" % e, file=sys.stderr)
 
