@@ -20,9 +20,11 @@ def _bar(open_raw=10.0, close_raw=10.0, up=11.0, down=9.0, suspended=0):
     }
 
 
-def test_load_costs_v1():
+def test_load_costs_v2_spec_e():
     c = load_costs()
-    assert c.cost_version == "v1"
+    assert c.cost_version == "v2"
+    assert c.limit_rule == "board_calc_v1"
+    assert c.limit_up_unfillable is False
     assert c.N_cap == 20
     assert c.fill_price == "open_raw"
 

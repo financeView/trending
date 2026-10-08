@@ -1,4 +1,5 @@
 param_version: p05-v2
+hard_freeze_min_suspend_days: 20
 price_adjust: qfq
 ma_fast: 20
 ma_slow: 60

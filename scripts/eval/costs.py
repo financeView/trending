@@ -23,6 +23,7 @@ class EvalCosts:
     N_cap: int
     initial_cash: float
     limit_rule: str
+    limit_up_unfillable: bool
     fill_price: str
     hs300_series: str
 
@@ -41,6 +42,7 @@ def load_costs(path: Optional[str | Path] = None) -> EvalCosts:
         N_cap=int(data["N_cap"]),
         initial_cash=float(data["initial_cash"]),
         limit_rule=str(data.get("limit_rule") or "vendor_fields"),
+        limit_up_unfillable=bool(data.get("limit_up_unfillable", False)),
         fill_price=str(data.get("fill_price") or "open_raw"),
         hs300_series=str(data.get("hs300_series") or "000300.SH"),
     )
