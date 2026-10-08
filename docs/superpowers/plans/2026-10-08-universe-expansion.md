@@ -246,9 +246,10 @@ EOF
 - Consumes: Task 1 membership helpers; `fetch_sw_members.normalize_member` / `fetch_latest_rows`; `patch_stock_names.rewrite_yaml` + `_name_map` (or inject); `scripts.common.calendar.latest_trade_day`
 - Produces:
   - `dump_yaml(rows, *, map_version: str, prior_names: dict[str,str] | None = None) -> str` — preserves `name_zh` from `prior_names` when present; never defaults version to wiping a newer header
-  - `refresh_taxonomy_once(*, fetch_rows, name_map, repo_root, session_asof: date, git: bool = False) -> dict` status keys: `taxonomy_fetch`, `map_version`, `taxonomy_commit`, counts…
+  - `refresh_taxonomy_once(*, fetch_rows, name_map, repo_root, session_asof: date, git: bool = False, allowed: set[str] | None = None) -> dict` status keys: `taxonomy_fetch`, `map_version`, `taxonomy_commit`, counts…
     - **`session_asof` required** (CLI default: `latest_trade_day()`). first_seen values written in step f are always this asof — never queue `D` / wall-clock “today”.
-  - CLI `main` always `return 0`; write `taxonomy_fetch=...` and `taxonomy_head_sha=...` (empty unless YAML push succeeded) to `$GITHUB_OUTPUT` if set
+    - **`allowed`:** L2 allow-list for normalize / `mapped_count` / guard. Default: `section4_codes(repo_root/config/taxonomy/sw_l2_to_l1.yaml)` — **not** the package `_ROOT` when `repo_root` is a tmp tree. Tests may pass `allowed={"370100"}`.
+  - CLI: default **`git=False`**; **`--git`** enables publish. Optional `--asof YYYY-MM-DD`. Always `return 0`; write `taxonomy_fetch=...` and `taxonomy_head_sha=...` to `$GITHUB_OUTPUT` if set
 
 - [ ] **Step 1: Failing tests for dump + refresh fail path**
 
@@ -313,6 +314,7 @@ def test_refresh_vendor_fail_keeps_yaml(tmp_path):
         repo_root=str(tmp_path),
         session_asof=date(2024, 1, 10),
         git=False,
+        allowed={"370100"},
     )
     assert st["taxonomy_fetch"] == "fail"
     assert stock.read_bytes() == before
@@ -330,6 +332,7 @@ def test_refresh_guard_fail_keeps_yaml(tmp_path):
         repo_root=str(tmp_path),
         session_asof=date(2024, 1, 10),
         git=False,
+        allowed={"370100"},
     )
     assert st["taxonomy_fetch"] == "fail"
     assert stock.read_bytes() == before
@@ -344,6 +347,7 @@ def test_refresh_name_only_writes_no_bump(tmp_path):
         repo_root=str(tmp_path),
         session_asof=date(2024, 1, 10),
         git=False,
+        allowed={"370100"},
     )
     assert st["taxonomy_fetch"] == "ok"
     assert st["map_version"] == "sw2021-v1"
@@ -363,6 +367,7 @@ def test_refresh_membership_bump_three_headers(tmp_path):
         repo_root=str(tmp_path),
         session_asof=date(2024, 1, 10),
         git=False,
+        allowed={"370100"},
     )
     assert st["taxonomy_fetch"] == "ok"
     assert st["map_version"] == "sw2021-v2"
@@ -380,13 +385,12 @@ def test_cli_fetch_fail_exit_zero_writes_github_output(tmp_path, monkeypatch):
     monkeypatch.setenv("GITHUB_OUTPUT", str(out))
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(rt, "fetch_latest_rows", lambda: (_ for _ in ()).throw(RuntimeError("x")))
-    assert rt.main(["--no-git"]) == 0  # or argv default without --git
+    # default git=False; do not pass --git
+    assert rt.main(["--asof", "2024-01-10"]) == 0
     body = out.read_text(encoding="utf-8")
     assert "taxonomy_fetch=fail" in body
     assert "taxonomy_head_sha=" in body  # empty value OK
 ```
-
-Add `from datetime import date` at top of the T2 test module (with the Path import).
 
 Note: **clist / `heartbeat.taxonomy` / first_seen commit are intentionally Task 3** — T2 covers fetch→guard→YAML write (+ CLI exit 0). T3 extends the same function with step f.
 
@@ -402,15 +406,18 @@ Logic order per spec §2.1 a–e (git=False; **not** f yet):
 5. Else write `stock_sw_l2.yaml`; if membership/sw_l2 delta non-zero → `bump_map_version` + `patch_map_version_header` on three files; else keep version
 6. Return status dict (`taxonomy_fetch`, `map_version`, deltas…)
 
-Git (`git=True`): CLI `--git`; config user, add taxonomy paths, commit, `pull --rebase --autostash`, then `git push` (no `--force`).
+Git (`git=True` / CLI `--git`): config user, add taxonomy paths, commit, `pull --rebase --autostash`, then `git push` (no `--force`).
 
-**Publish failure (any cause):**
+**`taxonomy_head_sha` contract (YAML vs heartbeat — nail this):**
+1. Capture SHA **only immediately after a successful taxonomy-YAML publish** (the commit that includes `stock_sw_l2.yaml` / headers). Set `os.environ["TAXONOMY_HEAD_SHA"]` and append `taxonomy_head_sha=<sha>` to `GITHUB_OUTPUT` at that moment.
+2. A later **heartbeat-only** / `first_seen` commit+push (step f) must **not** overwrite `TAXONOMY_HEAD_SHA` / `taxonomy_head_sha` (do not re-`rev-parse HEAD` into that key at CLI exit).
+3. On YAML **`push_fail`**: force empty `taxonomy_head_sha` (and clear env if set) **even if** a subsequent heartbeat push succeeds.
+4. `skipped_no_diff` / fetch `fail` with no YAML publish → leave `taxonomy_head_sha` empty.
+
+**Publish failure (any cause on the YAML attempt):**
 - Rebase conflict → `rebase --abort`
-- Push rejected / network / hook after local commit → **same recovery**: restore taxonomy paths (and any staged first_seen/heartbeat from this step) to `ORIG_HEAD` / `@{upstream}` / pre-commit tree so workspace YAML matches **published** tip — never leave an unpushed local commit that sync would read
-- Set `taxonomy_fetch=push_fail`, `taxonomy_commit=unpushed`
-- **Do not** set `TAXONOMY_HEAD_SHA` / write a non-empty `taxonomy_head_sha` to `GITHUB_OUTPUT`
-
-**Publish success only:** set `os.environ["TAXONOMY_HEAD_SHA"]=git rev-parse HEAD` and `taxonomy_head_sha=<sha>` in `GITHUB_OUTPUT`.
+- Push rejected / network / hook after local commit → **same recovery**: restore taxonomy paths to `ORIG_HEAD` / `@{upstream}` / pre-commit tree so workspace YAML matches **published** tip — never leave an unpushed local commit that sync would read
+- Set `taxonomy_fetch=push_fail`, `taxonomy_commit=unpushed`; empty `taxonomy_head_sha` per (3)
 
 - [ ] **Step 4: Pytest focused**
 
@@ -588,6 +595,30 @@ def test_clist_fail_returns_null_counts(tmp_path, monkeypatch):
     assert m.clist_fetch == "fail"
     assert m.unmapped_count is None
     assert m.ipo_unmapped_alert_count is None
+
+
+def test_yaml_quarantine_not_in_unmapped_count(tmp_path, monkeypatch):
+    """YAML-only quarantine / null-sw_l2 is not |clist−mapped|."""
+    first_seen = tmp_path / "fs.json"
+    first_seen.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        "scripts.taxonomy.unmapped.load_universe_codes",
+        lambda: ["000001.SZ"],
+    )
+    monkeypatch.setattr(
+        "scripts.taxonomy.unmapped.load_quarantine_codes",
+        lambda: {"000099.SZ"},  # in YAML quarantine, not necessarily in clist
+    )
+    m = compute_unmapped_metrics(
+        clist_rows=[
+            {"ts_code": "000001.SZ", "f26": "20200101"},
+            {"ts_code": "000002.SZ", "f26": "20200101"},
+        ],
+        session_asof=date(2024, 1, 10),
+        first_seen_path=str(first_seen),
+    )
+    assert m.unmapped_count == 1  # only 000002
+    assert m.yaml_quarantine_size == 1
 ```
 
 `compute_unmapped_metrics` signature: either `clist_rows=` **or** `clist_fetch=` callable; not both required. Prefer keyword-only.
@@ -598,7 +629,7 @@ def test_clist_fail_returns_null_counts(tmp_path, monkeypatch):
 
 Production fetch path: `fetch_clist_all_a(["f12","f13","f14","f26"])` → each row through `clist_row_to_ts_code` (`_infer_ts_code` + SH/SZ regex). Tests may inject `{"ts_code","f26"}` directly. Never write `0` on failure.
 
-- [ ] **Step 4: Wire into `refresh_taxonomy_once` step f** — call `compute_unmapped_metrics(..., session_asof=session_asof)`; write `heartbeat.taxonomy` via **`merge_heartbeat_taxonomy(fields)`** (dedicated helper: load JSON → `data["taxonomy"]=fields` → write; **do not** call `write_heartbeat(job=...)` so no `last_success` injection). When `git=True` and heartbeat/first_seen changed, commit those paths (even if YAML skipped) with the same publish-failure recovery as T2.
+- [ ] **Step 4: Wire into `refresh_taxonomy_once` step f** — call `compute_unmapped_metrics(..., session_asof=session_asof)`; write `heartbeat.taxonomy` via **`merge_heartbeat_taxonomy(fields)`** (dedicated helper: load JSON → `data["taxonomy"]=fields` → write; **do not** call `write_heartbeat(job=...)` so no `last_success` injection). When `git=True` and heartbeat/first_seen changed, commit+push those paths (even if YAML skipped) with the same **path-restore** recovery as T2 on publish fail — but **never** update `taxonomy_head_sha` / `TAXONOMY_HEAD_SHA` from a heartbeat-only push (see T2 SHA contract).
 
 Heartbeat `data["taxonomy"]` shape (no `last_success`):
 
@@ -682,6 +713,10 @@ def test_warn_appends_taxonomy():
     assert "taxonomy_fetch=push_fail" in _append_taxonomy_warn(
         "", ipo_alert=0, taxonomy_fetch="push_fail", clist_fetch="ok"
     )
+    # bare unmapped_count>0 must NOT warn (design §2)
+    assert _append_taxonomy_warn(
+        "", ipo_alert=0, taxonomy_fetch="ok", clist_fetch="ok", unmapped_count=99
+    ) == ""
 
 
 def test_git_sha_prefers_taxonomy_head_then_github_sha(monkeypatch):
@@ -697,10 +732,10 @@ def test_git_sha_prefers_taxonomy_head_then_github_sha(monkeypatch):
     assert _resolve_git_sha() == "checkout1"
 
 
-def test_ipo_alert_does_not_flip_evaluate_ok():
-    """Soft gate: ipo_unmapped_alert>0 must not make status partial when coverage passes."""
+def test_asof_status_ignores_ipo_alert():
+    """Soft gate: status comes only from evaluate_ok; IPO only affects warn text."""
     from scripts.common.coverage import CoverageMetrics, evaluate_ok
-    from scripts.daily_run import _append_taxonomy_warn
+    from scripts.daily_run import _compose_asof_status_and_warn
 
     m = CoverageMetrics(
         bar_coverage=1.0,
@@ -710,16 +745,21 @@ def test_ipo_alert_does_not_flip_evaluate_ok():
     )
     asof = date(2024, 1, 10)
     decision = evaluate_ok(asof, asof, m)
-    assert decision.status == "ok"
-    warn = _append_taxonomy_warn(
-        "" if decision.reason == "passed" else decision.reason,
+    status, warn = _compose_asof_status_and_warn(
+        decision,
         ipo_alert=2,
         taxonomy_fetch="ok",
         clist_fetch="ok",
     )
+    assert status == "ok"
     assert decision.status == "ok"
     assert "ipo_unmapped_alert=2" in warn
 ```
+
+Implement `_compose_asof_status_and_warn(decision, *, ipo_alert, taxonomy_fetch, clist_fetch) -> tuple[str, str]`:
+- `status = decision.status` **always** (never look at IPO / unmapped / clist for status)
+- `warn` = clear `"passed"` → `""`, then `_append_taxonomy_warn(...)`
+- `process_day` **must** use this helper (or equivalent) so status/warn stay coupled in one place
 
 **`upsert_rows` is `INSERT OR REPLACE` on the full dict** (`scripts/common/db.py`). Nail this:
 
@@ -745,14 +785,14 @@ if D != session_asof:
 ```
 
 **git_sha:** `_resolve_git_sha()` =
-1. non-empty `os.environ.get("TAXONOMY_HEAD_SHA")` (YAML push succeeded), else
+1. non-empty `os.environ.get("TAXONOMY_HEAD_SHA")` (YAML push succeeded; set by refresh process / Actions env), else
 2. `os.environ.get("GITHUB_SHA", "")` (Actions checkout SHA), else
-3. `""` locally if unset  
-**Never** `git rev-parse HEAD` as fallback — that records unpublished tip on `push_fail`/`unpushed`.
+3. optional local fallback: if `heartbeat.taxonomy.taxonomy_commit` matches `^[0-9a-f]{7,40}$`, use it; else `""`  
+**Never** `git rev-parse HEAD` — unpublished tip on `push_fail`/`unpushed`. Note: refresh’s in-process `os.environ` does **not** reach a separate `daily_run` process; CI relies on T5 env; local needs export or the heartbeat SHA fallback.
 
 **taxonomy_fetch for warn:** `_load_taxonomy_fetch()` → env `TAXONOMY_FETCH` if set, else `heartbeat.json` → `taxonomy.taxonomy_fetch`, else `"ok"` (no warn).
 
-Warn append only on asof when `taxonomy_fetch` in (`fail`,`push_fail`) or `ipo_unmapped_alert_count>0` or `clist_fetch==fail`.
+Warn append only on asof when `taxonomy_fetch` in (`fail`,`push_fail`) or `ipo_unmapped_alert_count>0` or `clist_fetch==fail`. **Not** when merely `unmapped_count>0`.
 
 Preserve heartbeat: after `write_heartbeat(job=daily_run)`, assert taxonomy key remains (existing db.py keeps dict siblings — add test).
 
@@ -877,7 +917,10 @@ EOF
 | heartbeat.taxonomy commit in taxonomy step | T2–T3 |
 | daily_run asof-only counts + warn append + git_sha | T4 |
 | taxonomy_fetch → warn (env + heartbeat) | T4 / T5 |
-| soft gate (IPO never flips evaluate_ok) | T4 |
+| soft gate (IPO never flips evaluate_ok) | T4 (`_compose_asof_status_and_warn`) |
+| quarantine not in unmapped_count | T3 |
+| taxonomy_head_sha YAML-only (not heartbeat) | T2 / T3 |
+| allowed L2 from repo_root / inject | T2 |
 | session_asof on refresh / first_seen | T2 / T3 |
 | unpin sw2021-v1 | T0 |
 | no tree-out bars | Global / T5 (sync unchanged) |
@@ -895,4 +938,5 @@ Tree-out bars warmup, Spec E, engine_state, BJ quarantine rows, PR-gated publish
 2. **Placeholders:** Cleared in plan-CR patch (2026-10-08): full T2/T3 fixtures; `f26` ms `1704384000000` → 2024-01-05 CST; T4 upsert/git_sha helpers named.  
 3. **Types:** `UnmappedMetrics` / `_UM` test double / membership helpers consistent; env **`TAXONOMY_HEAD_SHA`** + **`TAXONOMY_FETCH`** (daily_run); heartbeat fallback for local.  
 4. **Plan CR (2026-10-08) true fixes:** T2/T3 no `...`; T4 `INSERT OR REPLACE` + prior SELECT; `dump_yaml` kwargs optional; T1 tests for `mapped_count`/`patch_map_version_header`; T5 exports `taxonomy_head_sha` to daily_run.  
-5. **Indep plan-CR (2026-10-08) true fixes:** C1 git_sha = TAXONOMY_HEAD_SHA → GITHUB_SHA (never local HEAD); any publish fail restores workspace; C2 `session_asof` on refresh/CLI; C3 wire `TAXONOMY_FETCH` + heartbeat read; I1 T2 orchestration fixtures; I2 f26 IPO≥3 assert; I3 `_infer_ts_code` + SH/SZ; I4 soft-gate evaluate_ok test; I5 push-fail recovery; M1 warn base `""`; M2 workflow-only T5 commit; M3 `merge_heartbeat_taxonomy` only.
+5. **Indep plan-CR (2026-10-08) true fixes:** C1 git_sha = TAXONOMY_HEAD_SHA → GITHUB_SHA (never local HEAD); any publish fail restores workspace; C2 `session_asof` on refresh/CLI; C3 wire `TAXONOMY_FETCH` + heartbeat read; I1 T2 orchestration fixtures; I2 f26 IPO≥3 assert; I3 `_infer_ts_code` + SH/SZ; I4 soft-gate evaluate_ok test; I5 push-fail recovery; M1 warn base `""`; M2 workflow-only T5 commit; M3 `merge_heartbeat_taxonomy` only.  
+6. **Final plan-CR (2026-10-08) true fixes:** F1 YAML-only `taxonomy_head_sha` (heartbeat push must not overwrite; push_fail keeps empty); F2 quarantine size test; F3 `_compose_asof_status_and_warn`; F4 `allowed=` / repo_root L2 path; F5 default `git=False` + `--git`; F6 local heartbeat SHA fallback note; F7 drop stale import note; F8 bare unmapped no-warn assert. F9 non-issue (fixture sample `v1` OK).
