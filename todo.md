@@ -49,7 +49,7 @@
 
 | 项 | 现状 | 要做什么 |
 |----|------|----------|
-| **`run_deferred` vs metrics** | sync >200min 且 complete 时跳过 `daily_run`，bars 可能已 Spec E 更新 | 监控错位；补跑或拆 job |
+| **`run_deferred` vs metrics** | sync >200min 假绿跳过 metrics | **Spec F**（两 job）— [`spec`](docs/superpowers/specs/2026-10-08-workflow-split-jobs-design.md) / [`plan`](docs/superpowers/plans/2026-10-08-workflow-split-jobs.md) |
 | **fill 审计字段** | summary 有 `limit_rule`/`cost_version`；fill 行无 `limit_source` | 行级或影子摘要带 `limit_source`，方便 Audit H |
 | **L1/L2 全历史 replay 成本** | asof 日对全 L2/L1 `synth+replay` 贵；截断 lookback 会改 FSM | `engine_state` / 增量缓存后再做，**勿裸砍 lookback** |
 | **个股中文名补全** | loader/digest 已就绪；`stock_sw_l2.yaml` 的 `name_zh` 偶发需有网重跑 | `python3 scripts/taxonomy/patch_stock_names.py --in … --out …` |
