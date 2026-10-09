@@ -8,7 +8,7 @@
     "statuses": [
       "ok"
     ],
-    "last_success": "2026-10-08T17:49:55"
+    "last_success": "2026-10-09T17:25:55"
   },
   "taxonomy": {
     "taxonomy_fetch": "fail",
@@ -18,7 +18,7 @@
     "yaml_quarantine_size": 67,
     "map_version": "sw2021-v1",
     "taxonomy_commit": "",
-    "updated_at": "2026-10-08T17:50:55Z"
+    "updated_at": "2026-10-09T17:26:58Z"
   },
-  "updated_at": "2026-10-08T17:49:55"
+  "updated_at": "2026-10-09T17:25:55"
 }
