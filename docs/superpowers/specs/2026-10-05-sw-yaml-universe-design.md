@@ -98,7 +98,7 @@ Git（taxonomy §6.1），全文件同一 `map_version`：`sw2021-v1`（替换 `
 
 Sync 代码列表 = `load_universe_codes()`（映射宇宙），**禁止**生产仍 `--from-universe universe_stub.yaml`。
 
-`sync_complete` 写入 **`GITHUB_OUTPUT`**（`sync_complete=true|false`），step `id: sync`。`daily_run` / L / commit trend.db 均 `if: steps.sync.outputs.sync_complete == 'true'`。两边都 **exit 0**（好让 cache 保存）。只 print 不算完成信号。
+`sync_complete` 写入 **`GITHUB_OUTPUT`**（`sync_complete=true|false`），sync job step `id: sync`。**metrics** job 门闩：`if: needs.sync.outputs.sync_complete == 'true'`（其内跑 daily_run / shadow / commit trend.db / Issues）。sync incomplete 时仍 **exit 0**（好让 cache 保存）。只 print 不算完成信号。
 
 ~~若本 job 已 `sync_complete` 但 sync 已耗 >200 min，本轮跳过 daily_run（`run_deferred`）~~  
 **已废止（Spec F）：** 拆为 `sync` + `metrics` 两 job 后不再使用 `run_deferred`；生产 sync 也不再 `--time-budget-min` 200/300 截断。见 [`2026-10-08-workflow-split-jobs-design.md`](./2026-10-08-workflow-split-jobs-design.md)。

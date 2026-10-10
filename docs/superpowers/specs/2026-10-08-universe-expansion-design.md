@@ -76,7 +76,7 @@
       merge 写 heartbeat.taxonomy（失败则字段 null + clist_fetch=fail）
       - **无论** d/e/fail：只要 heartbeat.json 有变更 → 本步 commit+push
         `data/heartbeat.json`（及 `data/unmapped_first_seen.json`）
-        （不依赖后续是否 run_deferred；步骤 3 时尚不知 defer）
+        （不依赖后续 metrics 是否跑；步骤 3 时尚不知 sync_complete）
 4. Sync mapped bars（load_universe_codes()；无树外预热）
 5. daily_run → shadow → commit trend.db + heartbeat → Issues
       （daily_run 再写 asof run_meta 计数时调用同一 helper；可刷新

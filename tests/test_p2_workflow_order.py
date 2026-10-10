@@ -59,10 +59,14 @@ def test_metrics_ordered_daily_shadow_commit_issues():
     issues = met.index("update_l1_issues.py")
     assert daily < shadow < commit < issues
     assert met.count("git commit -m") == 1
-    assert "continue-on-error: true" in met.split("Update L1 / Radar Issues", 1)[1]
+    issues_chunk = met.split("Update L1 / Radar Issues", 1)[1]
+    assert "continue-on-error: true" in issues_chunk
+    assert "skip_issue_update != 'true' && success()" in issues_chunk
     between = met[daily:commit]
     assert "continue-on-error" not in between
     assert "--from-universe" not in text
+    assert 'update_l1_issues.py --date "$DATE"' in issues_chunk
+    assert "update_l1_issues.py --from-heartbeat" in issues_chunk
 
 
 def test_workflow_only_date_shadow_uses_asof_not_heartbeat():

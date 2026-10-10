@@ -188,7 +188,7 @@ jobs:
           fi
 
       - name: Update L1 / Radar Issues
-        if: ${{ github.event.inputs.skip_issue_update != 'true' }}
+        if: ${{ github.event.inputs.skip_issue_update != 'true' && success() }}
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
