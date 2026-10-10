@@ -65,9 +65,11 @@ def test_fetch_latest_rows_passes_verify_false_and_long_timeout(monkeypatch):
 def test_download_retries_three_times_with_backoff(monkeypatch):
     n = {"i": 0}
     sleeps = []
+    get_kwargs = []
 
     def fake_get(url, **kwargs):
         n["i"] += 1
+        get_kwargs.append(dict(kwargs))
         if n["i"] < 3:
             raise requests.exceptions.ReadTimeout("slow")
         return _ok_resp()
@@ -79,8 +81,10 @@ def test_download_retries_three_times_with_backoff(monkeypatch):
 
     content = fsm._download_sw_classify_xls()
     assert len(content) >= 10_000
-    assert n["i"] == 3
+    assert n["i"] == fsm._SW_ATTEMPTS == 3
     assert sleeps == [1, 2]  # min(2**0,8)=1, min(2**1,8)=2; no sleep after last
+    assert all(k.get("verify") is False for k in get_kwargs)
+    assert all(k.get("timeout") == fsm._SW_TIMEOUT_SEC for k in get_kwargs)
 
 
 def test_download_raises_after_three_failures(monkeypatch):

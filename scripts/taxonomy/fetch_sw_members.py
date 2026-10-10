@@ -131,9 +131,9 @@ _SW_UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 )
-# GHA→swsresearch is flaky (TLS + slow); generous timeout + 3 attempts.
+# GHA→swsresearch is flaky (TLS + slow); generous timeout + 3 attempts (not 3 post-fail retries).
 _SW_TIMEOUT_SEC = 180
-_SW_RETRIES = 3
+_SW_ATTEMPTS = 3
 
 
 def _download_sw_classify_xls() -> bytes:
@@ -150,7 +150,7 @@ def _download_sw_classify_xls() -> bytes:
         flush=True,
     )
     last: Optional[Exception] = None
-    for i in range(_SW_RETRIES):
+    for i in range(_SW_ATTEMPTS):
         try:
             r = requests.get(
                 _SW_CLASSIFY_XLS,
@@ -165,20 +165,23 @@ def _download_sw_classify_xls() -> bytes:
                     "swsresearch xls too small: %d bytes" % len(content)
                 )
             if i:
-                print("[fetch_sw] ok on attempt %d/%d" % (i + 1, _SW_RETRIES), flush=True)
+                print(
+                    "[fetch_sw] ok on attempt %d/%d" % (i + 1, _SW_ATTEMPTS),
+                    flush=True,
+                )
             return content
         except Exception as e:  # noqa: BLE001
             last = e
             print(
                 "[fetch_sw] attempt %d/%d failed: %s"
-                % (i + 1, _SW_RETRIES, e),
+                % (i + 1, _SW_ATTEMPTS, e),
                 flush=True,
             )
-            if i + 1 < _SW_RETRIES:
+            if i + 1 < _SW_ATTEMPTS:
                 time.sleep(min(2**i, 8))
     raise RuntimeError(
-        "swsresearch xls failed after %d attempts: %s" % (_SW_RETRIES, last)
-    )
+        "swsresearch xls failed after %d attempts: %s" % (_SW_ATTEMPTS, last)
+    ) from last
 
 
 def fetch_latest_rows():
