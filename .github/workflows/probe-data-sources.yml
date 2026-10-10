@@ -38,12 +38,18 @@ jobs:
             echo "---"
           }
 
-          SW_URL="https://www.swsresearch.com/swindex/pdf/SwClass2021/StockClassifyUse_stock.xls"
+          SW_HTTPS="https://www.swsresearch.com/swindex/pdf/SwClass2021/StockClassifyUse_stock.xls"
+          SW_HTTP="http://www.swsresearch.com/swindex/pdf/SwClass2021/StockClassifyUse_stock.xls"
           UA='User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
 
           echo "=== 申万 SW classify ==="
-          probe "$SW_URL" "swsresearch-xls" -H "$UA"
-          probe "$SW_URL" "swsresearch-xls-insecure" -k -H "$UA"
+          # ec=60 = TLS 证书链校验失败（缺 intermediate CA），还没到「业务拒绝」
+          probe "$SW_HTTPS" "swsresearch-https" -H "$UA"
+          probe "$SW_HTTPS" "swsresearch-https-insecure" -k -H "$UA"
+          # 明文 HTTP（用户指定）
+          probe "$SW_HTTP" "swsresearch-http" -H "$UA"
+          # 若 301→https，跟跳并仍 -k
+          probe "$SW_HTTP" "swsresearch-http-follow-insecure" -k -L -H "$UA"
 
           echo "=== 东财 clist ==="
           EM_QS="pn=1&pz=3&po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fid=f6&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23&fields=f2,f6,f12,f14"
