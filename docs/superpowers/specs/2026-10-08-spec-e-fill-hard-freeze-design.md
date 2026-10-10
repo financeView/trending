@@ -166,6 +166,8 @@ hard_frozen := is_st OR hard_freeze_flag
 
 ### 4.3.1 N 变更与 `param_version`（方案 B，与「persist + 读列」锁定一致）
 
+**护栏（P0）：** 单行戳 + sync/`daily_run` 强卡控见 [`2026-10-10-protocol-b-hard-freeze-stamp-design.md`](./2026-10-10-protocol-b-hard-freeze-stamp-design.md)（设计中）。
+
 `bars.hard_freeze_flag` 是长期停牌硬冻的 **SoT**；N 是 **sync 写盘旋钮**，不是 metrics 现算输入。
 
 | 规则 | 约定 |
