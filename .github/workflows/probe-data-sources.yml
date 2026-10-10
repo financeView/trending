@@ -107,67 +107,96 @@ jobs:
           probe "em-push2delay" --max-time 60 -H "$UA" "https://push2delay.eastmoney.com/api/qt/clist/get?$EM_QS"
           probe "sina-hq" --max-time 60 -H "Referer: https://finance.sina.com.cn" "https://hq.sinajs.cn/list=sh600000"
 
-      - name: Python requests verify=bundle vs verify=False
+      - name: Python fetch via --cacert (no verify=False)
+        continue-on-error: true
+        run: |
+          # Same shape as fetch_sw_members._download_sw_classify_xls, but verify=bundle
+          # (system CA + GeoTrust AIA intermediate) instead of verify=False.
+          python - <<'PY'
+          import io
+          import time
+          import traceback
+
+          import pandas as pd
+          import requests
+
+          from scripts.taxonomy import fetch_sw_members as sw
+
+          BUNDLE = "/tmp/ca/system_plus_geotrust.pem"
+          TIMEOUT = sw._SW_TIMEOUT_SEC  # 180
+          ATTEMPTS = sw._SW_ATTEMPTS  # 3
+          URL = sw._SW_CLASSIFY_XLS
+          headers = {"User-Agent": sw._SW_UA}
+
+          print(
+              "[probe-cacert] verify=%s timeout=%s attempts=%s (NO verify=False)"
+              % (BUNDLE, TIMEOUT, ATTEMPTS),
+              flush=True,
+          )
+          last = None
+          content = None
+          for i in range(ATTEMPTS):
+              try:
+                  r = requests.get(
+                      URL,
+                      headers=headers,
+                      timeout=TIMEOUT,
+                      verify=BUNDLE,
+                  )
+                  r.raise_for_status()
+                  content = r.content or b""
+                  if len(content) < 10_000:
+                      raise RuntimeError(
+                          "swsresearch xls too small: %d bytes" % len(content)
+                      )
+                  print(
+                      "[probe-cacert] OK attempt %d/%d bytes=%d"
+                      % (i + 1, ATTEMPTS, len(content)),
+                      flush=True,
+                  )
+                  break
+              except Exception as e:  # noqa: BLE001
+                  last = e
+                  print(
+                      "[probe-cacert] attempt %d/%d failed: %s"
+                      % (i + 1, ATTEMPTS, e),
+                      flush=True,
+                  )
+                  if i + 1 < ATTEMPTS:
+                      time.sleep(min(2**i, 8))
+          else:
+              print("[probe-cacert] FAIL after %d attempts: %s" % (ATTEMPTS, last))
+              raise SystemExit(1)
+
+          df = pd.read_excel(
+              io.BytesIO(content),
+              dtype={"股票代码": "str", "行业代码": "str"},
+          )
+          print(
+              "[probe-cacert] parse OK rows=%d cols=%s"
+              % (len(df), list(df.columns)[:6]),
+              flush=True,
+          )
+          if len(df) < 1000:
+              raise SystemExit("probe-cacert parse too small: %d" % len(df))
+          print("[probe-cacert] SUCCESS (cacert path, no verify=False)", flush=True)
+          PY
+
+      - name: Python fetch_latest_rows control (verify=False)
         continue-on-error: true
         run: |
           python - <<'PY'
           import traceback
-          import warnings
-          import requests
-          from urllib3.exceptions import InsecureRequestWarning
 
-          URL = "https://www.swsresearch.com/swindex/pdf/SwClass2021/StockClassifyUse_stock.xls"
-          UA = (
-              "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-              "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-          )
-          headers = {"User-Agent": UA}
-
-          # Match production _SW_TIMEOUT_SEC; connect/read both 180s.
-          TIMEOUT = 180
-
-          def try_get(label, **kw):
-              try:
-                  r = requests.get(URL, headers=headers, timeout=TIMEOUT, **kw)
-                  n = len(r.content or b"")
-                  print("[%s] status=%s bytes=%d" % (label, r.status_code, n))
-                  if r.status_code == 200 and n >= 10_000:
-                      print("[%s] OK (full body)" % label)
-                  return r
-              except Exception as e:
-                  print("[%s] FAIL: %s: %s" % (label, type(e).__name__, e))
-                  return None
-
-          try_get("py-default-verify", verify=True)
-          warnings.filterwarnings("ignore", category=InsecureRequestWarning)
-          try_get("py-verify-False", verify=False)
-          r = try_get(
-              "py-verify-system-plus-geotrust",
-              verify="/tmp/ca/system_plus_geotrust.pem",
-          )
-          try_get("py-verify-geotrust-int-only", verify="/tmp/ca/geotrust_int.pem")
-          if open("/tmp/ca/mozilla_plus_geotrust.pem", "rb").read(1):
-              try_get(
-                  "py-verify-mozilla-plus-geotrust",
-                  verify="/tmp/ca/mozilla_plus_geotrust.pem",
-              )
-
-          # Parse XLS via same path as production if bundle download worked.
-          if r is not None and r.status_code == 200 and len(r.content or b"") >= 10_000:
-              import io
-              import pandas as pd
-
-              df = pd.read_excel(io.BytesIO(r.content), dtype={"股票代码": "str"})
-              print("[probe-py-parse-xls] rows=%d cols=%s OK" % (len(df), list(df.columns)[:6]))
-          else:
-              print("[probe-py-parse-xls] SKIP (no successful bundle download)")
-
-          # Production helper still verify=False; keep as control.
           try:
               from scripts.taxonomy.fetch_sw_members import fetch_latest_rows
+
               rows = fetch_latest_rows()
-              print("[probe-py-fetch_latest_rows] rows=%d OK" % len(rows))
+              print("[probe-verifyFalse] rows=%d OK" % len(rows))
+              if len(rows) < 1000:
+                  raise SystemExit("too small: %d" % len(rows))
           except Exception:
               traceback.print_exc()
-              print("[probe-py-fetch_latest_rows] FAIL")
+              print("[probe-verifyFalse] FAIL")
+              raise
           PY
