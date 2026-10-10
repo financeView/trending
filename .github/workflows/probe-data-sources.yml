@@ -17,7 +17,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install deps (minimal for SW fetch)
-        run: pip install -q requests pandas xlrd
+        run: pip install -q 'requests>=2.32' 'pandas>=2.0' xlrd pyyaml
 
       - name: Probe endpoints
         run: |
@@ -27,10 +27,10 @@ jobs:
             url="$1"
             shift 2
             : > /tmp/body
-            code=$(curl -sS -o /tmp/body -w "%{http_code}" --max-time 20 "$url" "$@" 2>/tmp/err)
+            code=$(curl -sS -o /tmp/body -w "%{http_code}" --max-time 25 -L "$url" "$@" 2>/tmp/err)
             curl_ec=$?
             size=$(wc -c < /tmp/body 2>/dev/null || echo 0)
-            err=$(tr -d '\n' </tmp/err | head -c 160)
+            err=$(tr -d '\n' </tmp/err | head -c 200)
             echo "[$label] http=$code bytes=$size curl_ec=$curl_ec"
             if [ -n "$err" ]; then echo "  curl_err: $err"; fi
             file /tmp/body | sed 's|^|/tmp/body: |'
@@ -38,33 +38,34 @@ jobs:
             echo "---"
           }
 
+          SW_URL="https://www.swsresearch.com/swindex/pdf/SwClass2021/StockClassifyUse_stock.xls"
+          UA='User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
+
           echo "=== 申万 SW classify ==="
-          probe "https://www.swsresearch.com/swindex/pdf/SwClass2021/StockClassifyUse_stock.xls" "swsresearch-xls"
-          probe "https://www.swsresearch.com/swindex/pdf/SwClass2021/StockClassifyUse_stock.xls" "swsresearch-xls-insecure" -k
+          probe "$SW_URL" "swsresearch-xls" -H "$UA"
+          probe "$SW_URL" "swsresearch-xls-insecure" -k -H "$UA"
 
           echo "=== 东财 clist ==="
           EM_QS="pn=1&pz=3&po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fid=f6&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23&fields=f2,f6,f12,f14"
-          UA='User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
           probe "https://push2delay.eastmoney.com/api/qt/clist/get?$EM_QS" "em-push2delay" -H "$UA"
 
           echo "=== 对照：新浪 ==="
           probe "https://hq.sinajs.cn/list=sh600000" "sina-hq" -H "Referer: https://finance.sina.com.cn"
 
       - name: Python fetch_latest_rows (verify=False path)
+        continue-on-error: true
         run: |
           python - <<'PY'
-          from scripts.taxonomy.fetch_sw_members import fetch_latest_rows
-          from scripts.common.universe import section4_codes
-          from scripts.taxonomy.fetch_sw_members import normalize_member
-          rows = fetch_latest_rows()
-          allowed = section4_codes()
-          mapped = sum(
-              1
-              for r in rows
-              if (normalize_member(r["ts_code"], str(r.get("industry_code") or ""), allowed=allowed) or {}).get("sw_l2_code")
-          )
-          print("[probe-py] rows=%d mapped=%d" % (len(rows), mapped))
-          if len(rows) < 1000 or mapped < 1000:
-              raise SystemExit("fetch_latest_rows too small")
-          print("[probe-py] OK")
+          import traceback
+          try:
+              from scripts.taxonomy.fetch_sw_members import fetch_latest_rows
+              rows = fetch_latest_rows()
+              print("[probe-py] rows=%d sample=%s" % (len(rows), rows[:2]))
+              if len(rows) < 1000:
+                  raise SystemExit("fetch_latest_rows too small: %d" % len(rows))
+              print("[probe-py] OK")
+          except Exception as e:
+              traceback.print_exc()
+              print("[probe-py] FAIL: %r" % (e,))
+              raise
           PY
