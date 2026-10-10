@@ -70,12 +70,16 @@ jobs:
             label="$1"
             shift
             : > /tmp/body
-            code=$(curl -sS -o /tmp/body -w "%{http_code}" --max-time 40 "$@" 2>/tmp/err)
+            # 40s was too short on flaky GHA↔SW path; match production fetch_sw (180s)
+            code=$(curl -sS -o /tmp/body -w "%{http_code}" --max-time 180 "$@" 2>/tmp/err)
             curl_ec=$?
             size=$(wc -c < /tmp/body 2>/dev/null || echo 0)
             err=$(tr -d '\n' </tmp/err | head -c 240)
             echo "[$label] http=$code bytes=$size curl_ec=$curl_ec"
             if [ -n "$err" ]; then echo "  curl_err: $err"; fi
+            if [ "$code" = "200" ] && [ "${size:-0}" -ge 10000 ] 2>/dev/null; then
+              echo "[$label] OK (full body >=10k)"
+            fi
             echo "---"
           }
 
@@ -84,21 +88,24 @@ jobs:
             | grep -E 'depth=|verify error|Verify return|issuer=|subject=' | head -20
           echo "---"
 
-          echo "=== curl --cacert matrix ==="
-          probe "default-verify" -H "$UA" "$SW_HTTPS"
-          probe "insecure-k" -k -H "$UA" "$SW_HTTPS"
-          # Intermediate alone is NOT enough (needs DigiCert Global Root G2 in trust path)
-          probe "cacert-geotrust-int-only" --cacert /tmp/ca/geotrust_int.pem -H "$UA" "$SW_HTTPS"
+          echo "=== curl --cacert matrix (max-time 180) ==="
+          # Primary: system CA + AIA intermediate (the candidate production path)
           probe "cacert-system-plus-geotrust" --cacert /tmp/ca/system_plus_geotrust.pem -H "$UA" "$SW_HTTPS"
-          if [ -s /tmp/ca/mozilla_cacert.pem ]; then
-            probe "cacert-mozilla" --cacert /tmp/ca/mozilla_cacert.pem -H "$UA" "$SW_HTTPS"
+          if [ -s /tmp/ca/mozilla_plus_geotrust.pem ]; then
             probe "cacert-mozilla-plus-geotrust" --cacert /tmp/ca/mozilla_plus_geotrust.pem -H "$UA" "$SW_HTTPS"
           fi
+          probe "insecure-k" -k -H "$UA" "$SW_HTTPS"
+          probe "default-verify" -H "$UA" "$SW_HTTPS"
+          # Intermediate alone should fail TLS (needs DigiCert Global Root G2)
+          probe "cacert-geotrust-int-only" --cacert /tmp/ca/geotrust_int.pem -H "$UA" "$SW_HTTPS"
+          if [ -s /tmp/ca/mozilla_cacert.pem ]; then
+            probe "cacert-mozilla" --cacert /tmp/ca/mozilla_cacert.pem -H "$UA" "$SW_HTTPS"
+          fi
 
-          echo "=== controls (default verify) ==="
+          echo "=== controls (default verify, max-time 60) ==="
           EM_QS="pn=1&pz=3&po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fid=f6&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23&fields=f2,f6,f12,f14"
-          probe "em-push2delay" -H "$UA" "https://push2delay.eastmoney.com/api/qt/clist/get?$EM_QS"
-          probe "sina-hq" -H "Referer: https://finance.sina.com.cn" "https://hq.sinajs.cn/list=sh600000"
+          probe "em-push2delay" --max-time 60 -H "$UA" "https://push2delay.eastmoney.com/api/qt/clist/get?$EM_QS"
+          probe "sina-hq" --max-time 60 -H "Referer: https://finance.sina.com.cn" "https://hq.sinajs.cn/list=sh600000"
 
       - name: Python requests verify=bundle vs verify=False
         continue-on-error: true
@@ -116,22 +123,46 @@ jobs:
           )
           headers = {"User-Agent": UA}
 
+          # Match production _SW_TIMEOUT_SEC; connect/read both 180s.
+          TIMEOUT = 180
+
           def try_get(label, **kw):
               try:
-                  r = requests.get(URL, headers=headers, timeout=40, **kw)
-                  print("[%s] status=%s bytes=%d" % (label, r.status_code, len(r.content or b"")))
+                  r = requests.get(URL, headers=headers, timeout=TIMEOUT, **kw)
+                  n = len(r.content or b"")
+                  print("[%s] status=%s bytes=%d" % (label, r.status_code, n))
+                  if r.status_code == 200 and n >= 10_000:
+                      print("[%s] OK (full body)" % label)
+                  return r
               except Exception as e:
                   print("[%s] FAIL: %s: %s" % (label, type(e).__name__, e))
+                  return None
 
           try_get("py-default-verify", verify=True)
           warnings.filterwarnings("ignore", category=InsecureRequestWarning)
           try_get("py-verify-False", verify=False)
-          try_get("py-verify-system-plus-geotrust", verify="/tmp/ca/system_plus_geotrust.pem")
+          r = try_get(
+              "py-verify-system-plus-geotrust",
+              verify="/tmp/ca/system_plus_geotrust.pem",
+          )
           try_get("py-verify-geotrust-int-only", verify="/tmp/ca/geotrust_int.pem")
           if open("/tmp/ca/mozilla_plus_geotrust.pem", "rb").read(1):
-              try_get("py-verify-mozilla-plus-geotrust", verify="/tmp/ca/mozilla_plus_geotrust.pem")
+              try_get(
+                  "py-verify-mozilla-plus-geotrust",
+                  verify="/tmp/ca/mozilla_plus_geotrust.pem",
+              )
 
-          # Full fetch_latest_rows still uses verify=False in code; probe path only.
+          # Parse XLS via same path as production if bundle download worked.
+          if r is not None and r.status_code == 200 and len(r.content or b"") >= 10_000:
+              import io
+              import pandas as pd
+
+              df = pd.read_excel(io.BytesIO(r.content), dtype={"股票代码": "str"})
+              print("[probe-py-parse-xls] rows=%d cols=%s OK" % (len(df), list(df.columns)[:6]))
+          else:
+              print("[probe-py-parse-xls] SKIP (no successful bundle download)")
+
+          # Production helper still verify=False; keep as control.
           try:
               from scripts.taxonomy.fetch_sw_members import fetch_latest_rows
               rows = fetch_latest_rows()
