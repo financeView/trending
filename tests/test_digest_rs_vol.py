@@ -173,10 +173,16 @@ def test_l2_and_l1_headers_include_liang_warm_tables_do_not(tmp_path, monkeypatc
     l2_sec = l1_md.split("## 行业（L2）扫描")[1].split("## 今日温转热")[0]
     warm_sec = l1_md.split("## 今日温转热")[1].split("## 今日温转平")[0]
 
-    assert "| T | l1_id | 名称 | RS | 量 | 右侧 | 节气 | 温转热 | 成分温转热 | 成交额(亿) |" in self_sec
-    assert "| T | 代码 | 名称 | RS | 量 | 右侧 | 节气 | 温转热 | 成分温转热 | 成交额(亿) |" in l2_sec
+    assert (
+        "| T | l1_id | 名称 | RS | 量 | 在右侧 | 节气 | 今日温转热 | "
+        "今日成分温转热 | 成分热以上 | 成交额(亿) |"
+    ) in self_sec
+    assert (
+        "| T | 代码 | 名称 | RS | 量 | 在右侧 | 节气 | 今日温转热 | "
+        "今日成分温转热 | 成分热以上 | 成交额(亿) |"
+    ) in l2_sec
     warm_header = [ln for ln in warm_sec.splitlines() if ln.startswith("| ts_code")][0]
-    assert warm_header == "| ts_code | 名称 | T | RS | 右侧 | 节气 | 成交额(亿) |"
+    assert warm_header == "| ts_code | 名称 | T | RS | 在右侧 | 节气 | 成交额(亿) |"
     assert "量" not in warm_header
 
     # Basket VOL null → empty「量」cell; footnote once on L1/L2 block

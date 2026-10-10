@@ -37,21 +37,6 @@ def _run_link(sha: Optional[str]) -> str:
     return sha or ""
 
 
-def _hottest_t(values: Iterable[Optional[str]]) -> Optional[str]:
-    best: Optional[str] = None
-    best_r: Optional[int] = None
-    for t in values:
-        if not t:
-            continue
-        try:
-            r = rank(t)
-        except ValueError:
-            continue
-        if best_r is None or r > best_r:
-            best, best_r = t, r
-    return best
-
-
 def _meta_header(conn: sqlite3.Connection, trade_date: str, title: str) -> list[str]:
     row = conn.execute(
         """
@@ -105,6 +90,45 @@ def _fmt_cell(v: Any) -> str:
     if isinstance(v, float):
         return "%.4g" % v
     return str(v)
+
+
+def _fmt_yn(v: Any) -> str:
+    if v is None:
+        return ""
+    if v is True or v == 1 or v == "1":
+        return "是"
+    if v is False or v == 0 or v == "0":
+        return "否"
+    return ""
+
+
+def _count_members_hot_plus(
+    conn: sqlite3.Connection,
+    trade_date: str,
+    *,
+    l1_id: Optional[str] = None,
+    sw_l2_code: Optional[str] = None,
+) -> int:
+    td = _td(trade_date)
+    if l1_id is not None:
+        row = conn.execute(
+            """
+            SELECT COUNT(*) FROM daily_stock
+            WHERE trade_date=? AND l1_id=? AND T IN ('热','沸')
+            """,
+            (td, l1_id),
+        ).fetchone()
+    elif sw_l2_code is not None:
+        row = conn.execute(
+            """
+            SELECT COUNT(*) FROM daily_stock
+            WHERE trade_date=? AND sw_l2_code=? AND T IN ('热','沸')
+            """,
+            (td, sw_l2_code),
+        ).fetchone()
+    else:
+        raise ValueError("l1_id or sw_l2_code required")
+    return int(row[0] or 0)
 
 
 def _md_table(headers: Sequence[str], rows: Iterable[Sequence[Any]]) -> list[str]:
@@ -162,10 +186,21 @@ def render_l1_issue(
         (td, l1_id),
     ).fetchone()
     headers = [
-        "T", "l1_id", "名称", "RS", "量", "右侧", "节气", "温转热", "成分温转热", "成交额(亿)",
+        "T",
+        "l1_id",
+        "名称",
+        "RS",
+        "量",
+        "在右侧",
+        "节气",
+        "今日温转热",
+        "今日成分温转热",
+        "成分热以上",
+        "成交额(亿)",
     ]
+    hot_plus_l1 = _count_members_hot_plus(conn, td, l1_id=l1_id)
     if row is None:
-        cells = ["", l1_id, name_zh, "", "", "", "", "", "", ""]
+        cells = ["", l1_id, name_zh, "", "", "", "", "", "", hot_plus_l1, ""]
     else:
         t, rs, vol, right, solar, tag, wcount, amt = row
         cells = [
@@ -174,10 +209,11 @@ def render_l1_issue(
             name_zh,
             "" if rs is None else rs,
             "" if vol is None else vol,
-            "" if right is None else right,
+            _fmt_yn(right),
             "" if solar is None else solar,
-            "" if tag is None else tag,
+            _fmt_yn(tag),
             0 if wcount is None else wcount,
+            hot_plus_l1,
             _fmt_amount_yi(amt),
         ]
     lines.extend(_md_table(headers, [tuple(cells)]))
@@ -186,7 +222,19 @@ def render_l1_issue(
     lines.append("## 行业（L2）扫描")
     lines.extend(
         _md_table(
-            ["T", "代码", "名称", "RS", "量", "右侧", "节气", "温转热", "成分温转热", "成交额(亿)"],
+            [
+                "T",
+                "代码",
+                "名称",
+                "RS",
+                "量",
+                "在右侧",
+                "节气",
+                "今日温转热",
+                "今日成分温转热",
+                "成分热以上",
+                "成交额(亿)",
+            ],
             [
                 (
                     r[1],
@@ -194,10 +242,11 @@ def render_l1_issue(
                     l2_names.get(str(r[0]), ""),
                     r[3],
                     r[4],  # VOL_score — baskets null this slice
-                    r[5],
+                    _fmt_yn(r[5]),
                     r[7],
-                    r[6],
+                    _fmt_yn(r[6]),
                     r[8],
+                    _count_members_hot_plus(conn, td, sw_l2_code=str(r[0])),
                     _fmt_amount_yi(r[9]),
                 )
                 for r in l2_rows
@@ -206,6 +255,10 @@ def render_l1_issue(
     )
     lines.append(
         "注：L2/L1「量」本 slice 为空——篮子 VOL 后放（避历史换手序列成本）。"
+    )
+    lines.append(
+        "注：在右侧=是否仍处右侧存续（状态）；今日温转热=板块自身当日进场或温→热再确认（事件）。"
+        "成分热以上=当日成分 T∈{热,沸} 个数（按行上 l1_id / sw_l2_code 过滤）。"
     )
     lines.append("")
 
@@ -222,9 +275,17 @@ def render_l1_issue(
     lines.append("## 今日温转热（个股，Top N by 成交额）")
     lines.extend(
         _md_table(
-            ["ts_code", "名称", "T", "RS", "右侧", "节气", "成交额(亿)"],
+            ["ts_code", "名称", "T", "RS", "在右侧", "节气", "成交额(亿)"],
             [
-                (r[0], stock_names.get(str(r[0]), ""), r[1], r[2], r[3], r[4], _fmt_amount_yi(r[5]))
+                (
+                    r[0],
+                    stock_names.get(str(r[0]), ""),
+                    r[1],
+                    r[2],
+                    _fmt_yn(r[3]),
+                    r[4],
+                    _fmt_amount_yi(r[5]),
+                )
                 for r in hot
             ],
         )
@@ -312,7 +373,7 @@ def render_radar_issue(
     ratio = (float(n_right) / float(n_all)) if n_all else 0.0
     lines.append("## 总览")
     lines.append(
-        "- 个股数=%d 右侧=%d (%.1f%%) 温转热=%d"
+        "- 个股数=%d 右侧个股=%d (%.1f%%) 今日温转热=%d"
         % (n_all, n_right, 100.0 * ratio, n_hot)
     )
     lines.append("")
@@ -321,19 +382,22 @@ def render_radar_issue(
     for b in buckets:
         row = conn.execute(
             """
-            SELECT T,
+            SELECT
                    SUM(CASE WHEN IFNULL(right_side,0)=1 THEN 1 ELSE 0 END),
                    SUM(CASE WHEN IFNULL(tag_warm_to_hot,0)=1 THEN 1 ELSE 0 END),
                    COUNT(*)
             FROM daily_stock WHERE trade_date=? AND l1_id=?
-            GROUP BY T
             """,
             (td, b.l1_id),
-        ).fetchall()
-        c = sum(int(x[3] or 0) for x in row)
-        rgt = sum(int(x[1] or 0) for x in row)
-        h = sum(int(x[2] or 0) for x in row)
-        t = _hottest_t(x[0] for x in row)
+        ).fetchone()
+        rgt = int(row[0] or 0)
+        h = int(row[1] or 0)
+        c = int(row[2] or 0)
+        l1_t = conn.execute(
+            "SELECT T FROM daily_l1 WHERE trade_date=? AND code=?",
+            (td, b.l1_id),
+        ).fetchone()
+        t = l1_t[0] if l1_t else None
         share = (float(rgt) / float(c)) if c else 0.0
         l1_table.append((b.name_zh, b.l1_id, t, c, rgt, share, h))
     l1_table.sort(key=lambda x: (-x[5], -x[6], x[1]))
@@ -341,7 +405,7 @@ def render_radar_issue(
     lines.append("## 按 L1")
     lines.extend(
         _md_table(
-            ["L1", "l1_id", "T*", "个股", "右侧", "右侧占比", "个股温转热"],
+            ["L1", "l1_id", "T", "个股", "右侧个股", "右侧占比", "今日个股温转热"],
             [
                 (name, lid, t, c, r, "%.1f%%" % (100.0 * share), h)
                 for name, lid, t, c, r, share, h in l1_table
@@ -350,8 +414,9 @@ def render_radar_issue(
     )
     lines.append("")
     lines.append(
-        "T* / 个股温转热 = 个股截面（按 l1_id），非 L1 同引擎；"
-        "L1 自身（含 YAML 闭包「成分温转热」）见各 L1 Issue「L1 自身」。"
+        "T = daily_l1 同引擎温度（与各 L1 Issue「L1 自身」一致）；"
+        "右侧个股 / 今日个股温转热 = 个股截面（按 l1_id）。"
+        "L1 闭包「今日成分温转热」见各 L1 Issue。"
     )
     lines.append("")
     lines.append("## 全市场温转热 Top（成交额）")
