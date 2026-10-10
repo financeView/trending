@@ -131,22 +131,64 @@ _SW_UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 )
-# GHA→swsresearch is flaky (TLS + slow); generous timeout + 3 attempts (not 3 post-fail retries).
+# GHA→swsresearch is flaky (missing intermediate + slow/504); verify via
+# certifi roots + vendored GeoTrust intermediate (not verify=False).
 _SW_TIMEOUT_SEC = 180
 _SW_ATTEMPTS = 3
+_GEO_TRUST_INT_PEM = os.path.join(
+    os.path.dirname(__file__),
+    "certs",
+    "geotrust_g2_tls_cn_2022_ca1.pem",
+)
+_sw_ca_bundle_cache: Optional[str] = None
+
+
+def _sw_ca_bundle_path() -> str:
+    """certifi CA bundle + GeoTrust G2 TLS CN intermediate (AIA of *.swsresearch.com)."""
+    global _sw_ca_bundle_cache
+    if _sw_ca_bundle_cache and os.path.isfile(_sw_ca_bundle_cache):
+        return _sw_ca_bundle_cache
+
+    import tempfile
+
+    import certifi
+
+    if not os.path.isfile(_GEO_TRUST_INT_PEM):
+        raise RuntimeError("missing vendored CA: %s" % _GEO_TRUST_INT_PEM)
+    with open(_GEO_TRUST_INT_PEM, encoding="utf-8") as f:
+        intermediate = f.read()
+    if "BEGIN CERTIFICATE" not in intermediate:
+        raise RuntimeError("invalid vendored CA pem: %s" % _GEO_TRUST_INT_PEM)
+
+    roots = open(certifi.where(), encoding="utf-8").read()
+    fd, path = tempfile.mkstemp(prefix="sw_ca_bundle_", suffix=".pem")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as out:
+            out.write(roots)
+            if not roots.endswith("\n"):
+                out.write("\n")
+            out.write(intermediate)
+            if not intermediate.endswith("\n"):
+                out.write("\n")
+    except Exception:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        raise
+    _sw_ca_bundle_cache = path
+    return path
 
 
 def _download_sw_classify_xls() -> bytes:
-    """GET SwClass2021 XLS with scoped verify=False, timeout, backoff retries."""
+    """GET SwClass2021 XLS with CA bundle verify, timeout, backoff retries."""
     import time
-    import warnings
 
     import requests
-    from urllib3.exceptions import InsecureRequestWarning
 
-    warnings.filterwarnings("ignore", category=InsecureRequestWarning)
+    verify_path = _sw_ca_bundle_path()
     print(
-        "[fetch_sw] WARN: TLS verify=False for swsresearch XLS (GHA CA chain)",
+        "[fetch_sw] TLS verify=%s (certifi + GeoTrust intermediate)" % verify_path,
         flush=True,
     )
     last: Optional[Exception] = None
@@ -156,7 +198,7 @@ def _download_sw_classify_xls() -> bytes:
                 _SW_CLASSIFY_XLS,
                 headers={"User-Agent": _SW_UA},
                 timeout=_SW_TIMEOUT_SEC,
-                verify=False,
+                verify=verify_path,
             )
             r.raise_for_status()
             content = r.content or b""
@@ -187,8 +229,8 @@ def _download_sw_classify_xls() -> bytes:
 def fetch_latest_rows():
     """Download SW classify XLS → latest row per symbol.
 
-    GHA runners fail default TLS verify against swsresearch.com (missing issuer).
-    Scoped ``verify=False`` + size check; do not disable TLS globally.
+    swsresearch omits the GeoTrust intermediate; verify with certifi + vendored
+    AIA intermediate (see ``certs/``). Size check; do not use verify=False.
     """
     import io
 

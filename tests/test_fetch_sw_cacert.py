@@ -1,7 +1,8 @@
-"""SW classify download: scoped TLS verify=False, long timeout, backoff retries."""
+"""SW classify download: CA-bundle verify (certifi + GeoTrust), timeout, retries."""
 from __future__ import annotations
 
 import io
+import os
 
 import pandas as pd
 import pytest
@@ -40,7 +41,24 @@ def _stub_excel(monkeypatch):
     monkeypatch.setattr(pd, "read_excel", fake_read_excel)
 
 
-def test_fetch_latest_rows_passes_verify_false_and_long_timeout(monkeypatch):
+def test_sw_ca_bundle_includes_geotrust_intermediate():
+    path = fsm._sw_ca_bundle_path()
+    assert os.path.isfile(path)
+    text = open(path, encoding="utf-8").read()
+    assert "BEGIN CERTIFICATE" in text
+    assert "GeoTrust G2 TLS CN RSA4096 SHA256 2022 CA1" in text or os.path.isfile(
+        fsm._GEO_TRUST_INT_PEM
+    )
+    # Vendored intermediate must be appended (bundle larger than certifi alone).
+    import certifi
+
+    assert os.path.getsize(path) > os.path.getsize(certifi.where())
+    vendored = open(fsm._GEO_TRUST_INT_PEM, encoding="utf-8").read()
+    assert "BEGIN CERTIFICATE" in vendored
+    assert vendored.strip() in text
+
+
+def test_fetch_latest_rows_uses_ca_bundle_not_verify_false(monkeypatch):
     calls = {}
 
     def fake_get(url, **kwargs):
@@ -53,7 +71,9 @@ def test_fetch_latest_rows_passes_verify_false_and_long_timeout(monkeypatch):
     _stub_excel(monkeypatch)
 
     rows = fsm.fetch_latest_rows()
-    assert calls.get("verify") is False
+    assert calls.get("verify") is not False
+    assert isinstance(calls.get("verify"), str)
+    assert os.path.isfile(calls["verify"])
     assert calls.get("timeout") == fsm._SW_TIMEOUT_SEC
     assert fsm._SW_TIMEOUT_SEC >= 180
     assert "swsresearch.com" in calls.get("url", "")
@@ -82,8 +102,9 @@ def test_download_retries_three_times_with_backoff(monkeypatch):
     content = fsm._download_sw_classify_xls()
     assert len(content) >= 10_000
     assert n["i"] == fsm._SW_ATTEMPTS == 3
-    assert sleeps == [1, 2]  # min(2**0,8)=1, min(2**1,8)=2; no sleep after last
-    assert all(k.get("verify") is False for k in get_kwargs)
+    assert sleeps == [1, 2]
+    assert all(isinstance(k.get("verify"), str) for k in get_kwargs)
+    assert all(k.get("verify") is not False for k in get_kwargs)
     assert all(k.get("timeout") == fsm._SW_TIMEOUT_SEC for k in get_kwargs)
 
 
