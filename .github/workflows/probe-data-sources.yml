@@ -273,7 +273,7 @@ jobs:
           print("[probe-cacert] SUCCESS (cacert path, no verify=False)", flush=True)
           PY
 
-      - name: Python fetch_latest_rows control (verify=False)
+      - name: Python fetch_latest_rows (production cacert path)
         continue-on-error: true
         run: |
           python - <<'PY'
@@ -283,11 +283,11 @@ jobs:
               from scripts.taxonomy.fetch_sw_members import fetch_latest_rows
 
               rows = fetch_latest_rows()
-              print("[probe-verifyFalse] rows=%d OK" % len(rows))
+              print("[probe-prod-cacert] rows=%d OK" % len(rows))
               if len(rows) < 1000:
                   raise SystemExit("too small: %d" % len(rows))
           except Exception:
               traceback.print_exc()
-              print("[probe-verifyFalse] FAIL")
+              print("[probe-prod-cacert] FAIL")
               raise
           PY
