@@ -131,6 +131,54 @@ _SW_UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 )
+# GHA→swsresearch is flaky (TLS + slow); generous timeout + 3 attempts.
+_SW_TIMEOUT_SEC = 180
+_SW_RETRIES = 3
+
+
+def _download_sw_classify_xls() -> bytes:
+    """GET SwClass2021 XLS with scoped verify=False, timeout, backoff retries."""
+    import time
+    import warnings
+
+    import requests
+    from urllib3.exceptions import InsecureRequestWarning
+
+    warnings.filterwarnings("ignore", category=InsecureRequestWarning)
+    print(
+        "[fetch_sw] WARN: TLS verify=False for swsresearch XLS (GHA CA chain)",
+        flush=True,
+    )
+    last: Optional[Exception] = None
+    for i in range(_SW_RETRIES):
+        try:
+            r = requests.get(
+                _SW_CLASSIFY_XLS,
+                headers={"User-Agent": _SW_UA},
+                timeout=_SW_TIMEOUT_SEC,
+                verify=False,
+            )
+            r.raise_for_status()
+            content = r.content or b""
+            if len(content) < 10_000:
+                raise RuntimeError(
+                    "swsresearch xls too small: %d bytes" % len(content)
+                )
+            if i:
+                print("[fetch_sw] ok on attempt %d/%d" % (i + 1, _SW_RETRIES), flush=True)
+            return content
+        except Exception as e:  # noqa: BLE001
+            last = e
+            print(
+                "[fetch_sw] attempt %d/%d failed: %s"
+                % (i + 1, _SW_RETRIES, e),
+                flush=True,
+            )
+            if i + 1 < _SW_RETRIES:
+                time.sleep(min(2**i, 8))
+    raise RuntimeError(
+        "swsresearch xls failed after %d attempts: %s" % (_SW_RETRIES, last)
+    )
 
 
 def fetch_latest_rows():
@@ -140,27 +188,10 @@ def fetch_latest_rows():
     Scoped ``verify=False`` + size check; do not disable TLS globally.
     """
     import io
-    import warnings
 
     import pandas as pd
-    import requests
-    from urllib3.exceptions import InsecureRequestWarning
 
-    warnings.filterwarnings("ignore", category=InsecureRequestWarning)
-    print(
-        "[fetch_sw] WARN: TLS verify=False for swsresearch XLS (GHA CA chain)",
-        flush=True,
-    )
-    r = requests.get(
-        _SW_CLASSIFY_XLS,
-        headers={"User-Agent": _SW_UA},
-        timeout=60,
-        verify=False,
-    )
-    r.raise_for_status()
-    content = r.content or b""
-    if len(content) < 10_000:
-        raise RuntimeError("swsresearch xls too small: %d bytes" % len(content))
+    content = _download_sw_classify_xls()
 
     df = pd.read_excel(
         io.BytesIO(content),

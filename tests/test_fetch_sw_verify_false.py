@@ -1,32 +1,29 @@
-"""SW classify download uses scoped TLS verify=False (GHA CA chain)."""
+"""SW classify download: scoped TLS verify=False, long timeout, backoff retries."""
 from __future__ import annotations
 
 import io
 
 import pandas as pd
+import pytest
 import requests
 
 from scripts.taxonomy import fetch_sw_members as fsm
 
 
-def test_fetch_latest_rows_passes_verify_false(monkeypatch):
-    calls = {}
+def _ok_resp(body: bytes = b"x" * 12_000):
+    class Resp:
+        status_code = 200
 
-    def fake_get(url, **kwargs):
-        calls["url"] = url
-        calls["verify"] = kwargs.get("verify")
+        def __init__(self):
+            self.content = body
 
-        class Resp:
-            status_code = 200
-            content = b"x" * 12_000
+        def raise_for_status(self):
+            return None
 
-            def raise_for_status(self):
-                return None
+    return Resp()
 
-        return Resp()
 
-    monkeypatch.setattr(requests, "get", fake_get)
-
+def _stub_excel(monkeypatch):
     df = pd.DataFrame(
         {
             "股票代码": ["000001", "000001", "600000"],
@@ -42,9 +39,58 @@ def test_fetch_latest_rows_passes_verify_false(monkeypatch):
 
     monkeypatch.setattr(pd, "read_excel", fake_read_excel)
 
+
+def test_fetch_latest_rows_passes_verify_false_and_long_timeout(monkeypatch):
+    calls = {}
+
+    def fake_get(url, **kwargs):
+        calls["url"] = url
+        calls["verify"] = kwargs.get("verify")
+        calls["timeout"] = kwargs.get("timeout")
+        return _ok_resp()
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    _stub_excel(monkeypatch)
+
     rows = fsm.fetch_latest_rows()
     assert calls.get("verify") is False
+    assert calls.get("timeout") == fsm._SW_TIMEOUT_SEC
+    assert fsm._SW_TIMEOUT_SEC >= 180
     assert "swsresearch.com" in calls.get("url", "")
     by_ts = {r["ts_code"]: r["industry_code"] for r in rows}
     assert by_ts["000001.SZ"] == "110100"
     assert by_ts["600000.SH"] == "480100"
+
+
+def test_download_retries_three_times_with_backoff(monkeypatch):
+    n = {"i": 0}
+    sleeps = []
+
+    def fake_get(url, **kwargs):
+        n["i"] += 1
+        if n["i"] < 3:
+            raise requests.exceptions.ReadTimeout("slow")
+        return _ok_resp()
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    import time as time_mod
+
+    monkeypatch.setattr(time_mod, "sleep", sleeps.append)
+
+    content = fsm._download_sw_classify_xls()
+    assert len(content) >= 10_000
+    assert n["i"] == 3
+    assert sleeps == [1, 2]  # min(2**0,8)=1, min(2**1,8)=2; no sleep after last
+
+
+def test_download_raises_after_three_failures(monkeypatch):
+    def always_fail(url, **kwargs):
+        raise requests.exceptions.ReadTimeout("slow")
+
+    monkeypatch.setattr(requests, "get", always_fail)
+    import time as time_mod
+
+    monkeypatch.setattr(time_mod, "sleep", lambda *_a, **_k: None)
+
+    with pytest.raises(RuntimeError, match="after 3 attempts"):
+        fsm._download_sw_classify_xls()
