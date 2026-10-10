@@ -35,7 +35,7 @@
 
 | 决策 | 选择 |
 |------|------|
-| 架构 | **Approach 1：同 job**——sync flags → `hard_freeze_flag` pass → hist `board_calc` pass → `daily_run` |
+| 架构 | **Approach 1：同 sync 进程**——flags → `hard_freeze_flag` pass → hist `board_calc` pass；`daily_run` 在 Spec F 的 **metrics job**（`sync_complete` 后） |
 | board_calc 范围 | **混合：** 仅 `D < session_asof` 且 `limit_*` 皆空时写入；asof **纯 vendor** |
 | 持久化 | board_calc 与冻旗均写 **bars**；metrics / fill **读列**，不在引擎内重算板价 |
 | `limit_up_unfillable` | 保持 **false**；YAML 显式写出 |
@@ -55,11 +55,11 @@ catch-up / 历史追赶日：board_calc 的日期门闩用 **`session_asof`**，
 
 **`session_asof`（钉死）：** 默认 `latest_trade_day()`（与现有 `with_limits` 的 asof 判定同源）；允许显式 `--asof YYYY-MM-DD` 覆盖。**禁止**把 `--end` 当作 `session_asof`——workflow 在 `only_date` 且 `DATE != ASOF` 时会设 `END=$DATE`，若误用则历史日被当成「当日」而禁写 board_calc。`--end` **只**约束 OHLC/flags 拉取窗口。
 
-**挂点：** 两 pass 接在 `scripts/sync_bars_sample.py`（或同 job 等价 sync 入口）里：**OHLC/flags 循环结束之后**（`with_limits` 若执行则在其后）、`write_sync_complete` **之前**；`daily_run` 仍只在 `sync_complete=true` 时跑（既有 workflow）。可抽 helper，但 cron 必须同 job 跑完。
+**挂点：** 两 pass 接在 `scripts/sync_bars_sample.py`（sync **job** 入口）里：**OHLC/flags 循环结束之后**（`with_limits` 若执行则在其后）、`write_sync_complete` **之前**；`daily_run` 仅当 `sync_complete=true` 时在 **metrics job** 跑（Spec F）。cron 必须在 sync job 内跑完两 pass。
 
-**`sync_complete=false`（预算未跑完宇宙）：** 两 pass **仍执行**（基于库内已有行全量重算）；不得因 pass 本身把 `sync_complete` 打成 false。pass 异常 → stderr warn + 非零计数日志，**不**抛死整个 sync（与单票 OHLC warn 同级），以便次日续跑；`daily_run` 仍按既有门闩跳过。
+**`sync_complete=false`（OHLC 宇宙未跑完）：** 两 pass **仍执行**（基于库内已有行全量重算）；不得因 pass 本身把 `sync_complete` 打成 false。pass 异常 → stderr warn + 非零计数日志，**不**抛死整个 sync（与单票 OHLC warn 同级），以便次日续跑；`daily_run` 仍按既有门闩跳过。
 
-**预算边界：** `--time-budget-min` **只约束** OHLC/flags 网络拉取循环；两 pass 为本地 SQLite 重算，**不计入**该预算。job 总超时仍受 workflow `timeout-minutes`（sync 步 ~330）约束。首跑全宇宙重算接受数分钟级墙钟；**不**另定「必须 <X min」硬帽——若接近 job 超时则 warn（实现可打 elapsed），不得静默截断半票宇宙（要么整票提交，要么该票跳过并记日志）。
+**预算边界：** 生产 cron/only_date **不再**传 `--time-budget-min`（Spec F）；若本地/测试仍传，该预算**只约束** OHLC/flags 网络循环，两 pass 不计入。sync job 总超时 `timeout-minutes: 360`。首跑全宇宙重算接受数分钟级墙钟；不得静默截断半票宇宙（要么整票提交，要么该票跳过并记日志）。
 
 **回填范围（可重入）：** 每个 sync 会话对 **mapped U（−quarantine）** 全量扫描 bars：
 

@@ -1,6 +1,7 @@
 name: daily-trend
 
 # 北京 19:00 = UTC 11:00（等 BaoStock 日K/复权）；见 market-data-contract
+# Spec F: sync job + metrics job（各 timeout 360）；废除 deferred 门闩 / 生产 time-budget 截断
 
 on:
   schedule:
@@ -37,12 +38,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  trend:
+  sync:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:
       BARS_SOURCE: sina
       PYTHONUNBUFFERED: "1"
+    outputs:
+      sync_complete: ${{ steps.sync.outputs.sync_complete }}
+      taxonomy_head_sha: ${{ steps.taxonomy.outputs.taxonomy_head_sha }}
+      taxonomy_fetch: ${{ steps.taxonomy.outputs.taxonomy_fetch }}
     steps:
       - uses: actions/checkout@v4
 
@@ -73,7 +78,6 @@ jobs:
 
       - name: Sync mapped-universe bars
         id: sync
-        timeout-minutes: 330
         run: |
           DATE="${{ github.event.inputs.date }}"
           ONLY="${{ github.event.inputs.only_date }}"
@@ -85,10 +89,8 @@ jobs:
           ASOF=$(python -c "from scripts.common.calendar import latest_trade_day; print(latest_trade_day().isoformat())" 2>/dev/null)
           END="$ASOF"
           LIMIT_ARGS=(--with-limits)
-          BUDGET=200
           if [ -n "$DATE" ] && [ "$ONLY" = "true" ]; then
             END="$DATE"
-            BUDGET=300
             if [ "$DATE" != "$ASOF" ]; then
               LIMIT_ARGS=()
               echo "[sync] skip --with-limits (only_date=$DATE != asof $ASOF)"
@@ -98,18 +100,57 @@ jobs:
           else
             echo "[sync] cron end=$ASOF"
           fi
+          # Spec F: no --time-budget-min truncation (job has its own 6h)
           python scripts/sync_bars_sample.py \
             --end "$END" \
             --asof "$ASOF" \
-            --time-budget-min "$BUDGET" \
             "${LIMIT_ARGS[@]}"
 
+      - name: Warn if sync incomplete
+        if: ${{ always() && steps.sync.outcome == 'success' && steps.sync.outputs.sync_complete != 'true' }}
+        run: |
+          echo "::warning::sync_incomplete — metrics job will be skipped"
+
+  metrics:
+    needs: sync
+    if: ${{ needs.sync.outputs.sync_complete == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      BARS_SOURCE: sina
+      PYTHONUNBUFFERED: "1"
+    steps:
+      # Tip checkout: sync may have pushed taxonomy/heartbeat after the trigger SHA
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore bars cache
+        id: bars-cache
+        uses: actions/cache@v4
+        with:
+          path: data/cache
+          key: bars-${{ github.run_id }}
+          # Spec F: no restore-keys — exact run_id hit required
+
+      - name: Require exact bars cache hit
+        if: ${{ steps.bars-cache.outputs.cache-hit != 'true' }}
+        run: |
+          echo "::error::bars cache miss for bars-${{ github.run_id }} (exact key required)"
+          exit 1
+
       - name: daily_run
-        if: ${{ success() && steps.sync.outputs.sync_complete == 'true' && steps.sync.outputs.run_deferred != 'true' }}
         timeout-minutes: 120
         env:
-          TAXONOMY_HEAD_SHA: ${{ steps.taxonomy.outputs.taxonomy_head_sha }}
-          TAXONOMY_FETCH: ${{ steps.taxonomy.outputs.taxonomy_fetch }}
+          TAXONOMY_HEAD_SHA: ${{ needs.sync.outputs.taxonomy_head_sha }}
+          TAXONOMY_FETCH: ${{ needs.sync.outputs.taxonomy_fetch }}
         run: |
           DATE="${{ github.event.inputs.date }}"
           ONLY="${{ github.event.inputs.only_date }}"
@@ -124,7 +165,6 @@ jobs:
           python scripts/daily_run.py ${DATE:+--date $DATE} $ONLY_ARG $FORCE
 
       - name: live_shadow
-        if: ${{ success() && steps.sync.outputs.sync_complete == 'true' && steps.sync.outputs.run_deferred != 'true' }}
         run: |
           DATE="${{ github.event.inputs.date }}"
           ONLY="${{ github.event.inputs.only_date }}"
@@ -135,7 +175,6 @@ jobs:
           fi
 
       - name: Commit trend.db + heartbeat
-        if: ${{ success() && steps.sync.outputs.sync_complete == 'true' && steps.sync.outputs.run_deferred != 'true' }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -149,7 +188,7 @@ jobs:
           fi
 
       - name: Update L1 / Radar Issues
-        if: ${{ github.event.inputs.skip_issue_update != 'true' && success() && steps.sync.outputs.sync_complete == 'true' && steps.sync.outputs.run_deferred != 'true' }}
+        if: ${{ github.event.inputs.skip_issue_update != 'true' }}
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

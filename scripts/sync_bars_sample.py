@@ -102,18 +102,14 @@ def run_spec_e_passes(conn, codes, *, session_asof: dt.date) -> None:
 
 
 def write_sync_complete(complete: bool, elapsed_min: float = 0.0) -> None:
+    """Write sync_complete (+ elapsed) for Actions. Spec F: no run_deferred gate."""
     flag = "true" if complete else "false"
-    deferred = "true" if (complete and elapsed_min > 200) else "false"
-    print(
-        "[sync_bars] sync_complete=%s elapsed_min=%.1f run_deferred=%s"
-        % (flag, elapsed_min, deferred)
-    )
+    print("[sync_bars] sync_complete=%s elapsed_min=%.1f" % (flag, elapsed_min))
     path = os.environ.get("GITHUB_OUTPUT")
     if path:
         with open(path, "a", encoding="utf-8") as f:
             f.write("sync_complete=%s\n" % flag)
             f.write("sync_elapsed_min=%.1f\n" % elapsed_min)
-            f.write("run_deferred=%s\n" % deferred)
 
 
 def main(argv=None) -> int:

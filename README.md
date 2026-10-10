@@ -29,7 +29,7 @@ Actions `workflow_dispatch`:
 | 单日补洞 | date=D, only_date=true | `--date D --only-date` |
 | 从 D 追赶 | date=D | `--date D` |
 
-Incomplete sync (`sync_complete=false`) skips daily_run / L / trend.db commit. Sync >200 min → `run_deferred` (skip daily_run this job).
+Workflow is two jobs (`sync` → `metrics`). Incomplete sync (`sync_complete=false`) skips the metrics job (daily_run / shadow / trend.db commit / Issues) and emits `::warning::sync_incomplete`. Spec F removed `run_deferred` and production `--time-budget-min` truncation.
 
 ## P1 L1 / Radar Issues
 

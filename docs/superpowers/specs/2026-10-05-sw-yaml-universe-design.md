@@ -100,22 +100,22 @@ Sync 代码列表 = `load_universe_codes()`（映射宇宙），**禁止**生产
 
 `sync_complete` 写入 **`GITHUB_OUTPUT`**（`sync_complete=true|false`），step `id: sync`。`daily_run` / L / commit trend.db 均 `if: steps.sync.outputs.sync_complete == 'true'`。两边都 **exit 0**（好让 cache 保存）。只 print 不算完成信号。
 
-若本 job 已 `sync_complete` 但 sync 已耗 **>200 min**，本轮 **跳过** daily_run（`run_deferred`），下次 cron 再跑截面，避免 360 墙钟在 replay 中被杀。
+~~若本 job 已 `sync_complete` 但 sync 已耗 >200 min，本轮跳过 daily_run（`run_deferred`）~~  
+**已废止（Spec F）：** 拆为 `sync` + `metrics` 两 job 后不再使用 `run_deferred`；生产 sync 也不再 `--time-budget-min` 200/300 截断。见 [`2026-10-08-workflow-split-jobs-design.md`](./2026-10-08-workflow-split-jobs-design.md)。
 
-`sync_incomplete` / `run_deferred` → 禁止 daily_run / L / commit `trend.db`。
+`sync_incomplete`（`sync_complete=false`）→ metrics job 整 job skip（禁止 daily_run / L / commit `trend.db`）。
 
 ---
 
 ## 4. Sync 分批（Actions 6h）
 
-托管 job 上限 6h。冷启动会超；热 cache 单日多数不超，**限速 / cache miss / 复权重刷仍可能超**。每个 job 必须有预算 + 断点。
+托管 **每个 job** 上限 6h。Spec F 拆为 `sync` + `metrics` 后各占独立 6h；生产 **不再**用 `--time-budget-min` 200/300 主动截断（见 Spec F）。冷启动 / 限速 / cache miss 仍可能触硬超时。
 
 | 项 | 值 |
 |----|-----|
-| job `timeout-minutes` | 360 |
-| sync step | ≤ 330 |
-| `--time-budget-min` | ≤ 300（必须低于 step，好 `exit 0` 让 cache 写入） |
-| `--max-codes` | 可配；与时间预算取先到 |
+| `sync` / `metrics` job `timeout-minutes` | 各 360 |
+| 生产 `--time-budget-min` | **省略**（本地/测试可仍传） |
+| `--max-codes` | 可配（测试/限流） |
 
 续跑：`ts_code` 稳定排序。OHLC 与 flags **分开**跳过：仅当 **end 当日已有 OHLC 行** 才 skip OHLC；仅当当日 `flag_source` 已写才 skip flags。`sync_meta.last_bar_date ≥ end` **不等于** 已有 9.30 行、也不等于 flags 齐（现码把 `last_bar_date` 写成请求的 `end`）。
 

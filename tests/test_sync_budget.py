@@ -82,8 +82,10 @@ def test_github_output_sync_complete(tmp_path, monkeypatch):
     text = out.read_text(encoding="utf-8")
     assert "sync_complete=true" in text
     assert "sync_complete=false" in text
-    assert "run_deferred=false" in text
-    assert "run_deferred=true" in text
+    assert text.count("sync_complete=true") >= 2
+    assert "run_deferred=true" not in text  # Spec F: no deferred gate
+    assert "run_deferred=" not in text
+    assert "sync_elapsed_min=201.0" in text
 
 
 def test_max_codes_counts_work_not_list_prefix(tmp_path, monkeypatch):

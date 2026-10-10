@@ -1,6 +1,7 @@
 # Spec F：daily-trend 拆成 sync + metrics 两 job
 
-> 状态：草案  
+> 状态：已落地  
+
 > 日期：2026-10-08  
 > 依赖：  
 > - [`2026-09-30-ops-action-and-eval-design.md`](./2026-09-30-ops-action-and-eval-design.md)（`sync_complete` / Actions 骨架）  

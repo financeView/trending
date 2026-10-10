@@ -44,14 +44,14 @@
 - Modify: `scripts/sync_bars_sample.py`
 - Modify: `tests/test_sync_budget.py` (or add focused test file if none covers deferred)
 
-- [ ] **Step 1: Read current tests** for `write_sync_complete` / `run_deferred` / time budget
+- [x] **Step 1: Read current tests** for `write_sync_complete` / `run_deferred` / time budget
 
 ```bash
 .venv/bin/pytest tests/test_sync_budget.py tests/test_sync_from_universe.py -q --collect-only
 rg -n "run_deferred|write_sync_complete|time-budget" tests scripts/sync_bars_sample.py
 ```
 
-- [ ] **Step 2: Update / replace deferred assertions**
+- [x] **Step 2: Update / replace deferred assertions**
 
 **Must change** existing `tests/test_sync_budget.py::test_github_output_sync_complete` — today it **requires** `run_deferred=true` at `elapsed_min=201` (will FAIL the suite if left unchanged).
 
@@ -72,21 +72,21 @@ def test_github_output_sync_complete(tmp_path, monkeypatch):
 
 Optional extra: `assert text.count("sync_complete=true") >= 2`.
 
-- [ ] **Step 3: Run test — expect FAIL** on old code
+- [x] **Step 3: Run test — expect FAIL** on old code
 
 ```bash
 .venv/bin/pytest tests/test_sync_budget.py::test_github_output_sync_complete -q
 ```
 
-- [ ] **Step 4: Implement** — in `write_sync_complete`, remove deferred computation; **stop writing** `run_deferred` (preferred). Keep stdout log with `elapsed_min`.
+- [x] **Step 4: Implement** — in `write_sync_complete`, remove deferred computation; **stop writing** `run_deferred` (preferred). Keep stdout log with `elapsed_min`.
 
-- [ ] **Step 5: Run tests — expect PASS**
+- [x] **Step 5: Run tests — expect PASS**
 
 ```bash
 .venv/bin/pytest tests/test_sync_budget.py -q
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add scripts/sync_bars_sample.py tests/test_sync_budget.py
@@ -105,7 +105,7 @@ EOF
 - Modify: `.github/workflows/daily-trend.yml`
 - Modify: `tests/test_p2_workflow_order.py`
 
-- [ ] **Step 1: Rewrite failing workflow tests** first (TDD on static file)
+- [x] **Step 1: Rewrite failing workflow tests** first (TDD on static file)
 
 Replace `_GATE` / single-job assumptions with concrete asserts:
 
@@ -142,13 +142,13 @@ def test_metrics_ordered_daily_shadow_commit_issues():
 
 Keep: unit → taxonomy → sync order **inside sync job**; only_date shadow `--asof`; Issues `continue-on-error`.
 
-- [ ] **Step 2: Run tests — expect FAIL**
+- [x] **Step 2: Run tests — expect FAIL**
 
 ```bash
 .venv/bin/pytest tests/test_p2_workflow_order.py -q
 ```
 
-- [ ] **Step 3: Implement yml skeleton**
+- [x] **Step 3: Implement yml skeleton**
 
 Required shape (fill inputs/scripts from current file; do not invent new CLI flags):
 
@@ -200,7 +200,7 @@ Pin:
 - `concurrency` / `permissions` / `on:` unchanged.
 - metrics **git tip checkout** + **exact cache-hit gate** (Spec §4.3).
 
-- [ ] **Step 4: Incomplete warning** — after sync script, if output false, emit `::warning::` (bash read `steps.sync.outputs.sync_complete` or parse log). Prefer:
+- [x] **Step 4: Incomplete warning** — after sync script, if output false, emit `::warning::` (bash read `steps.sync.outputs.sync_complete` or parse log). Prefer:
 
 ```bash
 if [ "${{ steps.sync.outputs.sync_complete }}" != "true" ]; then
@@ -210,13 +210,13 @@ fi
 
 (as a trailing step in sync job, or inline after sync step)
 
-- [ ] **Step 5: Run workflow static tests — PASS**
+- [x] **Step 5: Run workflow static tests — PASS**
 
 ```bash
 .venv/bin/pytest tests/test_p2_workflow_order.py -q
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add .github/workflows/daily-trend.yml tests/test_p2_workflow_order.py
@@ -239,11 +239,11 @@ EOF
 - Modify: `todo.md` P3 `run_deferred` row → Spec F / 进行中 or 完成（实现后标完成）
 - Modify: Spec F header status → 已落地（仅在全部任务完成后）
 
-- [ ] **Step 1: README** — replace deferred sentence with two-job description + incomplete warning semantics
+- [x] **Step 1: README** — replace deferred sentence with two-job description + incomplete warning semantics
 
-- [ ] **Step 2: Cross-specs** — mark superseded deferred/budget lines; link Spec F
+- [x] **Step 2: Cross-specs** — mark superseded deferred/budget lines; link Spec F
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add README.md docs/superpowers/specs/todo.md 2>/dev/null
@@ -263,7 +263,7 @@ EOF
 
 ### Task 4: Smoke verification
 
-- [ ] **Step 1: Full related pytest**
+- [x] **Step 1: Full related pytest**
 
 ```bash
 .venv/bin/pytest tests/test_p2_workflow_order.py tests/test_sync_budget.py tests/test_sync_spec_e_passes.py tests/test_sync_from_universe.py -q
@@ -271,18 +271,18 @@ EOF
 
 - [ ] **Step 2: Manual Actions** (after push) — `workflow_dispatch` with `date` + `only_date` on a recent day; confirm metrics job **runs** even if sync wall time >200m (as long as complete). Confirm cache restore in metrics logs.
 
-- [ ] **Step 3: Mark Spec F status 已落地** + todo row; commit if not done in Task 3
+- [x] **Step 3: Mark Spec F status 已落地** + todo row; commit if not done in Task 3
 
 ---
 
 ## Done-when checklist
 
-- [ ] Two jobs; metrics needs sync; no `run_deferred` in yml  
-- [ ] Production sync omits time-budget truncation  
-- [ ] `write_sync_complete` does not emit deferred=true gate；`test_github_output_sync_complete` updated  
-- [ ] metrics checkout default-branch tip；exact `cache-hit` fail gate  
-- [ ] Static tests green（含双 cache key、metrics 步序）  
-- [ ] Docs/README/todo updated  
+- [x] Two jobs; metrics needs sync; no `run_deferred` in yml  
+- [x] Production sync omits time-budget truncation  
+- [x] `write_sync_complete` does not emit deferred=true gate；`test_github_output_sync_complete` updated  
+- [x] metrics checkout default-branch tip；exact `cache-hit` fail gate  
+- [x] Static tests green（含双 cache key、metrics 步序）  
+- [x] Docs/README/todo updated  
 - [ ] (Manual) long complete sync still starts metrics job；metrics log shows cache-hit true 
 
 ---

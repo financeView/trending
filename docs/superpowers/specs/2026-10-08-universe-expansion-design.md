@@ -89,7 +89,7 @@
 
 **多 commit：** 步骤 3 可能 push taxonomy 与/或 heartbeat；步骤 5 的 db commit **只** `git add data/trend.db data/heartbeat.json`，不得 restage taxonomy。步骤 3 已推而 4/5 失败 → 可接受。
 
-冷启动：票首次进 mapped U 时 sync 默认 `end−400` 自然日（≈盖 252 交易日）。预算仍走既有 `run_deferred`（200/300 min）；**本 slice 不另做摊销**。
+冷启动：票首次进 mapped U 时 sync 默认 `end−400` 自然日（≈盖 252 交易日）。~~预算仍走既有 `run_deferred`（200/300 min）~~ → **Spec F 废止 deferred / 生产 time-budget**；**本 slice 不另做摊销**。
 
 ### 2.2 `unmapped_count` 与 IPO 告警
 
@@ -111,7 +111,7 @@
 - 无 list_date：`data/unmapped_first_seen.json`（**路径钉死，不在 `data/cache/`**）存 `ts_code → first_asof`；`first_asof` **永远是首次观察时的 `session_asof`**（不是补洞 `D`）；天数 = `[first_asof, session_asof]` 含端。  
 - `ipo_unmapped_alert_count` = 仍落在 unmapped 且天数 ≥ 3 的个数。  
 - **不**使 `evaluate_ok` → partial。  
-- 计数与 first_seen 更新在 **步骤 3.f**（及 daily_run 共用 helper）；不得只放在 daily_run 以致 `run_deferred` 日永不推进 IPO 钟。
+- 计数与 first_seen 更新在 **步骤 3.f**（及 daily_run 共用 helper）；不得只放在 daily_run 以致 sync incomplete / metrics skipped 日永不推进 IPO 钟。
 
 **写入：**
 
