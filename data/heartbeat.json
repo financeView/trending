@@ -1,14 +1,14 @@
 {
   "daily_run": {
     "status": "ok",
-    "asof": "2024-01-10",
+    "asof": "2026-10-08",
     "days": [
-      "2024-01-10"
+      "2026-09-30"
     ],
     "statuses": [
       "ok"
     ],
-    "last_success": "2026-10-09T17:25:55"
+    "last_success": "2026-10-08T17:08:11"
   },
   "taxonomy": {
     "taxonomy_fetch": "fail",
@@ -18,7 +18,7 @@
     "yaml_quarantine_size": 67,
     "map_version": "sw2021-v1",
     "taxonomy_commit": "",
-    "updated_at": "2026-10-09T17:26:58Z"
+    "updated_at": "2026-10-08T14:26:36Z"
   },
-  "updated_at": "2026-10-09T17:25:55"
+  "updated_at": "2026-10-08T17:08:11"
 }
