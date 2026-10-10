@@ -131,6 +131,28 @@ def _count_members_hot_plus(
     return int(row[0] or 0)
 
 
+def _hot_plus_by_l2(
+    conn: sqlite3.Connection,
+    trade_date: str,
+    l2_codes: Sequence[str],
+) -> dict[str, int]:
+    """One GROUP BY for all L2 codes (avoid N+1 COUNTs in L2 scan)."""
+    if not l2_codes:
+        return {}
+    td = _td(trade_date)
+    qmarks = ",".join("?" * len(l2_codes))
+    rows = conn.execute(
+        """
+        SELECT sw_l2_code, COUNT(*) FROM daily_stock
+        WHERE trade_date=? AND sw_l2_code IN (%s) AND T IN ('热','沸')
+        GROUP BY sw_l2_code
+        """
+        % qmarks,
+        (td, *l2_codes),
+    ).fetchall()
+    return {str(r[0]): int(r[1] or 0) for r in rows}
+
+
 def _md_table(headers: Sequence[str], rows: Iterable[Sequence[Any]]) -> list[str]:
     lines = [
         "| " + " | ".join(headers) + " |",
@@ -220,6 +242,7 @@ def render_l1_issue(
     lines.append("")
 
     lines.append("## 行业（L2）扫描")
+    hot_plus_l2 = _hot_plus_by_l2(conn, td, [str(r[0]) for r in l2_rows])
     lines.extend(
         _md_table(
             [
@@ -245,8 +268,8 @@ def render_l1_issue(
                     _fmt_yn(r[5]),
                     r[7],
                     _fmt_yn(r[6]),
-                    r[8],
-                    _count_members_hot_plus(conn, td, sw_l2_code=str(r[0])),
+                    0 if r[8] is None else r[8],
+                    hot_plus_l2.get(str(r[0]), 0),
                     _fmt_amount_yi(r[9]),
                 )
                 for r in l2_rows

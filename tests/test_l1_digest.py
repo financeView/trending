@@ -172,6 +172,58 @@ def test_radar_t_uses_daily_l1_not_stock_max(tmp_path, monkeypatch):
     conn.close()
 
 
+def test_l2_warm_to_hot_member_count_null_renders_zero(tmp_path, monkeypatch):
+    """Spec §4.1: L2 今日成分温转热 NULL → 0 (same as L1)."""
+    monkeypatch.setenv("TREND_DB", str(tmp_path / "trend.db"))
+    conn = get_conn()
+    init_schema(conn)
+    td = "2024-02-02"
+    conn.execute(
+        """
+        INSERT INTO run_meta (
+          trade_date, status, param_version, map_version, git_sha,
+          bar_coverage, computable_coverage, limit_coverage_asof, tradable_count
+        ) VALUES (?,?,?,?,?,?,?,?,?)
+        """,
+        (td, "ok", "p05-v1", "p05-v1", "x", 1.0, 1.0, 1.0, 1),
+    )
+    upsert_daily_stock(
+        conn,
+        [
+            {
+                "trade_date": td,
+                "ts_code": "000001.SZ",
+                "sw_l2_code": "801780",
+                "l1_id": "l1_finance",
+                "T": "平",
+                "amount": 1.0,
+            }
+        ],
+    )
+    upsert_daily_l2(
+        conn,
+        [
+            {
+                "trade_date": td,
+                "code": "801780",
+                "T": "平",
+                "right_side": 0,
+                "tag_warm_to_hot": 0,
+                "warm_to_hot_member_count": None,
+                "amount": 1.0,
+            }
+        ],
+    )
+    conn.commit()
+    md = render_l1_issue(conn, td, "l1_finance", name_zh="金融")
+    l2_row = [ln for ln in md.splitlines() if "| 801780 |" in ln][0]
+    # 今日成分温转热 is third-from-last data cell before 成分热以上 / 成交额
+    cells = [c.strip() for c in l2_row.strip("|").split("|")]
+    # T 代码 名称 RS 量 在右侧 节气 今日温转热 今日成分温转热 成分热以上 成交额
+    assert cells[8] == "0"
+    conn.close()
+
+
 def test_member_hot_plus_excludes_warm(tmp_path, monkeypatch):
     monkeypatch.setenv("TREND_DB", str(tmp_path / "trend.db"))
     conn = get_conn()
