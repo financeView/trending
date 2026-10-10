@@ -1,0 +1,46 @@
+name: probe-data-sources
+
+# 诊断用（仅手动）: GitHub runner 到 taxonomy / bars 相关数据源的可达性。
+# 背景: refresh_taxonomy 常 fail（cand_mapped=0），疑申万 swsresearch XLS 海外不可达；
+# 东财 clist 同期 heartbeat 也 fail，需与 stock-analyse probe 对照。
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe endpoints
+        run: |
+          set +e
+          probe() {
+            label="$2"
+            url="$1"
+            shift 2
+            code=$(curl -sS -o /tmp/body -w "%{http_code}" --max-time 20 "$url" "$@" 2>/tmp/err)
+            curl_ec=$?
+            size=$(wc -c < /tmp/body 2>/dev/null || echo 0)
+            err=$(tr -d '\n' </tmp/err | head -c 160)
+            echo "[$label] http=$code bytes=$size curl_ec=$curl_ec"
+            if [ -n "$err" ]; then echo "  curl_err: $err"; fi
+            # magic / content sniff
+            file /tmp/body | sed 's|^|/tmp/body: |'
+            head -c 220 /tmp/body | tr -d '\n' | head -c 220; echo
+            echo "---"
+          }
+
+          echo "=== 申万 SW classify (taxonomy fetch_sw_members) ==="
+          probe "https://www.swsresearch.com/swindex/pdf/SwClass2021/StockClassifyUse_stock.xls" "swsresearch-xls"
+          probe "http://www.swsresearch.com/swindex/pdf/SwClass2021/StockClassifyUse_stock.xls" "swsresearch-xls-http"
+
+          echo "=== 东财 clist (em_client / name_zh / limits) ==="
+          EM_QS="pn=1&pz=3&po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fid=f6&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23&fields=f2,f6,f12,f14"
+          UA='User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
+          probe "https://push2delay.eastmoney.com/api/qt/clist/get?$EM_QS" "em-push2delay" -H "$UA"
+          probe "https://push2.eastmoney.com/api/qt/clist/get?$EM_QS" "em-push2" -H "$UA"
+          probe "https://82.push2.eastmoney.com/api/qt/clist/get?$EM_QS" "em-82-push2" -H "$UA"
+
+          echo "=== 对照：新浪 / 腾讯（bars 栈） ==="
+          probe "https://hq.sinajs.cn/list=sh600000" "sina-hq" -H "Referer: https://finance.sina.com.cn"
+          probe "https://qt.gtimg.cn/q=sh600000" "tencent-qt"
