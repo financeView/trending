@@ -123,10 +123,58 @@ def _symbol_to_ts(symbol: str) -> Optional[str]:
     return s + ".SZ"
 
 
-def fetch_latest_rows():
-    import akshare as ak
+# Same URL as akshare.stock_industry_clf_hist_sw (SwClass2021).
+_SW_CLASSIFY_XLS = (
+    "https://www.swsresearch.com/swindex/pdf/SwClass2021/StockClassifyUse_stock.xls"
+)
+_SW_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+)
 
-    df = ak.stock_industry_clf_hist_sw()
+
+def fetch_latest_rows():
+    """Download SW classify XLS → latest row per symbol.
+
+    GHA runners fail default TLS verify against swsresearch.com (missing issuer).
+    Scoped ``verify=False`` + size check; do not disable TLS globally.
+    """
+    import io
+    import warnings
+
+    import pandas as pd
+    import requests
+    from urllib3.exceptions import InsecureRequestWarning
+
+    warnings.filterwarnings("ignore", category=InsecureRequestWarning)
+    print(
+        "[fetch_sw] WARN: TLS verify=False for swsresearch XLS (GHA CA chain)",
+        flush=True,
+    )
+    r = requests.get(
+        _SW_CLASSIFY_XLS,
+        headers={"User-Agent": _SW_UA},
+        timeout=60,
+        verify=False,
+    )
+    r.raise_for_status()
+    content = r.content or b""
+    if len(content) < 10_000:
+        raise RuntimeError("swsresearch xls too small: %d bytes" % len(content))
+
+    df = pd.read_excel(
+        io.BytesIO(content),
+        dtype={"股票代码": "str", "行业代码": "str"},
+    )
+    df = df.rename(
+        columns={
+            "股票代码": "symbol",
+            "计入日期": "start_date",
+            "行业代码": "industry_code",
+            "更新日期": "update_time",
+        }
+    )
+    df["start_date"] = pd.to_datetime(df["start_date"], errors="coerce").dt.date
     df = df.sort_values("start_date")
     latest = df.groupby("symbol", as_index=False).tail(1)
     rows = []
