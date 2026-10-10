@@ -1,8 +1,7 @@
 name: probe-data-sources
 
 # 诊断用（仅手动）: GitHub runner 到 taxonomy / bars 相关数据源的可达性。
-# 背景: refresh_taxonomy 常 fail（cand_mapped=0）；申万 HTTPS 证书链在 GHA 失败。
-# 本次加 A/B：默认 DNS vs 强制国内 DNS（阿里 223.5.5.5 / 腾讯 119.29.29.29）。
+# 背景: 申万 HTTPS curl_ec=60（unable to get local issuer）；试 --cacert 补中间 CA。
 
 on:
   workflow_dispatch:
@@ -20,128 +19,124 @@ jobs:
       - name: Install deps (minimal for SW fetch)
         run: pip install -q 'requests>=2.32' 'pandas>=2.0' xlrd pyyaml
 
-      - name: Probe endpoints (default DNS then China DNS)
+      - name: Prepare CA materials (AIA intermediate + bundles)
+        run: |
+          set -e
+          mkdir -p /tmp/ca
+          UA='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
+
+          # Leaf AIA (from *.swsresearch.com cert): GeoTrust G2 TLS CN … CA1
+          AIA_CN="http://cacerts.digicert.cn/GeoTrustG2TLSCNRSA4096SHA2562022CA1.crt"
+          AIA_COM="http://cacerts.digicert.com/GeoTrustG2TLSCNRSA4096SHA2562022CA1.crt"
+
+          echo "=== download GeoTrust intermediate (AIA) ==="
+          if curl -fsSL --max-time 30 -A "$UA" -o /tmp/ca/geotrust.der "$AIA_CN"; then
+            echo "AIA digicert.cn OK bytes=$(wc -c </tmp/ca/geotrust.der)"
+          elif curl -fsSL --max-time 30 -A "$UA" -o /tmp/ca/geotrust.der "$AIA_COM"; then
+            echo "AIA digicert.com OK bytes=$(wc -c </tmp/ca/geotrust.der)"
+          else
+            echo "::error::failed to download GeoTrust intermediate"
+            exit 1
+          fi
+          openssl x509 -inform DER -in /tmp/ca/geotrust.der -out /tmp/ca/geotrust_int.pem
+          openssl x509 -in /tmp/ca/geotrust_int.pem -noout -subject -issuer
+
+          SYS_CA="/etc/ssl/certs/ca-certificates.crt"
+          test -f "$SYS_CA"
+          # Bundle: system roots + missing intermediate (proper --cacert target)
+          cat "$SYS_CA" /tmp/ca/geotrust_int.pem > /tmp/ca/system_plus_geotrust.pem
+          echo "system_plus_geotrust bytes=$(wc -c </tmp/ca/system_plus_geotrust.pem)"
+
+          echo "=== download Mozilla cacert.pem (curl.se) ==="
+          if curl -fsSL --max-time 45 -A "$UA" -o /tmp/ca/mozilla_cacert.pem https://curl.se/ca/cacert.pem; then
+            echo "mozilla_cacert bytes=$(wc -c </tmp/ca/mozilla_cacert.pem)"
+            # also mozilla + intermediate (in case mozilla also lacks this CN intermediate)
+            cat /tmp/ca/mozilla_cacert.pem /tmp/ca/geotrust_int.pem > /tmp/ca/mozilla_plus_geotrust.pem
+          else
+            echo "::warning::mozilla cacert.pem download failed"
+            : > /tmp/ca/mozilla_cacert.pem
+            : > /tmp/ca/mozilla_plus_geotrust.pem
+          fi
+
+          ls -la /tmp/ca/
+
+      - name: Probe SW with --cacert variants
         run: |
           set +e
+          UA='User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
+          SW_HTTPS="https://www.swsresearch.com/swindex/pdf/SwClass2021/StockClassifyUse_stock.xls"
 
           probe() {
-            label="$2"
-            url="$1"
-            shift 2
+            label="$1"
+            shift
             : > /tmp/body
-            code=$(curl -sS -o /tmp/body -w "%{http_code}" --max-time 25 -L "$url" "$@" 2>/tmp/err)
+            code=$(curl -sS -o /tmp/body -w "%{http_code}" --max-time 40 "$@" 2>/tmp/err)
             curl_ec=$?
             size=$(wc -c < /tmp/body 2>/dev/null || echo 0)
-            err=$(tr -d '\n' </tmp/err | head -c 200)
+            err=$(tr -d '\n' </tmp/err | head -c 240)
             echo "[$label] http=$code bytes=$size curl_ec=$curl_ec"
             if [ -n "$err" ]; then echo "  curl_err: $err"; fi
-            file /tmp/body | sed 's|^|/tmp/body: |'
-            head -c 220 /tmp/body | tr -d '\n' | head -c 220; echo
             echo "---"
           }
 
-          resolve_host() {
-            host="$1"
-            tag="$2"
-            echo "=== resolve $host ($tag) ==="
-            echo "-- /etc/resolv.conf --"
-            cat /etc/resolv.conf 2>/dev/null || true
-            if command -v resolvectl >/dev/null 2>&1; then
-              echo "-- resolvectl status (head) --"
-              resolvectl status 2>/dev/null | head -40 || true
-            fi
-            echo "-- getent ahosts --"
-            getent ahosts "$host" 2>&1 || true
-            echo "-- dig default --"
-            dig +time=3 +tries=1 "$host" A +short 2>&1 || true
-            echo "-- dig @223.5.5.5 --"
-            dig +time=3 +tries=1 @"223.5.5.5" "$host" A +short 2>&1 || true
-            echo "-- dig @119.29.29.29 --"
-            dig +time=3 +tries=1 @"119.29.29.29" "$host" A +short 2>&1 || true
-            echo "---"
-          }
+          echo "=== leaf peer cert (openssl) ==="
+          echo | openssl s_client -connect www.swsresearch.com:443 -servername www.swsresearch.com 2>&1 \
+            | grep -E 'depth=|verify error|Verify return|issuer=|subject=' | head -20
+          echo "---"
 
-          set_china_dns() {
-            echo "=== Set DNS to China (Ali 223.5.5.5 + Tencent 119.29.29.29) ==="
-            # Ubuntu runners often symlink resolv.conf → systemd-resolved stub.
-            # Prefer resolvectl on the default route iface; also overwrite resolv.conf.
-            if command -v resolvectl >/dev/null 2>&1; then
-              IFACE=$(ip -4 route show default 2>/dev/null | awk '{print $5; exit}')
-              echo "default iface=$IFACE"
-              if [ -n "$IFACE" ]; then
-                sudo resolvectl dns "$IFACE" 223.5.5.5 119.29.29.29 || true
-                sudo resolvectl domain "$IFACE" '~.' || true
-                sudo resolvectl flush-caches || true
-              fi
-            fi
-            # Break symlink if present, then write static resolv.conf
-            if [ -L /etc/resolv.conf ]; then
-              sudo rm -f /etc/resolv.conf
-            fi
-            printf 'nameserver 223.5.5.5\nnameserver 119.29.29.29\noptions timeout:2 attempts:2\n' \
-              | sudo tee /etc/resolv.conf
-            echo "-- after write --"
-            ls -la /etc/resolv.conf
-            cat /etc/resolv.conf
-            echo "---"
-          }
+          echo "=== curl --cacert matrix ==="
+          probe "default-verify" -H "$UA" "$SW_HTTPS"
+          probe "insecure-k" -k -H "$UA" "$SW_HTTPS"
+          # Intermediate alone is NOT enough (needs DigiCert Global Root G2 in trust path)
+          probe "cacert-geotrust-int-only" --cacert /tmp/ca/geotrust_int.pem -H "$UA" "$SW_HTTPS"
+          probe "cacert-system-plus-geotrust" --cacert /tmp/ca/system_plus_geotrust.pem -H "$UA" "$SW_HTTPS"
+          if [ -s /tmp/ca/mozilla_cacert.pem ]; then
+            probe "cacert-mozilla" --cacert /tmp/ca/mozilla_cacert.pem -H "$UA" "$SW_HTTPS"
+            probe "cacert-mozilla-plus-geotrust" --cacert /tmp/ca/mozilla_plus_geotrust.pem -H "$UA" "$SW_HTTPS"
+          fi
 
-          SW_HTTPS="https://www.swsresearch.com/swindex/pdf/SwClass2021/StockClassifyUse_stock.xls"
-          SW_HTTP="http://www.swsresearch.com/swindex/pdf/SwClass2021/StockClassifyUse_stock.xls"
-          UA='User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
-          HOST="www.swsresearch.com"
-
-          echo "######## PHASE A: default DNS ########"
-          resolve_host "$HOST" "default"
-          echo "=== 申万 SW classify (default DNS) ==="
-          probe "$SW_HTTPS" "A-swsresearch-https" -H "$UA"
-          probe "$SW_HTTPS" "A-swsresearch-https-insecure" -k -H "$UA"
-          probe "$SW_HTTP" "A-swsresearch-http" -H "$UA"
-          probe "$SW_HTTP" "A-swsresearch-http-follow-insecure" -k -L -H "$UA"
-          echo "=== 东财 / 新浪 (default DNS) ==="
+          echo "=== controls (default verify) ==="
           EM_QS="pn=1&pz=3&po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fid=f6&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23&fields=f2,f6,f12,f14"
-          probe "https://push2delay.eastmoney.com/api/qt/clist/get?$EM_QS" "A-em-push2delay" -H "$UA"
-          probe "https://hq.sinajs.cn/list=sh600000" "A-sina-hq" -H "Referer: https://finance.sina.com.cn"
+          probe "em-push2delay" -H "$UA" "https://push2delay.eastmoney.com/api/qt/clist/get?$EM_QS"
+          probe "sina-hq" -H "Referer: https://finance.sina.com.cn" "https://hq.sinajs.cn/list=sh600000"
 
-          set_china_dns
-
-          echo "######## PHASE B: China DNS ########"
-          resolve_host "$HOST" "china-dns"
-          echo "=== 申万 SW classify (China DNS) ==="
-          probe "$SW_HTTPS" "B-swsresearch-https" -H "$UA"
-          probe "$SW_HTTPS" "B-swsresearch-https-insecure" -k -H "$UA"
-          probe "$SW_HTTP" "B-swsresearch-http" -H "$UA"
-          probe "$SW_HTTP" "B-swsresearch-http-follow-insecure" -k -L -H "$UA"
-          echo "=== 东财 / 新浪 (China DNS) ==="
-          probe "https://push2delay.eastmoney.com/api/qt/clist/get?$EM_QS" "B-em-push2delay" -H "$UA"
-          probe "https://hq.sinajs.cn/list=sh600000" "B-sina-hq" -H "Referer: https://finance.sina.com.cn"
-
-      - name: Python fetch_latest_rows after China DNS
+      - name: Python requests verify=bundle vs verify=False
         continue-on-error: true
         run: |
-          # Ensure China DNS still in place for this step (job-local).
-          if [ -L /etc/resolv.conf ]; then sudo rm -f /etc/resolv.conf; fi
-          printf 'nameserver 223.5.5.5\nnameserver 119.29.29.29\n' | sudo tee /etc/resolv.conf
-          if command -v resolvectl >/dev/null 2>&1; then
-            IFACE=$(ip -4 route show default 2>/dev/null | awk '{print $5; exit}')
-            if [ -n "$IFACE" ]; then
-              sudo resolvectl dns "$IFACE" 223.5.5.5 119.29.29.29 || true
-              sudo resolvectl flush-caches || true
-            fi
-          fi
-          echo "resolv.conf:"; cat /etc/resolv.conf
-          echo "getent:"; getent ahosts www.swsresearch.com || true
           python - <<'PY'
           import traceback
+          import warnings
+          import requests
+          from urllib3.exceptions import InsecureRequestWarning
+
+          URL = "https://www.swsresearch.com/swindex/pdf/SwClass2021/StockClassifyUse_stock.xls"
+          UA = (
+              "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+          )
+          headers = {"User-Agent": UA}
+
+          def try_get(label, **kw):
+              try:
+                  r = requests.get(URL, headers=headers, timeout=40, **kw)
+                  print("[%s] status=%s bytes=%d" % (label, r.status_code, len(r.content or b"")))
+              except Exception as e:
+                  print("[%s] FAIL: %s: %s" % (label, type(e).__name__, e))
+
+          try_get("py-default-verify", verify=True)
+          warnings.filterwarnings("ignore", category=InsecureRequestWarning)
+          try_get("py-verify-False", verify=False)
+          try_get("py-verify-system-plus-geotrust", verify="/tmp/ca/system_plus_geotrust.pem")
+          try_get("py-verify-geotrust-int-only", verify="/tmp/ca/geotrust_int.pem")
+          if open("/tmp/ca/mozilla_plus_geotrust.pem", "rb").read(1):
+              try_get("py-verify-mozilla-plus-geotrust", verify="/tmp/ca/mozilla_plus_geotrust.pem")
+
+          # Full fetch_latest_rows still uses verify=False in code; probe path only.
           try:
               from scripts.taxonomy.fetch_sw_members import fetch_latest_rows
               rows = fetch_latest_rows()
-              print("[probe-py] rows=%d sample=%s" % (len(rows), rows[:2]))
-              if len(rows) < 1000:
-                  raise SystemExit("fetch_latest_rows too small: %d" % len(rows))
-              print("[probe-py] OK")
-          except Exception as e:
+              print("[probe-py-fetch_latest_rows] rows=%d OK" % len(rows))
+          except Exception:
               traceback.print_exc()
-              print("[probe-py] FAIL: %r" % (e,))
-              raise
+              print("[probe-py-fetch_latest_rows] FAIL")
           PY
