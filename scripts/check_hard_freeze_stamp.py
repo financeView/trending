@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import sys
 
 from scripts.common.hard_freeze import check_hard_freeze_stamp
 
