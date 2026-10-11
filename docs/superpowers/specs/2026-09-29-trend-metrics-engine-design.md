@@ -24,7 +24,7 @@
 | 相对强度 0–100 | 选筹 / 置换 |
 | 右侧状态 + 天数 | 生命周期 |
 | 节气（仅右侧） | 右侧前/后段偏好，**非**进场开关 |
-| 止盈辅助标签 | 默认关闭；分仓 / 应急 |
+| 止盈辅助标签 | 默认开；只展示；L1 空；分仓 / 应急语义后放 |
 
 非目标：预测下一节气、复刻黑盒、多标签主题情绪、盘中分钟级温度。
 
@@ -40,7 +40,7 @@
     │                                    └─► 节气
     ├─► 强度引擎 ──► RS（按实体类 peer 宇宙分位）
     │
-    └─► 止盈标签（feature flag，默认关）
+    └─► 止盈标签（feature flag，默认开；只展示）
 ```
 
 ### 2.1 硬约束
@@ -628,7 +628,7 @@ RS = round(100 * percentile_rank(RS_raw among peer_universe))  # 0–100 整数
 
 雷达：`radar_level=stock|l2`；统计温转热个数、右侧占比。
 
-## 11. 止盈辅助标签（默认关闭）
+## 11. 止盈辅助标签（默认开；只展示）
 
 | 标签 | 定义（flag 打开后才生效） | 稀疏度 |
 |------|---------------------------|--------|
@@ -638,9 +638,9 @@ RS = round(100 * percentile_rank(RS_raw among peer_universe))  # 0–100 整数
 
 **规范：危险信号 / 开香槟 / 波动率放大 均不修改 `R`、天数或节气。** 策略层可据此减仓，而指标层右侧状态仍只由 \(T_{fsm}\) 驱动。
 
-`tag_rate_cap` 初值 0.02（标的·日）。未达定义前保持 flag 关。
+`tag_rate_cap` 初值 0.02（标的·日）。超阈 stderr WARN，不改 tags。
 
-> **修订注（2026-10-11，exit-tags slice）：** 实现与验收见专文 [`2026-10-11-exit-tags-design.md`](2026-10-11-exit-tags-design.md)。本 slice **只展示**（不改 fill / paper）；**L1 恒 `tags=[]`**；**L2 `danger` 后放**（由同 PR 姊妹篮子 VOL Spec 在合成序列具备可靠 Σamount 后启用）。**默认开旗**与 yaml `param_version` bump 与同 PR 姊妹 Spec 一并收口（非本 slice 单独 flip）；§13 配置表仍记 `exit_tags_enabled: false` 直至同 PR 篮子 VOL Task 4 终值。
+> **修订注（2026-10-11，exit-tags + basket VOL）：** 实现与验收见 [`2026-10-11-exit-tags-design.md`](2026-10-11-exit-tags-design.md) / [`2026-10-11-basket-vol-score-design.md`](2026-10-11-basket-vol-score-design.md)。**只展示**（不改 fill / paper）；**L1 恒 `tags=[]`**；个股三标签全开；**L2 `danger` 在合成 Σamount 脊可用时启用**（`enable_l2_danger=True`）。yaml：`exit_tags_enabled: true`，`param_version=p05-v5`。
 
 ## 12. 输出契约
 
@@ -718,7 +718,7 @@ filters_meta                # 复权、资格过滤摘要
 | `danger_ret_pctile` | 0.05 | flag |
 | `danger_amt_pctile` | 0.95 | flag |
 | `tag_rate_cap` | 0.02 | flag |
-| `exit_tags_enabled` | false | |
+| `exit_tags_enabled` | true | p05-v5；只展示 |
 
 配置文件：`config/metrics/a_share_daily.yaml` + `fixtures/temp_raw_gold.csv`。
 
@@ -766,7 +766,7 @@ filters_meta                # 复权、资格过滤摘要
 | V3 | 节气事后标签 / 高 d 低 g 伪大暑 | 保持 C3；盯 K5；必要时降 w_d 或 g 地板 |
 | V4 | 市值 vs 等权 | A/B 雷达 |
 | V5 | 自然日假期膨胀 | UI 双展示；节气用交易日 |
-| V6 | 止盈过拟合 | 默认关 + 稀疏度 |
+| V6 | 止盈过拟合 | 只展示 + 稀疏度 WARN；减仓语义后放 |
 | V7 | 多资产 | 分域参数 |
 | V8 | 自动加大滞回 | v1.1 策略，非 MVP |
 
@@ -799,3 +799,4 @@ filters_meta                # 复权、资格过滤摘要
 | 2026-10-01 | 跨 spec 对齐：§6.0 事件枚举；`hard_frozen`=ST/显式旗且结束右侧；软冻≠硬冻；伪代码 emit `ENTER`/`EXIT`/`WARM_TO_HOT` |
 | 2026-10-01 | §6.0：每标的×日×event ≤1 **active**（`superseded_by` 允许多历史行） |
 | 2026-10-07 | Spec C T0：§5.4 Spearman 临时豁免；§9.1 `percentile_rank` 闭合式；§13 `vol_score_min_samples` |
+| 2026-10-11 | P1 终局：§11/§13 与 `p05-v5` 对齐——默认开、只展示、L2 danger 可用；删「默认关 / 后放」双源 |
