@@ -156,3 +156,56 @@ def test_incomplete_sot_rejects_fill(tmp_path, monkeypatch):
     _plant_sot(tmp_path, monkeypatch, session_asof="2024-01-08", sync_complete=False)
     db, bars = _would_fill_fixture(tmp_path, monkeypatch)
     assert run_asof("2024-01-08", db_path=str(db), bars_path=str(bars)) == 1
+
+
+def test_from_heartbeat_keeps_earlier_gate_fail(tmp_path, monkeypatch):
+    """Later soft-skip (0) must not mask an earlier sync_authority fail (1)."""
+    from scripts.eval.live_shadow_step import main
+
+    monkeypatch.setattr(
+        "scripts.common.sync_status.DEFAULT_SYNC_STATUS_PATH",
+        str(tmp_path / "missing_sync_status.json"),
+    )
+    load_trade_dates_from_list(["2024-01-05", "2024-01-08", "2024-01-09"])
+    db = tmp_path / "trend.db"
+    bars = tmp_path / "bars.db"
+    hb = tmp_path / "heartbeat.json"
+    hb.write_text(
+        json.dumps(
+            {
+                "status": "ok",
+                "days": ["2024-01-08", "2024-01-09"],
+                "asof": "2024-01-09",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TREND_DB", str(db))
+    conn = get_conn()
+    init_schema(conn)
+    for day in ("2024-01-05", "2024-01-08", "2024-01-09"):
+        _meta(conn, day)
+    _event(conn, "2024-01-05", "000001.SZ", "ENTER_RIGHT", eid=1)
+    # D2 has a pending name but no bars → missing_bars soft-skip 0
+    _event(conn, "2024-01-08", "000002.SZ", "ENTER_RIGHT", eid=2)
+    conn.commit()
+    conn.close()
+    bconn = bars_conn(str(bars))
+    _bar_row(bconn, "000001.SZ", "2024-01-08")
+    bconn.commit()
+    bconn.close()
+
+    assert run_asof("2024-01-08", db_path=str(db), bars_path=str(bars)) == 1
+    assert run_asof("2024-01-09", db_path=str(db), bars_path=str(bars)) == 0
+    rc = main(
+        [
+            "--from-heartbeat",
+            "--db",
+            str(db),
+            "--bars-db",
+            str(bars),
+            "--heartbeat",
+            str(hb),
+        ]
+    )
+    assert rc == 1

@@ -229,12 +229,14 @@ def main(argv=None) -> int:
             return 0
         rc = 0
         for d in dates:
-            rc = run_asof(
+            day_rc = run_asof(
                 d,
                 dry_run=args.dry_run,
                 db_path=args.db or None,
                 bars_path=args.bars_db or None,
             )
+            if day_rc:
+                rc = day_rc
         return rc
     asof = args.asof
     if asof == "today":
