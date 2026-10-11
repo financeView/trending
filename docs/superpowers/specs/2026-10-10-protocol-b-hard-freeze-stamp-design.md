@@ -3,7 +3,7 @@
 **日期：** 2026-10-10  
 **状态：** 已落地；plan [`2026-10-10-protocol-b-hard-freeze-stamp.md`](../plans/2026-10-10-protocol-b-hard-freeze-stamp.md)  
 **范围：** `todo.md` P0 **Protocol B**——改 `hard_freeze_min_suspend_days` / bump `param_version` 与 `bars.hard_freeze_flag` 脱节时的运维护栏。  
-**后放（禁止混入本 slice）：** `limit_rule` 回退护栏；incomplete + asof 限价产品抉择；metrics 侧自动补跑硬冻 pass；按日审计流水；改硬冻算法 / 默认 N。
+**后放（禁止混入本 slice）：** ~~`limit_rule` 回退护栏~~ → [`2026-10-11-limit-rule-rollback-guard-design.md`](2026-10-11-limit-rule-rollback-guard-design.md)；~~incomplete + asof 限价产品抉择~~ → [`2026-10-11-incomplete-asof-authority-design.md`](2026-10-11-incomplete-asof-authority-design.md)；metrics 侧自动补跑硬冻 pass；按日审计流水；改硬冻算法 / 默认 N。
 
 交叉：Spec E [`2026-10-08-spec-e-fill-hard-freeze-design.md`](2026-10-08-spec-e-fill-hard-freeze-design.md) §2.1 / §4.3.1 · Spec F [`2026-10-08-workflow-split-jobs-design.md`](2026-10-08-workflow-split-jobs-design.md) · 待办 [`todo.md`](../../../todo.md) P0 Protocol B
 
@@ -42,7 +42,7 @@ Spec E 将硬冻定为 **persist + 读列**：`hard_freeze_flag` 由 sync 全量
 
 - 不改 `apply_hard_freeze_flags` 的 streak / N 语义。  
 - 不新建按日增长的审计表。  
-- 不在本 slice 做 P0 另外两项（`limit_rule` 回退、incomplete×asof 限价）。  
+- ~~不在本 slice 做 P0 另外两项（`limit_rule` 回退、incomplete×asof 限价）。~~ → 已另开 Spec（见文首后放划掉项）。  
 - 不把「无戳」在绿场首次部署时永久卡死——见 §4.3 迁移。  
 - **不**给 `paper_book` / 离线评估入口加戳门闩（本 slice 仅 `daily_run` + 可选 CLI；纸面若跳过 `daily_run` 仍可能读旧旗——接受，写入 runbook「评估前须先绿 `daily_run`」）。  
 - **不**用戳代替「改 N 必须 bump `param_version`」的 runbook；戳只证明「旗已按戳上的 N/版本重写过」。
@@ -280,6 +280,7 @@ yaml 的 N/`param_version` 与库内戳不一致或无戳 → 不要宣称新版
 | 2026-10-10 | 初版：单行戳；sync pass 硬失败；daily_run 戳校验；档 1 不强行 metrics 自动 pass |
 | 2026-10-10 | CR 核查并修：覆盖 Spec E §2.1；cache B；写戳/空 codes/`sync_complete` 顺序；yaml 同源；`main` 挂点；paper_book 非目标；incomplete 仍写戳 |
 | 2026-10-10 | 二次 CR 核查并修：§4.5 钉 restore/save、禁 save-always/run_attempt；Re-run→新 run；§5.12–13；skip 后挂点；空宇宙操作化；E N 加载同源 |
+| 2026-10-11 | 后放两项划掉：链 limit_rule 回退 Spec / incomplete×asof 权威 Spec |
 
 ---
 

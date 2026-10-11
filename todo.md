@@ -20,8 +20,8 @@
 | 项 | 现状 | 要做什么 |
 |----|------|----------|
 | **Protocol B** | **已落地**（戳 + sync/`daily_run` 强卡控；Actions cache B） | Spec [`2026-10-10-protocol-b-hard-freeze-stamp-design.md`](docs/superpowers/specs/2026-10-10-protocol-b-hard-freeze-stamp-design.md) · plan [`2026-10-10-protocol-b-hard-freeze-stamp.md`](docs/superpowers/plans/2026-10-10-protocol-b-hard-freeze-stamp.md) · runbook [`hard-freeze-stamp-runbook.md`](docs/ops/hard-freeze-stamp-runbook.md) |
-| **`limit_rule` 回退** | 切回 `vendor_fields` 只停写，旧 `limit_source=board_calc_v1` 仍被 fill 读 | 文档 + 清库脚本，或 fill/summary 在 YAML 与 `limit_source` 不一致时告警 |
-| **incomplete + asof 限价** | `sync_complete=false` 时跳过 `--with-limits`，board_calc 又不补 asof | 产品抉择：是否把 asof 东财限价与 OHLC 预算解耦；未解耦前勿把 partial 当日影子成交当权威 |
+| **`limit_rule` 回退** | Spec 已写（强卡控；不清库） | 待 plan/实现：`vendor_fields` ∧ 库内仍有 `board_calc_v1` 限价 → fill/影子非零 · [`2026-10-11-limit-rule-rollback-guard-design.md`](docs/superpowers/specs/2026-10-11-limit-rule-rollback-guard-design.md) |
+| **incomplete + asof 限价** | Spec 已写（不拆耦；本地 SoT + 强卡控） | 待 plan/实现：`sync_status.json`；incomplete 非权威；fill/影子门闩；拆耦后放 · [`2026-10-11-incomplete-asof-authority-design.md`](docs/superpowers/specs/2026-10-11-incomplete-asof-authority-design.md) |
 
 ---
 
