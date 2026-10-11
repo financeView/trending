@@ -22,6 +22,7 @@ from scripts.common.db import (
     insert_paper_fills,
     paper_fill_keys_on_date,
 )
+from scripts.common.sync_status import check_sync_complete_for_fill
 from scripts.eval.costs import load_costs
 from scripts.eval.fill_day import fill_day
 from scripts.eval.shadow_store import load_shadow_book, save_shadow_book
@@ -167,6 +168,9 @@ def run_asof(
         print("[shadow] skip live_shadow (missing_bars) asof=%s" % T)
         conn.close()
         return 0
+    if check_sync_complete_for_fill(fill_asof=T) != 0:
+        conn.close()
+        return 1
     ver_day = confirm or T
     ver = conn.execute(
         "SELECT param_version, map_version FROM run_meta WHERE trade_date=?",

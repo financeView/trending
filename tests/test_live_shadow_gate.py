@@ -3,7 +3,18 @@ import json
 from scripts.common.bars import bars_conn
 from scripts.common.calendar import load_trade_dates_from_list
 from scripts.common.db import consumed_signal_sides, get_conn, init_schema
+from scripts.common.sync_status import write_sync_status
 from scripts.eval.live_shadow_step import live_allowed, main, run_asof
+
+
+def _plant_sync_authority(tmp_path, monkeypatch, session_asof: str):
+    """Authorize fill paths without TRENDING_ALLOW_INCOMPLETE_FILL."""
+    p = tmp_path / "sync_status.json"
+    monkeypatch.setattr(
+        "scripts.common.sync_status.DEFAULT_SYNC_STATUS_PATH", str(p)
+    )
+    write_sync_status(sync_complete=True, session_asof=session_asof, path=p)
+    return p
 
 
 def _meta(conn, day, status="ok", param="p-T", mmap="m-T"):
@@ -124,6 +135,7 @@ def test_live_skips_missing_bars_does_not_consume(tmp_path, monkeypatch):
 
 
 def test_param_version_copied_from_confirm_day(tmp_path, monkeypatch):
+    _plant_sync_authority(tmp_path, monkeypatch, "2024-01-08")
     load_trade_dates_from_list(["2024-01-05", "2024-01-08"])
     db = tmp_path / "trend.db"
     bars = tmp_path / "bars.db"
@@ -147,6 +159,7 @@ def test_param_version_copied_from_confirm_day(tmp_path, monkeypatch):
 
 
 def test_second_asof_does_not_duplicate_consumed(tmp_path, monkeypatch):
+    _plant_sync_authority(tmp_path, monkeypatch, "2024-01-08")
     load_trade_dates_from_list(["2024-01-05", "2024-01-08"])
     db = tmp_path / "trend.db"
     bars = tmp_path / "bars.db"
@@ -171,6 +184,7 @@ def test_second_asof_does_not_duplicate_consumed(tmp_path, monkeypatch):
 
 
 def test_from_heartbeat_walks_all_ok_days(tmp_path, monkeypatch):
+    _plant_sync_authority(tmp_path, monkeypatch, "2024-01-09")
     load_trade_dates_from_list(["2024-01-05", "2024-01-08", "2024-01-09"])
     db = tmp_path / "trend.db"
     bars = tmp_path / "bars.db"
@@ -215,6 +229,7 @@ def test_from_heartbeat_walks_all_ok_days(tmp_path, monkeypatch):
 
 
 def test_catchup_day_without_limits_does_not_data_gap_consume(tmp_path, monkeypatch):
+    _plant_sync_authority(tmp_path, monkeypatch, "2024-01-09")
     load_trade_dates_from_list(["2024-01-05", "2024-01-08", "2024-01-09"])
     db = tmp_path / "trend.db"
     bars = tmp_path / "bars.db"
@@ -251,6 +266,7 @@ def test_same_asof_pending_sell_does_not_fill_while_skipping_insert(tmp_path, mo
     from scripts.eval.costs import load_costs
     from scripts.eval.shadow_store import load_shadow_book
 
+    _plant_sync_authority(tmp_path, monkeypatch, "2024-01-09")
     load_trade_dates_from_list(["2024-01-05", "2024-01-08", "2024-01-09"])
     db = tmp_path / "trend.db"
     bars = tmp_path / "bars.db"
