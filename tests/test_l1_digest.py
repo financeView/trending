@@ -128,7 +128,7 @@ L1_SELF_HEADER = (
     "今日成分温转热 | 成分热以上 | 成交额(亿) |"
 )
 L2_HEADER = (
-    "| T | 代码 | 名称 | RS | 量 | 在右侧 | 节气 | 今日温转热 | "
+    "| T | 代码 | 名称 | RS | 量 | 止盈 | 在右侧 | 节气 | 今日温转热 | "
     "今日成分温转热 | 成分热以上 | 成交额(亿) |"
 )
 RADAR_L1_HEADER = (
@@ -219,8 +219,8 @@ def test_l2_warm_to_hot_member_count_null_renders_zero(tmp_path, monkeypatch):
     l2_row = [ln for ln in md.splitlines() if "| 801780 |" in ln][0]
     # 今日成分温转热 is third-from-last data cell before 成分热以上 / 成交额
     cells = [c.strip() for c in l2_row.strip("|").split("|")]
-    # T 代码 名称 RS 量 在右侧 节气 今日温转热 今日成分温转热 成分热以上 成交额
-    assert cells[8] == "0"
+    # T 代码 名称 RS 量 止盈 在右侧 节气 今日温转热 今日成分温转热 成分热以上 成交额
+    assert cells[9] == "0"
     conn.close()
 
 

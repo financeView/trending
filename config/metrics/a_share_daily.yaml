@@ -1,4 +1,4 @@
-param_version: p05-v3
+param_version: p05-v5
 hard_freeze_min_suspend_days: 20
 price_adjust: qfq
 ma_fast: 20
@@ -56,4 +56,10 @@ knots_v:
   - [0.75, 0.5]
   - [0.9, 0.8]
   - [1.0, 1.0]
-exit_tags_enabled: false
+vol_expand_pctile: 0.90
+champ_k: 3
+champ_excess: 0.05
+danger_ret_pctile: 0.05
+danger_amt_pctile: 0.95
+tag_rate_cap: 0.02
+exit_tags_enabled: true

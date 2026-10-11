@@ -75,7 +75,8 @@ def synthesize_basket_bars(
 ) -> list[dict]:
     """Return OHLC records for replay_from_ohlc (skipped days omitted).
 
-    Each record: trade_date, close_qfq, high_qfq, low_qfq, is_st=0, is_suspended=0.
+    Each record: trade_date, close_qfq, high_qfq, low_qfq, is_st=0, is_suspended=0,
+    plus paired Σ amount/float_mv over r_members (Spec §3.1) or null when none.
     Prev day = previous element in injected trade_dates (full calendar).
     """
     bars = _index_bars(member_bars_by_ts)
@@ -159,16 +160,34 @@ def synthesize_basket_bars(
         if not (_finite_pos(low_t) and _finite_pos(p_t) and _finite_pos(high_t)):
             continue
 
-        out.append(
-            {
-                "trade_date": t_iso,
-                "close_qfq": p_t,
-                "high_qfq": high_t,
-                "low_qfq": low_t,
-                "is_st": 0,
-                "is_suspended": 0,
-            }
-        )
+        sum_amount = 0.0
+        sum_float_mv = 0.0
+        paired = False
+        for ts in r_members:
+            row = bars[(ts, t_iso)]
+            amt = row.get("amount")
+            mv = row.get("float_mv")
+            if _finite(amt) and _finite_pos(mv):
+                sum_amount += float(amt)
+                sum_float_mv += float(mv)
+                paired = True
+
+        rec: dict = {
+            "trade_date": t_iso,
+            "close_qfq": p_t,
+            "high_qfq": high_t,
+            "low_qfq": low_t,
+            "is_st": 0,
+            "is_suspended": 0,
+        }
+        if paired and sum_float_mv > 0 and _finite(sum_amount):
+            rec["amount"] = sum_amount
+            rec["float_mv"] = sum_float_mv
+        else:
+            rec["amount"] = None
+            rec["float_mv"] = None
+
+        out.append(rec)
         p_prev = p_t
 
     return out
