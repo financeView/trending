@@ -51,6 +51,7 @@ from scripts.metrics.aggregate import (
     stub_l1_members,
     taxonomy_for_stock,
 )
+from scripts.metrics.exit_tags import assign_exit_tags, tags_to_sql
 from scripts.metrics.l2_synth import synthesize_basket_bars
 from scripts.metrics.params import MetricsParams, load_params
 from scripts.metrics.peer_rs import (
@@ -60,6 +61,8 @@ from scripts.metrics.peer_rs import (
 )
 from scripts.metrics.pipeline import replay_from_ohlc
 from scripts.metrics.vol_score import compute_vol_scores, turnover_from_bar
+
+_EPHEMERAL_DAILY_KEYS = ("_sigma_pctile", "_is_suspended", "RS_raw")
 
 _METRICS_YAML = os.path.join(_ROOT, "config", "metrics", "a_share_daily.yaml")
 _FIRST_SEEN_PATH = os.path.join(_ROOT, "data", "unmapped_first_seen.json")
@@ -369,6 +372,7 @@ def _snap_to_daily_stock(ts_code: str, snap: dict) -> dict:
         "float_mv": _sql_float(snap.get("float_mv")),
         "stage_score": _sql_float(snap.get("stage_score")),
         "stage_score_raw": _sql_float(snap.get("stage_score_raw")),
+        "_sigma_pctile": _sql_float(snap.get("sigma_pctile")),
     }
 
 
@@ -406,6 +410,7 @@ def _basket_asof_row(
         solar = None
         s_temp = None
         rs_raw = None
+        sigma_pctile = None
     else:
         t = snap.get("T")
         right_side = int(bool(snap.get("R")))
@@ -414,13 +419,14 @@ def _basket_asof_row(
         solar = snap.get("solar_term")
         s_temp = _sql_float(snap.get("S_temp"))
         rs_raw = snap.get("RS_raw")
+        sigma_pctile = _sql_float(snap.get("sigma_pctile"))
     return {
         "trade_date": trade_date,
         "code": code,
         "T": t,
         "S_temp": s_temp,
         "RS": None,  # filled by peer pass
-        "RS_raw": rs_raw,  # ephemeral; stripped by upsert COLS
+        "RS_raw": rs_raw,  # ephemeral; stripped before upsert
         "right_side": right_side,
         "tag_warm_to_hot": tag_hot,
         "tag_warm_to_flat": tag_flat,
@@ -430,6 +436,7 @@ def _basket_asof_row(
         "warm_to_hot_member_count": warm_count,
         "amount": amount_sum if any_amount else None,
         "VOL_score": None,  # baskets always null this slice (Spec C §2.3)
+        "_sigma_pctile": sigma_pctile,
     }
 
 
@@ -510,11 +517,13 @@ def replay_metrics_cross_section(
         dates = _l2_trade_dates(bar_cache, D)
 
         l2_rows: list[dict] = []
+        l2_synth_by_code: dict[str, list[dict]] = {}
         for code, members in mapping.items():
             if not members:
                 continue
             member_bars = {ts: bar_cache[ts] for ts in members if bar_cache.get(ts)}
             synth = synthesize_basket_bars(member_bars, trade_dates=dates)
+            l2_synth_by_code[code] = synth
             snap = None
             if synth:
                 snaps = replay_from_ohlc(params, synth, min_history=min_hist)
@@ -617,6 +626,18 @@ def replay_metrics_cross_section(
             r["param_version"] = pv
             r["VOL_score"] = None
 
+        assign_exit_tags(
+            stock_rows,
+            l2_rows,
+            l1_rows,
+            params=params,
+            bar_cache=bar_cache,
+            l2_synth_by_code=l2_synth_by_code,
+            quarantine=qua,
+            trade_date=td,
+            enable_l2_danger=False,
+        )
+
         rs_by_ts = {r["ts_code"]: r.get("RS") for r in stock_rows}
         for ev in events:
             ev["RS"] = rs_by_ts.get(ev["ts_code"])
@@ -624,6 +645,16 @@ def replay_metrics_cross_section(
         return stock_rows, l2_rows, l1_rows, events
     finally:
         bconn.close()
+
+
+def _finalize_rows_for_upsert(rows: Sequence[dict]) -> None:
+    """Serialize tags JSON and strip ephemeral keys before daily_* upsert."""
+    for r in rows:
+        tags = r.get("tags")
+        if tags is not None and not isinstance(tags, str):
+            r["tags"] = tags_to_sql(tags)
+        for k in _EPHEMERAL_DAILY_KEYS:
+            r.pop(k, None)
 
 
 def process_day(
@@ -646,6 +677,9 @@ def process_day(
     stock_rows, l2_rows, l1_rows, events = replay_metrics_cross_section(
         D, bars_path=bars_path, params=params, universe=universe
     )
+    _finalize_rows_for_upsert(stock_rows)
+    _finalize_rows_for_upsert(l2_rows)
+    _finalize_rows_for_upsert(l1_rows)
     if stock_rows:
         upsert_daily_stock(conn, stock_rows, commit=False)
     if l2_rows:

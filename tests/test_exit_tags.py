@@ -1,6 +1,7 @@
 """Exit-tag params load (Task 0) and later assign/digest tests."""
 from __future__ import annotations
 
+import json
 import math
 from copy import deepcopy
 from dataclasses import replace
@@ -545,3 +546,101 @@ def test_tag_rate_warn(capsys):
     assert "stock" in err
     assert ASOF in err
     assert "0.02" in err or "2%" in err
+
+
+# --- Task 4: daily_run wire ---
+
+
+def _stub_mini_taxonomy(monkeypatch):
+    monkeypatch.setattr(
+        "scripts.daily_run.taxonomy_for_stock",
+        lambda ts, **kw: ("370100", "l1_test"),
+    )
+    monkeypatch.setattr(
+        "scripts.metrics.aggregate.taxonomy_for_stock",
+        lambda ts, **kw: ("370100", "l1_test"),
+    )
+    for mod in (
+        "scripts.common.universe.l2_members_map",
+        "scripts.daily_run.l2_members_map",
+        "scripts.metrics.aggregate.l2_members_map",
+    ):
+        monkeypatch.setattr(mod, lambda: {"370100": ["000001.SZ"]})
+    monkeypatch.setattr(
+        "scripts.metrics.aggregate.l1_to_l2_map",
+        lambda: {"l1_test": ["370100"]},
+    )
+    monkeypatch.setattr(
+        "scripts.common.universe.l1_to_l2_map",
+        lambda: {"l1_test": ["370100"]},
+    )
+
+
+def test_exit_tags_wire_replay_and_db(tmp_path, monkeypatch):
+    """Flag on via monkeypatch: stock tags JSON in DB; L2 no danger; L1 []."""
+    from scripts.common.bars import bars_conn
+    from scripts.common.db import get_conn, init_schema
+    from scripts.daily_run import process_day, replay_metrics_cross_section
+    from tests.test_daily_run_metrics_wire import (
+        SHORT_N,
+        _seed_uptrend,
+        _short_params,
+        _universe_yaml,
+        _weekdays_ending,
+    )
+
+    params = replace(_short_params(), exit_tags_enabled=True)
+    monkeypatch.setenv("TREND_DB", str(tmp_path / "trend.db"))
+    monkeypatch.setenv("UNIVERSE_YAML", str(_universe_yaml(tmp_path, ["000001.SZ"])))
+    monkeypatch.setattr("scripts.daily_run.load_metrics_params", lambda: params)
+    monkeypatch.setattr("scripts.common.coverage.DEFAULT_MIN_HISTORY", SHORT_N)
+    _stub_mini_taxonomy(monkeypatch)
+
+    D = date(2024, 1, 10)
+    dates = _weekdays_ending(D, SHORT_N + 8)
+    monkeypatch.setattr(
+        "scripts.daily_run.cal.trading_days_inclusive",
+        lambda start, end: [d for d in dates if start <= d <= end],
+    )
+    bars_path = str(tmp_path / "bars.db")
+    bconn = bars_conn(bars_path)
+    _seed_uptrend(bconn, "000001.SZ", dates, start_px=10.0)
+    bconn.close()
+
+    stock_rows, l2_rows, l1_rows, _events = replay_metrics_cross_section(
+        D, bars_path=bars_path, params=params, universe=["000001.SZ"]
+    )
+    assert stock_rows
+    assert all(isinstance(r.get("tags"), list) for r in stock_rows)
+    assert all("_sigma_pctile" in r for r in stock_rows)
+    assert all(isinstance(r.get("tags"), list) for r in l2_rows)
+    assert all("danger" not in (r.get("tags") or []) for r in l2_rows)
+    assert all(r.get("tags") == [] for r in l1_rows)
+    assert all(r.get("VOL_score") is None for r in l2_rows)
+    assert all(r.get("VOL_score") is None for r in l1_rows)
+
+    st = process_day(D, D, bars_path=bars_path, stub_coverage=True)
+    assert st == "ok"
+    tconn = get_conn()
+    init_schema(tconn)
+    s_tags = tconn.execute(
+        "SELECT tags FROM daily_stock WHERE ts_code=? AND trade_date=?",
+        ("000001.SZ", D.isoformat()),
+    ).fetchone()[0]
+    assert s_tags is not None
+    parsed = json.loads(s_tags)
+    assert isinstance(parsed, list)
+    assert all(t in ("vol_expand", "champagne", "danger") for t in parsed)
+
+    l2_tags = tconn.execute(
+        "SELECT tags FROM daily_l2 WHERE code=? AND trade_date=?",
+        ("370100", D.isoformat()),
+    ).fetchone()[0]
+    assert "danger" not in json.loads(l2_tags)
+
+    l1_tags = tconn.execute(
+        "SELECT tags FROM daily_l1 WHERE code=? AND trade_date=?",
+        ("l1_test", D.isoformat()),
+    ).fetchone()[0]
+    assert json.loads(l1_tags) == []
+    tconn.close()
