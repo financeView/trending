@@ -281,6 +281,7 @@ yaml 的 N/`param_version` 与库内戳不一致或无戳 → 不要宣称新版
 | 2026-10-10 | CR 核查并修：覆盖 Spec E §2.1；cache B；写戳/空 codes/`sync_complete` 顺序；yaml 同源；`main` 挂点；paper_book 非目标；incomplete 仍写戳 |
 | 2026-10-10 | 二次 CR 核查并修：§4.5 钉 restore/save、禁 save-always/run_attempt；Re-run→新 run；§5.12–13；skip 后挂点；空宇宙操作化；E N 加载同源 |
 | 2026-10-11 | 后放两项划掉：链 limit_rule 回退 Spec / incomplete×asof 权威 Spec |
+| 2026-10-11 | 交叉 incomplete Spec：hard_freeze 失败仍不得调 `write_sync_complete`；本地 SoT 用独立 `write_sync_status(false)` |
 
 ---
 

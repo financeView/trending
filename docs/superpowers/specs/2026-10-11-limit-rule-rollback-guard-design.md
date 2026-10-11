@@ -39,7 +39,7 @@
 - 按 `--from/--to` 窗口过滤 EXISTS（回退后只要库内任一 board_calc 限价即红）。  
 - 在 `limit_rule=board_calc_v1` 时扫描「混有 vendor」——合法。  
 - 改 fill 撮合公式 / `limit_up_unfillable`。  
-- 给 `daily_run` / `paper_book` 加限价一致性门（`paper_book` 见姊妹 Spec 分层；本门只挂写影子成交路径时与 shadow 一致——见 §3.2）。
+- 给 `daily_run` / `paper_book` 加限价一致性门（本门仅 `live_shadow_step.run_asof`，见 §3.2）。
 
 ---
 
@@ -72,7 +72,7 @@ AND EXISTS (
 
 | 入口 | 挂点 | 行为 |
 |------|------|------|
-| `live_shadow_step.run_asof` | 函数入口、调用 `fill_day` **之前** | fail → 向上返回非零 / 不写 `paper_fill` |
+| `live_shadow_step.run_asof` | 与姊妹 Spec 同序：**0-skip 之后**、`fill_day` **紧前**（limit_rule 在 sync_complete 门之后） | fail → 非零 / 不写 `paper_fill` |
 | `live_shadow_step.main` | 仅薄封装；**不得**只挂 `main` 而让直调 `run_asof` 旁路 | — |
 | 可选 CLI | `python scripts/check_limit_rule_bars.py --bars-db …` | 同函数 |
 
@@ -147,3 +147,4 @@ sync / board_calc pass：**不变**。
 |------|------|
 | 2026-10-11 | 初版：Approach 2；EXISTS；fill/影子入口；不清库 |
 | 2026-10-11 | CR：全库 EXISTS 钉死；挂点 `run_asof`；不门 `paper_book`；`--bars-db` 同源；无 env 旁路；修验收措辞 |
+| 2026-10-11 | 复审：门序与 incomplete 对齐（0-skip 后、sync 门后）；收紧 §2.1 措辞 |

@@ -53,29 +53,37 @@
 
 路径：`data/cache/sync_status.json`（仓库根相对；`data/cache/*` 已 gitignore，**不入库**）。
 
-#### 3.1.1 悲观写入时序（钉死）
+#### 3.1.1 双写 API 与时序（钉死）
+
+| API | 职责 |
+|-----|------|
+| `write_sync_status(...)` | **仅**写 `data/cache/sync_status.json`（本地 SoT） |
+| `write_sync_complete(complete, elapsed_min, session_asof=...)` | **成功路径末尾专用**：写 GITHUB_OUTPUT（若有）**并**调用 `write_sync_status` 落最终文件值 |
+
+与 Protocol B §4.2：**hard_freeze/戳失败不得调用 `write_sync_complete`**（尤其不得写 `sync_complete=true` 到 GITHUB_OUTPUT）。失败/早退只用 `write_sync_status(false, ...)`。
 
 ```text
-sync main 在 OHLC 循环 / Spec E 之前（打开 bars 之后尽早）：
-  write_sync_status(sync_complete=false, session_asof=..., elapsed_min=0)   # 悲观
+sync main 打开 bars 后尽早：
+  write_sync_status(sync_complete=false, session_asof=S, elapsed_min=0)   # 悲观；不碰 GITHUB_OUTPUT
 
 … OHLC / flags / optional limits …
 
 try:
   run_spec_e_passes(...)   # hard_freeze + stamp
 except:
-  write_sync_status(sync_complete=false, session_asof=..., ...)  # 失败路径仍落盘 false
-  return 1                 # 与 Protocol B：不得暗示 complete=true
+  write_sync_status(sync_complete=false, session_asof=S, ...)  # 仅文件
+  return 1                 # 不调用 write_sync_complete
 
-# 成功到达末尾：
-write_sync_complete(complete, elapsed_min, session_asof=...)
-  → GITHUB_OUTPUT（若有）+ 文件最终值 sync_complete=complete
+# 仅成功到达末尾：
+write_sync_complete(complete, elapsed_min, session_asof=S)
+  → GITHUB_OUTPUT sync_complete=true|false
+  → write_sync_status(sync_complete=complete, session_asof=S, ...)
 ```
 
-- **禁止**只写 `GITHUB_OUTPUT` 不写文件。  
-- **原子写：** temp + `os.replace`（或等价），避免半截 JSON。  
-- hard_freeze/戳失败：**必须**使文件为 `sync_complete=false`（或删除文件；二选一钉死为 **写 false**），不得留下旧 `true`。  
-- 进程在悲观写之前被杀：无文件 → check FAIL（缺文件 = FAIL）。
+- 成功路径**禁止**只写 GITHUB_OUTPUT 不写文件。  
+- **原子写文件：** temp + `os.replace`（或等价）。  
+- hard_freeze/戳失败：文件必为 `false`；GITHUB_OUTPUT **不追加**（保持今日「失败不调用 write_sync_complete」；与 `test_main_freeze_fail_no_sync_complete_true` 兼容）。  
+- 悲观写之前被杀：无文件 → check FAIL。
 
 #### 3.1.2 文件 schema
 
@@ -97,34 +105,45 @@ write_sync_complete(complete, elapsed_min, session_asof=...)
 
 ### 3.2 入口检查（仅 live_shadow）
 
-`check_sync_complete_for_fill(*, status_path=None, require_asof: str) -> int`  # 0 ok, 1 fail  
+`check_sync_complete_for_fill(*, status_path=None, fill_asof: str) -> int`  # 0 ok, 1 fail  
 
-`require_asof` = 本次影子成交日 `T`（`YYYY-MM-DD`）。
+`fill_asof` = 本次影子成交日 `T`（`YYYY-MM-DD`）。
+
+**Freshness（钉死，兼容 Spec F catch-up / only_date）：**
 
 ```text
 status ← read sync_status.json
 if missing or invalid JSON → FAIL
 if sync_complete is not true → FAIL
-if status.session_asof != require_asof → FAIL
+# trade-date 序：完整 sync 的 tip（session_asof）须覆盖成交日
+if status.session_asof < fill_asof → FAIL   # 字符串 YYYY-MM-DD 即字典序=日历序
 → ok
 ```
 
-| 入口 | 挂点 |
+| 情形 | 结果 |
 |------|------|
-| `live_shadow_step.run_asof` | 入口、`fill_day` 之前；传入 `require_asof=T` |
+| 完整 sync `session_asof=ASOF`，`fill_asof=T` 且 `T ≤ ASOF` | **ok**（`--from-heartbeat` catch-up；`only_date` 且 DATE≠ASOF） |
+| 完整 sync tip=`D1`，`fill_asof=D2 > D1` | **FAIL**（陈旧 tip，不能授权未来/更新日） |
+| `sync_complete=false` 或缺失 | **FAIL** |
+
+| 入口 | 挂点（钉死） |
+|------|------|
+| `live_shadow_step.run_asof` | **在** `not_on_calendar` / `live_allowed` / `missing_bars` 等 **return 0 跳过之后**，**紧挨** `fill_day(...)` 之前；传入 `fill_asof=T` |
 | `live_shadow_step.main` | 薄封装；**禁止**只挂 `main` |
 
-**不门：** `paper_book`（历史 Audit H；冷 clone / 无 SoT 须仍可绿）。后放：显式 `--require-sync-complete`。
+含义：日历/缺 bars 的温和 skip 仍 exit 0；仅即将真实成交时才强卡控。
+
+**不门：** `paper_book`。后放：显式 `--require-sync-complete`。
 
 失败 stderr 示例：
 
 ```text
-[sync_authority] no fresh sync_complete for asof=YYYY-MM-DD
-(missing/stale/false data/cache/sync_status.json) — partial bars non-authoritative;
-re-run full sync for that session_asof before live_shadow
+[sync_authority] no fresh sync_complete covering fill_asof=YYYY-MM-DD
+(missing/stale/false data/cache/sync_status.json) — re-run full sync
+(session_asof >= fill_asof, sync_complete=true) before live_shadow fill
 ```
 
-**调试旁路（钉死）：** 仅 `TRENDING_ALLOW_INCOMPLETE_FILL=1` 可跳过本检查。默认未设。文档标危险。**CI 主路径测试禁止**依赖该变量变绿（验收 #）。
+**调试旁路（钉死）：** 仅 `TRENDING_ALLOW_INCOMPLETE_FILL=1`。默认未设。**CI 主路径禁止**依赖该变量绿。
 
 ### 3.3 sync / limits 行为（不变，仅重申）
 
@@ -137,7 +156,7 @@ re-run full sync for that session_asof before live_shadow
 
 ### 3.4 产品句（文档）
 
-> Incomplete sync 或 SoT 显示非 complete / asof 不匹配时，**禁止**宣称当日 `live_shadow` / `paper_fill` 有效。须对该 `session_asof` 完整 sync 后再跑影子。`paper_book` 历史审计不在本门默认范围内。
+> 无新鲜完整 sync（`sync_complete=true` 且 `session_asof ≥` 成交日）时，**禁止**宣称该日 `live_shadow` / `paper_fill` 有效。完整 tip sync 可覆盖 catch-up / `only_date` 中 `T ≤ tip` 的影子日。`paper_book` 不在本门默认范围。
 
 ---
 
@@ -145,13 +164,14 @@ re-run full sync for that session_asof before live_shadow
 
 ```text
 sync:
-  early write sync_status(false, session_asof)
+  write_sync_status(false, session_asof=S)          # 早；仅文件
   → OHLC / limits? / Spec E
-  → on hard_freeze fail: write sync_status(false); exit 1
-  → on success end: write_sync_complete(complete, session_asof) → GITHUB_OUTPUT + file
+  → on hard_freeze fail: write_sync_status(false); exit 1  # 不调用 write_sync_complete
+  → on success end: write_sync_complete(complete, session_asof=S)
 
 live_shadow.run_asof(T):
-  → check_sync_complete_for_fill(require_asof=T)
+  → calendar / live_allowed / missing_bars → return 0（不检 SoT）
+  → check_sync_complete_for_fill(fill_asof=T)      # 紧挨 fill_day 前
        fail → exit 1
        ok   → limit_rule 门（姊妹）→ fill_day → paper_fill
 ```
@@ -162,17 +182,18 @@ live_shadow.run_asof(T):
 
 | # | 断言 |
 |---|------|
-| 1 | 悲观写后、成功完成前：文件 `sync_complete=false`；`check_*(require_asof=…)` == 1 |
-| 2 | `write_sync_complete(True, session_asof=D)` 后 `check_*(require_asof=D)` == 0 |
+| 1 | 悲观写后、成功完成前：文件 `false`；`check_*(fill_asof=S)` == 1 |
+| 2 | `write_sync_complete(True, session_asof=D2)` 后：`check_*(fill_asof=D2)` == 0 **且** `check_*(fill_asof=D1)` == 0（`D1 < D2`，catch-up） |
 | 3 | 缺文件 / 非法 JSON → 1 |
-| 4 | 陈旧：文件 `true` 且 `session_asof=D1`，`require_asof=D2≠D1` → 1 |
-| 5 | 模拟 hard_freeze 失败：文件为 `false`（非残留 `true`）；`check_*` == 1 |
-| 6 | `run_asof` 在失败时不写 `paper_fill`；直调 `run_asof` 不可旁路 |
-| 7 | `paper_book` **无**本门时：无 `sync_status` 夹具仍可跑通既有 Audit 测 |
-| 8 | 默认未设 env 时旁路无效；设 `TRENDING_ALLOW_INCOMPLETE_FILL=1` 可放行（单测）；主路径套件不依赖该 env |
-| 9 | `with_limits` 在 `not complete` 时不拉东财（回归） |
-| 10 | workflow 仍含 `needs.sync.outputs.sync_complete == 'true'`（回归） |
-| 11 | 落地时 todo P0 行改写为已落地并链本 Spec |
+| 4 | 陈旧 tip：`true` 且 `session_asof=D1`，`fill_asof=D2 > D1` → 1 |
+| 5 | hard_freeze 失败：调用了 `write_sync_status(false)`；**未**调用 `write_sync_complete`；无 GITHUB_OUTPUT `true`；`check_*` == 1 |
+| 6 | `not_on_calendar` / `missing_bars` 在缺 SoT 时仍 return **0**（门在 skip 之后） |
+| 7 | 即将 `fill_day` 时缺/陈旧 SoT → 非零且不写 `paper_fill`；直调 `run_asof` 不可旁路 |
+| 8 | `paper_book` 无本门：无 `sync_status` 仍可跑既有 Audit 测 |
+| 9 | env 旁路：默认无效；`TRENDING_ALLOW_INCOMPLETE_FILL=1` 可放行（单测）；主路径不依赖 |
+| 10 | `with_limits` 在 `not complete` 时不拉东财（回归） |
+| 11 | workflow 仍含 `needs.sync.outputs.sync_complete == 'true'`（回归） |
+| 12 | 落地时 todo 改写为已落地并链本 Spec（措辞：`live_shadow.run_asof` 门闩，非泛「fill」） |
 
 ---
 
@@ -190,3 +211,4 @@ live_shadow.run_asof(T):
 |------|------|
 | 2026-10-11 | 初版：不拆耦；sync_status；fill/影子门 |
 | 2026-10-11 | CR：悲观写 + 失败写 false；检查 `session_asof`；仅门 `run_asof`；不门 `paper_book`；env/陈旧验收 |
+| 2026-10-11 | 复审 BLOCK→修：freshness 改为 `session_asof ≥ fill_asof`；门在 0-skip 之后；`write_sync_status` vs `write_sync_complete` 分职 |
