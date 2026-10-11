@@ -8,6 +8,8 @@ import os
 import sqlite3
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from scripts.metrics.exit_tags import tags_to_sql
+
 DEFAULT_DB = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", "trend.db"
 )
@@ -328,6 +330,9 @@ def _prepare_row(row: Dict[str, Any], allowed: Sequence[str]) -> Dict[str, Any]:
             continue
         if k in _INT_BOOL_COLS:
             v = _as_sql_int(v)
+        # exit_tags may leave list in memory; TEXT columns need JSON string
+        if k == "tags" and isinstance(v, (list, tuple)):
+            v = tags_to_sql(v)
         out[k] = v
     return out
 
