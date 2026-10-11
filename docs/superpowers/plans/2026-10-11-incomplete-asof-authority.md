@@ -106,17 +106,19 @@ EOF
   - keyword-only `session_asof`  
   - writes GITHUB_OUTPUT (existing) **and** `write_sync_status(sync_complete=complete, session_asof=session_asof, elapsed_min=elapsed_min)`
 - `main` success end always passes `session_asof=session_asof.isoformat()`
-- After `session_asof` / `conn` ready, **before** OHLC loop: `write_sync_status(False, session_asof=...)`
-- `except` around `run_spec_e_passes`: `write_sync_status(False, ...)`; `return 1`; **never** `write_sync_complete`
+- After `session_asof` / `conn` ready, **before** OHLC loop: `write_sync_status(sync_complete=False, session_asof=...)` (**keyword-only**; never positional `False`)
+- `except` around `run_spec_e_passes`: `write_sync_status(sync_complete=False, session_asof=...)`; `return 1`; **never** `write_sync_complete`
 - Empty-universe early `return 1`: leave pessimistic false file (already written); do not call `write_sync_complete`
 
 **Spy migration (钉死):** every monkeypatch of `write_sync_complete` must accept `*args, **kwargs` (or explicit `session_asof=...`). Listed files above.
 
+**SoT path isolation (钉死):** any test that drives `sync_bars_sample.main()` (or asserts status file contents) must monkeypatch `DEFAULT_SYNC_STATUS_PATH` / `write_sync_status` `path=` to `tmp_path` — do **not** pollute repo `data/cache/sync_status.json`.
+
 - [ ] **Step 1: Extend / update tests**
-  - hard_freeze fail → status file false; spy shows `write_sync_complete` not called; no GITHUB_OUTPUT true
+  - hard_freeze fail → status file false (under tmp path); spy shows `write_sync_complete` not called; no GITHUB_OUTPUT true
   - success incomplete → file `sync_complete=false` + `session_asof`; GITHUB_OUTPUT false if env set
   - success complete → file true
-  - `test_github_output_sync_complete`: pass `session_asof=...`; assert GITHUB_OUTPUT **and** file contents
+  - `test_github_output_sync_complete`: pass `session_asof=...`; assert GITHUB_OUTPUT **and** file contents (tmp path)
   - optional: `with_limits` not entered when `complete=false` (extend sync test or cite `if args.with_limits and complete` + new assert)
 
 - [ ] **Step 2: Implement wiring + signature**
