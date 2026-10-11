@@ -779,7 +779,9 @@ filters_meta                # 复权、资格过滤摘要
 5. \(S_{temp}\) + Spearman 门禁  
 6. L2/L1 合成 + 同引擎  
 7. 节气  
-8. 止盈 flag（默关）  
+8. ~~止盈 flag（默关）~~ → **已落地**（`p05-v5`：默认开、只展示；L2 danger 在 Σamount 可用时启用）  
+
+
 
 实现计划：`docs/superpowers/plans/`（本修订稿确认后）。
 
@@ -800,3 +802,4 @@ filters_meta                # 复权、资格过滤摘要
 | 2026-10-01 | §6.0：每标的×日×event ≤1 **active**（`superseded_by` 允许多历史行） |
 | 2026-10-07 | Spec C T0：§5.4 Spearman 临时豁免；§9.1 `percentile_rank` 闭合式；§13 `vol_score_min_samples` |
 | 2026-10-11 | P1 终局：§11/§13 与 `p05-v5` 对齐——默认开、只展示、L2 danger 可用；删「默认关 / 后放」双源 |
+| 2026-10-11 | 完整 CR：§16 step 8 划掉「默关」残余 |

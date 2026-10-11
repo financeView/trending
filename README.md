@@ -59,8 +59,10 @@ python scripts/eval/paper_book.py --from 2024-01-05 --to 2024-01-08 \
 
 **L1 same-engine (shipped):** L1 member-closure synth → same FSM as stocks/L2; L1 `tag_warm_to_hot` split from `warm_to_hot_member_count`; digest `## L1 自身` + Radar 个股温转热表头对齐 Spec B.
 
-**RS / S_temp / VOL (shipped):** pure-price RS (peer percentile, `local_*` isolation); §5.4 `S_temp` + C1 allowlist; Spearman gold+synthetic gate (live asof waived); stock `VOL_score` bypass (turnover window percentile); L2/L1 `VOL_score` SQL null; digest sort RS → VOL → amount +「量」列。
+**RS / S_temp / VOL (shipped):** pure-price RS (peer percentile, `local_*` isolation); §5.4 `S_temp` + C1 allowlist; Spearman gold+synthetic gate (live asof waived); stock + L2/L1 `VOL_score` (basket from paired Σamount/Σfloat_mv own-history); digest sort RS → VOL → amount +「量」列。
+
+**Exit tags (shipped):** display-only `vol_expand` / `champagne` / `danger` on stock+L2 (L1 empty); digest「止盈」; `exit_tags_enabled` + `param_version=p05-v5`.
 
 **Ops A (shipped):** asof limit soft-ok (`ok`+warn, `last_ok` advances); nested heartbeat readers; Actions `only_date` pins `live_shadow --asof`.
 
-**Still out of ship:** tree-out bars warmup (deferred), causal H / walk-forward gates, L2/L1 replay perf / `engine_state`, basket non-null VOL.
+**Still out of ship:** tree-out bars warmup (deferred), causal H / walk-forward gates, L2/L1 replay perf / `engine_state`, exit-tag fill/减仓 semantics.
