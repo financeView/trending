@@ -43,9 +43,13 @@ def test_with_limits_em_failure_exits_zero(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "scripts.sync_bars_sample.write_sync_complete", lambda *a, **k: None
     )
+    from scripts.common.hard_freeze import HardFreezePassConfig
+
     monkeypatch.setattr(
-        "scripts.common.hard_freeze.load_hard_freeze_min_suspend_days",
-        lambda: 20,
+        "scripts.common.hard_freeze.load_hard_freeze_pass_config",
+        lambda path=None: HardFreezePassConfig(
+            min_suspend_days=20, param_version="p05-v3"
+        ),
     )
     monkeypatch.setattr(
         "scripts.eval.costs.load_costs",

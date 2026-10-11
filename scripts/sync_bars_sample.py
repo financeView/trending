@@ -78,18 +78,23 @@ def run_spec_e_passes(conn, codes, *, session_asof: dt.date) -> None:
     from scripts.common.board_calc import apply_board_calc
     from scripts.common.hard_freeze import (
         apply_hard_freeze_flags,
-        load_hard_freeze_min_suspend_days,
+        load_hard_freeze_pass_config,
+        write_hard_freeze_pass_meta,
     )
     from scripts.eval.costs import load_costs
 
     ensure_bars_columns(conn)
-    try:
-        n = load_hard_freeze_min_suspend_days()
-        nf = apply_hard_freeze_flags(conn, codes, n=n)
+    cfg = load_hard_freeze_pass_config()
+    if codes:
+        nf = apply_hard_freeze_flags(conn, codes, n=cfg.min_suspend_days)
+        write_hard_freeze_pass_meta(
+            conn,
+            n=cfg.min_suspend_days,
+            param_version=cfg.param_version,
+            rows_touched=nf,
+        )
         if nf:
             print("[sync_bars] hard_freeze rows=%d" % nf)
-    except Exception as e:  # noqa: BLE001
-        print("[sync_bars] warn: hard_freeze skipped: %s" % e, file=sys.stderr)
     try:
         costs = load_costs()
         nb = apply_board_calc(
@@ -219,9 +224,16 @@ def main(argv=None) -> int:
     else:
         pass_codes = codes_from_universe()
     pass_codes = sorted(set(pass_codes))
-    run_spec_e_passes(conn, pass_codes, session_asof=session_asof)
-
-    conn.close()
+    try:
+        if not args.from_universe and not pass_codes:
+            print("[sync_bars] error: empty mapped universe", file=sys.stderr)
+            return 1
+        run_spec_e_passes(conn, pass_codes, session_asof=session_asof)
+    except Exception as e:  # noqa: BLE001
+        print("[sync_bars] error: hard_freeze/stamp failed: %s" % e, file=sys.stderr)
+        return 1
+    finally:
+        conn.close()
     elapsed_min = (dt.datetime.utcnow() - started).total_seconds() / 60.0
     write_sync_complete(complete, elapsed_min)
     return 0

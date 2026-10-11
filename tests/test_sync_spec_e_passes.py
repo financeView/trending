@@ -17,9 +17,13 @@ def test_run_spec_e_passes_invokes_both(tmp_path, monkeypatch, capsys):
         "scripts.common.board_calc.apply_board_calc",
         lambda *a, **k: seen.append("board") or 5,
     )
+    from scripts.common.hard_freeze import HardFreezePassConfig
+
     monkeypatch.setattr(
-        "scripts.common.hard_freeze.load_hard_freeze_min_suspend_days",
-        lambda: 20,
+        "scripts.common.hard_freeze.load_hard_freeze_pass_config",
+        lambda path=None: HardFreezePassConfig(
+            min_suspend_days=20, param_version="p05-v3"
+        ),
     )
     monkeypatch.setattr(
         "scripts.eval.costs.load_costs",
@@ -157,9 +161,13 @@ def test_main_pass_sets_flag_beyond_ohlc_end_window(tmp_path, monkeypatch):
         "scripts.sync_bars_sample.write_sync_complete",
         lambda *a, **k: None,
     )
+    from scripts.common.hard_freeze import HardFreezePassConfig
+
     monkeypatch.setattr(
-        "scripts.common.hard_freeze.load_hard_freeze_min_suspend_days",
-        lambda: 20,
+        "scripts.common.hard_freeze.load_hard_freeze_pass_config",
+        lambda path=None: HardFreezePassConfig(
+            min_suspend_days=20, param_version="p05-v3"
+        ),
     )
     monkeypatch.setattr(
         "scripts.eval.costs.load_costs",
