@@ -92,7 +92,8 @@ def test_right_side_top_header_has_liang_and_sort_rs_vol_amount(tmp_path, monkey
     md = render_l1_issue(conn, td, "l1_finance", name_zh="金融")
     top = md.split("## 右侧存续 Top")[1]
     assert (
-        "| ts_code | 名称 | T | RS | 量 | 节气 | 交易日天数 | 成交额(亿) |" in top
+        "| ts_code | 名称 | T | RS | 量 | 止盈 | 节气 | 交易日天数 | 成交额(亿) |"
+        in top
     )
     # Order: A (RS90) → B (RS80,VOL50) → C (RS80,VOL20,amt9e9) → D (RS80,VOL20,amt1e9)
     pos = [top.index(c) for c in (
@@ -178,11 +179,13 @@ def test_l2_and_l1_headers_include_liang_warm_tables_do_not(tmp_path, monkeypatc
         "今日成分温转热 | 成分热以上 | 成交额(亿) |"
     ) in self_sec
     assert (
-        "| T | 代码 | 名称 | RS | 量 | 在右侧 | 节气 | 今日温转热 | "
+        "| T | 代码 | 名称 | RS | 量 | 止盈 | 在右侧 | 节气 | 今日温转热 | "
         "今日成分温转热 | 成分热以上 | 成交额(亿) |"
     ) in l2_sec
     warm_header = [ln for ln in warm_sec.splitlines() if ln.startswith("| ts_code")][0]
-    assert warm_header == "| ts_code | 名称 | T | RS | 在右侧 | 节气 | 成交额(亿) |"
+    assert warm_header == (
+        "| ts_code | 名称 | T | RS | 止盈 | 在右侧 | 节气 | 成交额(亿) |"
+    )
     assert "量" not in warm_header
 
     # Basket VOL null → empty「量」cell; footnote once on L1/L2 block

@@ -1,12 +1,14 @@
 """Pure markdown digests from trend.db (ops §5.2)."""
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 from typing import Any, Iterable, Optional, Sequence
 
 from scripts.common.taxonomy_meta import L1Bucket, load_l1_buckets
 from scripts.common.universe import load_l2_to_l1, load_stock_sw_l2
+from scripts.metrics.exit_tags import format_tags_display
 from scripts.metrics.temp_raw import rank
 
 
@@ -82,6 +84,19 @@ def _sort_l2_key(row: tuple) -> tuple:
         r = -99
     s = row[2] if row[2] is not None else float("-inf")
     return (-r, -float(s))
+
+
+def _fmt_tags(raw: Any) -> str:
+    """Parse daily_* tags JSON cell → display names; null/empty → empty string."""
+    if raw is None or raw == "":
+        return ""
+    try:
+        tags = json.loads(raw) if isinstance(raw, str) else list(raw)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return ""
+    if not tags:
+        return ""
+    return format_tags_display(tags)
 
 
 def _fmt_cell(v: Any) -> str:
@@ -188,7 +203,7 @@ def render_l1_issue(
             conn.execute(
                 """
                 SELECT code, T, S_temp, RS, VOL_score, right_side, tag_warm_to_hot,
-                       solar_term, warm_to_hot_member_count, amount
+                       solar_term, warm_to_hot_member_count, amount, tags
                 FROM daily_l2
                 WHERE trade_date=? AND code IN (%s)
                 """
@@ -251,6 +266,7 @@ def render_l1_issue(
                 "名称",
                 "RS",
                 "量",
+                "止盈",
                 "在右侧",
                 "节气",
                 "今日温转热",
@@ -265,6 +281,7 @@ def render_l1_issue(
                     l2_names.get(str(r[0]), ""),
                     r[3],
                     r[4],  # VOL_score — baskets null this slice
+                    _fmt_tags(r[10]),
                     _fmt_yn(r[5]),
                     r[7],
                     _fmt_yn(r[6]),
@@ -287,7 +304,7 @@ def render_l1_issue(
 
     hot = conn.execute(
         """
-        SELECT ts_code, T, RS, right_side, solar_term, amount
+        SELECT ts_code, T, RS, right_side, solar_term, amount, tags
         FROM daily_stock
         WHERE trade_date=? AND l1_id=? AND IFNULL(tag_warm_to_hot,0)=1
         ORDER BY IFNULL(amount,0) DESC
@@ -298,13 +315,14 @@ def render_l1_issue(
     lines.append("## 今日温转热（个股，Top N by 成交额）")
     lines.extend(
         _md_table(
-            ["ts_code", "名称", "T", "RS", "在右侧", "节气", "成交额(亿)"],
+            ["ts_code", "名称", "T", "RS", "止盈", "在右侧", "节气", "成交额(亿)"],
             [
                 (
                     r[0],
                     stock_names.get(str(r[0]), ""),
                     r[1],
                     r[2],
+                    _fmt_tags(r[6]),
                     _fmt_yn(r[3]),
                     r[4],
                     _fmt_amount_yi(r[5]),
@@ -339,7 +357,7 @@ def render_l1_issue(
 
     right = conn.execute(
         """
-        SELECT ts_code, T, RS, VOL_score, solar_term, right_side_days_trading, amount
+        SELECT ts_code, T, RS, VOL_score, solar_term, right_side_days_trading, amount, tags
         FROM daily_stock
         WHERE trade_date=? AND l1_id=? AND IFNULL(right_side,0)=1
         ORDER BY IFNULL(RS, -1e99) DESC,
@@ -352,7 +370,7 @@ def render_l1_issue(
     lines.append("## 右侧存续 Top（RS 高）")
     lines.extend(
         _md_table(
-            ["ts_code", "名称", "T", "RS", "量", "节气", "交易日天数", "成交额(亿)"],
+            ["ts_code", "名称", "T", "RS", "量", "止盈", "节气", "交易日天数", "成交额(亿)"],
             [
                 (
                     r[0],
@@ -360,6 +378,7 @@ def render_l1_issue(
                     r[1],
                     r[2],
                     r[3],
+                    _fmt_tags(r[7]),
                     r[4],
                     r[5],
                     _fmt_amount_yi(r[6]),
