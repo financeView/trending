@@ -25,6 +25,7 @@ from scripts.common.db import (
 from scripts.common.sync_status import check_sync_complete_for_fill
 from scripts.eval.costs import load_costs
 from scripts.eval.fill_day import fill_day
+from scripts.eval.limit_rule_guard import check_limit_rule_bars
 from scripts.eval.shadow_store import load_shadow_book, save_shadow_book
 from scripts.issues.update_l1_issues import (
     heartbeat_job_view,
@@ -169,6 +170,10 @@ def run_asof(
         conn.close()
         return 0
     if check_sync_complete_for_fill(fill_asof=T) != 0:
+        conn.close()
+        return 1
+    bp = bars_path or DEFAULT_BARS_DB
+    if check_limit_rule_bars(bp, costs.limit_rule) != 0:
         conn.close()
         return 1
     ver_day = confirm or T
