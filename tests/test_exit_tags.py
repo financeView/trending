@@ -2,13 +2,24 @@
 from __future__ import annotations
 
 import math
+from copy import deepcopy
+from dataclasses import replace
 from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
 
 from scripts.common import db as dbmod
+from scripts.metrics.exit_tags import (
+    TAG_DISPLAY,
+    TAG_ORDER,
+    assign_exit_tags,
+    daily_returns,
+    format_tags_display,
+    tags_to_sql,
+)
 from scripts.metrics.params import load_params
+from scripts.metrics.percentile import scores_0_100
 from scripts.metrics.pipeline import replay_from_ohlc
 from tests.test_daily_run_metrics_wire import SHORT_N, _short_params
 
@@ -123,3 +134,414 @@ def test_daily_l2_tags_column_roundtrip(tmp_path):
     ).fetchone()
     assert row[0] == '["vol_expand"]'
     conn.close()
+
+
+# --- Task 3: pure assign_exit_tags goldens ---
+
+ASOF = "2024-02-01"
+
+
+def _params(**overrides):
+    base = load_params(METRICS_YAML)
+    return replace(base, exit_tags_enabled=True, **overrides)
+
+
+def _bar(td: str, close, *, amount=100.0):
+    return {"trade_date": td, "close_qfq": close, "amount": amount}
+
+
+def _dates(n: int, end: str = ASOF) -> list[str]:
+    """n weekdays ending at end (inclusive), ISO strings."""
+    from datetime import date, timedelta
+
+    d = date.fromisoformat(end)
+    out: list[str] = []
+    while len(out) < n:
+        if d.weekday() < 5:
+            out.append(d.isoformat())
+        d -= timedelta(days=1)
+    return list(reversed(out))
+
+
+def _closes_to_bars(closes, *, amounts=None, dates=None):
+    n = len(closes)
+    dts = dates or _dates(n)
+    amts = amounts if amounts is not None else [100.0] * n
+    return [_bar(dts[i], closes[i], amount=amts[i]) for i in range(n)]
+
+
+def _stock_row(ts_code: str, **kw):
+    row = {
+        "trade_date": ASOF,
+        "ts_code": ts_code,
+        "right_side": 0,
+        "solar_term": None,
+        "_sigma_pctile": None,
+        "T": "热",
+        "RS": 50,
+        "RS_raw": 0.5,
+        "VOL_score": 40,
+        "hard_frozen": False,
+        "_is_suspended": False,
+        "tags": None,
+    }
+    row.update(kw)
+    return row
+
+
+def _l2_row(code: str, **kw):
+    row = {
+        "trade_date": ASOF,
+        "code": code,
+        "right_side": 0,
+        "solar_term": None,
+        "_sigma_pctile": None,
+        "T": "热",
+        "RS": 50,
+        "RS_raw": 0.5,
+        "VOL_score": None,
+        "tags": None,
+    }
+    row.update(kw)
+    return row
+
+
+def test_format_and_sql_helpers():
+    assert TAG_ORDER == ("vol_expand", "champagne", "danger")
+    assert TAG_DISPLAY["vol_expand"] == "波动率放大"
+    assert format_tags_display(["danger", "vol_expand"]) == "波动率放大、危险信号"
+    assert format_tags_display([]) == ""
+    assert tags_to_sql(["danger", "vol_expand"]) == '["vol_expand", "danger"]'
+
+
+def test_flag_off_all_empty_tags():
+    params = _params()
+    params = replace(params, exit_tags_enabled=False)
+    stocks = [
+        _stock_row(
+            "A.SZ",
+            right_side=1,
+            solar_term="大暑",
+            _sigma_pctile=0.99,
+        )
+    ]
+    l2 = [_l2_row("L2A", right_side=1, solar_term="大暑", _sigma_pctile=0.99)]
+    l1 = [_l2_row("L1A")]
+    bars = {"A.SZ": _closes_to_bars([10.0, 11.0, 12.0, 13.0])}
+    meta = assign_exit_tags(
+        stocks,
+        l2,
+        l1,
+        params=params,
+        bar_cache=bars,
+        l2_synth_by_code={},
+        trade_date=ASOF,
+    )
+    assert stocks[0]["tags"] == []
+    assert l2[0]["tags"] == []
+    assert l1[0]["tags"] == []
+    assert meta["stock"] == 0.0
+    assert meta["l2"] == 0.0
+    assert meta["l1"] == 0.0
+
+
+def test_vol_expand_golden():
+    params = _params()
+    stocks = [
+        _stock_row(
+            "A.SZ",
+            right_side=1,
+            solar_term="大暑",
+            _sigma_pctile=0.95,
+        )
+    ]
+    assign_exit_tags(
+        stocks,
+        [],
+        [],
+        params=params,
+        bar_cache={"A.SZ": _closes_to_bars([10.0, 10.1])},
+        l2_synth_by_code={},
+        trade_date=ASOF,
+    )
+    assert stocks[0]["tags"] == ["vol_expand"]
+
+    stocks2 = [
+        _stock_row(
+            "B.SZ",
+            right_side=1,
+            solar_term="谷雨",
+            _sigma_pctile=0.99,
+        )
+    ]
+    assign_exit_tags(
+        stocks2,
+        [],
+        [],
+        params=params,
+        bar_cache={"B.SZ": _closes_to_bars([10.0, 10.1])},
+        l2_synth_by_code={},
+        trade_date=ASOF,
+    )
+    assert "vol_expand" not in stocks2[0]["tags"]
+
+
+def test_champagne_breaks_on_uncomputable_day():
+    """champ_k=3 but middle day close None → no champagne (no lookback pad)."""
+    params = _params(champ_k=3, champ_excess=0.01)
+    dts = _dates(4)
+    # closes: peer flat; target beats on days with finite ret — but middle close None
+    target_closes = [10.0, 11.0, None, 12.0]
+    peer_closes = [10.0, 10.0, 10.0, 10.0]
+    stocks = [
+        _stock_row("T.SZ", RS_raw=1.0),
+        _stock_row("P.SZ", RS_raw=0.5),
+    ]
+    bar_cache = {
+        "T.SZ": _closes_to_bars(target_closes, dates=dts),
+        "P.SZ": _closes_to_bars(peer_closes, dates=dts),
+    }
+    assign_exit_tags(
+        stocks,
+        [],
+        [],
+        params=params,
+        bar_cache=bar_cache,
+        l2_synth_by_code={},
+        trade_date=ASOF,
+    )
+    assert "champagne" not in stocks[0]["tags"]
+
+
+def test_champagne_short_spine_no_tag():
+    params = _params(champ_k=3, champ_excess=0.01)
+    dts = _dates(2)
+    stocks = [
+        _stock_row("T.SZ", RS_raw=1.0),
+        _stock_row("P.SZ", RS_raw=0.5),
+    ]
+    bar_cache = {
+        "T.SZ": _closes_to_bars([10.0, 12.0], dates=dts),
+        "P.SZ": _closes_to_bars([10.0, 10.1], dates=dts),
+    }
+    assign_exit_tags(
+        stocks,
+        [],
+        [],
+        params=params,
+        bar_cache=bar_cache,
+        l2_synth_by_code={},
+        trade_date=ASOF,
+    )
+    assert "champagne" not in stocks[0]["tags"]
+
+
+def test_champagne_fails_when_day_not_above_median():
+    params = _params(champ_k=3, champ_excess=0.01)
+    dts = _dates(4)
+    # Target underperforms peer on last day
+    stocks = [
+        _stock_row("T.SZ", RS_raw=1.0),
+        _stock_row("P.SZ", RS_raw=0.5),
+    ]
+    bar_cache = {
+        "T.SZ": _closes_to_bars([10.0, 11.0, 12.0, 12.1], dates=dts),
+        "P.SZ": _closes_to_bars([10.0, 10.5, 11.0, 12.0], dates=dts),
+    }
+    assign_exit_tags(
+        stocks,
+        [],
+        [],
+        params=params,
+        bar_cache=bar_cache,
+        l2_synth_by_code={},
+        trade_date=ASOF,
+    )
+    assert "champagne" not in stocks[0]["tags"]
+
+
+def test_champagne_fails_when_excess_below_cap():
+    params = _params(champ_k=3, champ_excess=1.0)  # unreachable excess
+    dts = _dates(4)
+    stocks = [
+        _stock_row("T.SZ", RS_raw=1.0),
+        _stock_row("P.SZ", RS_raw=0.5),
+    ]
+    # Target beats peer each day but sum(excess) << 1.0
+    bar_cache = {
+        "T.SZ": _closes_to_bars([10.0, 10.2, 10.4, 10.6], dates=dts),
+        "P.SZ": _closes_to_bars([10.0, 10.1, 10.2, 10.3], dates=dts),
+    }
+    assign_exit_tags(
+        stocks,
+        [],
+        [],
+        params=params,
+        bar_cache=bar_cache,
+        l2_synth_by_code={},
+        trade_date=ASOF,
+    )
+    assert "champagne" not in stocks[0]["tags"]
+
+
+def test_champagne_asof_peer_frozen():
+    """Ineligible-asof name with huge hist rets must not enter median universe."""
+    params = _params(champ_k=3, champ_excess=0.05)
+    dts = _dates(4)
+    stocks = [
+        _stock_row("T.SZ", RS_raw=1.0),
+        _stock_row("P.SZ", RS_raw=0.5),
+        # quarantined → not in asof peer set
+        _stock_row("X.SZ", RS_raw=0.9),
+    ]
+    # X rockets every day; if wrongly included, T cannot beat median
+    bar_cache = {
+        "T.SZ": _closes_to_bars([10.0, 11.0, 12.1, 13.3], dates=dts),
+        "P.SZ": _closes_to_bars([10.0, 10.2, 10.4, 10.6], dates=dts),
+        "X.SZ": _closes_to_bars([10.0, 20.0, 40.0, 80.0], dates=dts),
+    }
+    assign_exit_tags(
+        stocks,
+        [],
+        [],
+        params=params,
+        bar_cache=bar_cache,
+        l2_synth_by_code={},
+        quarantine={"X.SZ"},
+        trade_date=ASOF,
+    )
+    assert "champagne" in stocks[0]["tags"]
+
+
+def test_danger_uses_window_not_full_spine_rank():
+    """Full-spine rank would tag danger; window-then-rank must not."""
+    params = _params(
+        vol_hist=5,
+        danger_ret_pctile=0.05,
+        danger_amt_pctile=0.95,
+    )
+    n = 25
+    dts = _dates(n)
+    closes = [100.0]
+    for i in range(1, n):
+        closes.append(closes[-1] * 1.01)
+    # One worse day inside the window (index n-3); today 2nd-worst globally
+    # so full-spine p_ret ≤ 0.05, but window p_ret = 0.25 > 0.05
+    worse_i = n - 3
+    closes[worse_i] = closes[worse_i - 1] * (1.0 - 0.50)
+    # rebuild path after worse day back up then mild down today
+    for j in range(worse_i + 1, n - 1):
+        closes[j] = closes[j - 1] * 1.01
+    closes[n - 1] = closes[n - 2] * (1.0 - 0.20)
+
+    amounts = [10.0] * n
+    amounts[n - 1] = 1e9  # unique max amount → p_amt = 1 both ways
+
+    rets = daily_returns(closes)
+    t = n - 1
+    # Forbidden full-spine path would tag
+    full_scores = scores_0_100(rets)
+    p_ret_full = full_scores[t] / 100.0
+    assert p_ret_full <= params.danger_ret_pctile
+    amt_scores_full = scores_0_100(amounts)
+    assert amt_scores_full[t] / 100.0 >= params.danger_amt_pctile
+
+    stocks = [_stock_row("D.SZ")]
+    assign_exit_tags(
+        stocks,
+        [],
+        [],
+        params=params,
+        bar_cache={"D.SZ": _closes_to_bars(closes, amounts=amounts, dates=dts)},
+        l2_synth_by_code={},
+        trade_date=ASOF,
+    )
+    assert "danger" not in stocks[0]["tags"]
+
+
+def test_danger_stock_golden_and_l2_never_danger():
+    params = _params(vol_hist=5, danger_ret_pctile=0.05, danger_amt_pctile=0.95)
+    n = 6
+    dts = _dates(n)
+    closes = [100.0, 101.0, 102.0, 103.0, 104.0, 104.0 * (1.0 - 0.30)]
+    amounts = [10.0, 10.0, 10.0, 10.0, 10.0, 1e9]
+    stocks = [_stock_row("D.SZ")]
+    l2 = [
+        _l2_row(
+            "L2D",
+            right_side=1,
+            solar_term="大暑",
+            _sigma_pctile=0.99,
+        )
+    ]
+    synth = {"L2D": _closes_to_bars(closes, amounts=amounts, dates=dts)}
+    assign_exit_tags(
+        stocks,
+        l2,
+        [],
+        params=params,
+        bar_cache={"D.SZ": _closes_to_bars(closes, amounts=amounts, dates=dts)},
+        l2_synth_by_code=synth,
+        trade_date=ASOF,
+        enable_l2_danger=False,
+    )
+    assert "danger" in stocks[0]["tags"]
+    assert "danger" not in l2[0]["tags"]
+    # L2 still may get vol_expand
+    assert "vol_expand" in l2[0]["tags"]
+
+
+def test_assign_does_not_mutate_r_solar_rs_vol():
+    params = _params()
+    stocks = [
+        _stock_row(
+            "A.SZ",
+            right_side=1,
+            solar_term="大暑",
+            _sigma_pctile=0.99,
+            RS=77,
+            VOL_score=88,
+            T="沸",
+        )
+    ]
+    watch = ("right_side", "solar_term", "T", "RS", "VOL_score", "_sigma_pctile")
+    before = {k: deepcopy(stocks[0][k]) for k in watch}
+    assign_exit_tags(
+        stocks,
+        [],
+        [],
+        params=params,
+        bar_cache={"A.SZ": _closes_to_bars([10.0, 11.0])},
+        l2_synth_by_code={},
+        trade_date=ASOF,
+    )
+    for k in watch:
+        assert stocks[0][k] == before[k]
+    assert stocks[0]["tags"] == ["vol_expand"]
+
+
+def test_tag_rate_warn(capsys):
+    params = _params(tag_rate_cap=0.02)
+    stocks = [
+        _stock_row(
+            "A.SZ",
+            right_side=1,
+            solar_term="大暑",
+            _sigma_pctile=0.99,
+        )
+    ]
+    meta = assign_exit_tags(
+        stocks,
+        [],
+        [],
+        params=params,
+        bar_cache={"A.SZ": _closes_to_bars([10.0, 11.0])},
+        l2_synth_by_code={},
+        trade_date=ASOF,
+    )
+    assert meta["stock"] == pytest.approx(1.0)
+    err = capsys.readouterr().err
+    assert "tag_rate" in err.lower() or "tag rate" in err.lower() or "rate" in err
+    assert "stock" in err
+    assert ASOF in err
+    assert "0.02" in err or "2%" in err
