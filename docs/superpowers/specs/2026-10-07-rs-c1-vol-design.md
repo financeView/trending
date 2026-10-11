@@ -96,7 +96,7 @@ VOL_score  = round(100 * percentile_rank(turnover_t among window))  # 公式同 
 - 量进 `RS`（线性 mix / 乘法 boost / 改名冒充实 RS）；todo §2.2「量价混合可跟」**以本条为准作废**，改为旁路 `VOL_score`  
 - 用 `aggregate_*` 加权平均成员 `RS`/`S_temp` 冒充同引擎  
 - 实盘日 Spearman 硬门、C2 新测、全 A peer、YAML 日拉  
-- L2/L1 非 null `VOL_score`  
+- ~~L2/L1 非 null `VOL_score`~~ → **已由** [`2026-10-11-basket-vol-score-design.md`](2026-10-11-basket-vol-score-design.md) **闭合**（本条仅记录 Spec C 当时边界）  
 - Spec B 曾钉的篮子 `S_temp`/`RS` 恒 NULL：**被本 slice 取代**（改为同引擎真值 + 截面 `RS`）
 
 ---
@@ -114,7 +114,7 @@ bars / 合成 OHLC
   → asof 截面 pass（实体类隔离）
        peer 分位 → 派生 RS
        个股 own-history → 派生 VOL_score
-       L2/L1 VOL_score := null
+       L2/L1 VOL_score := null   # Spec C 当时；现由篮 VOL Spec 对合成脊赋分
   → 内存回填：events[].RS := 该 ts_code 当日 RS（可算则写，否则保持 null）
   → upsert daily_*（含 S_temp / RS / VOL_score / universe_id / param_version）
   → append_signal_events（禁止事后 UPDATE signal_event）
@@ -139,7 +139,7 @@ bars / 合成 OHLC
 | 表 | 变更 |
 |----|------|
 | `daily_stock` | ALTER：`VOL_score REAL`、`param_version TEXT`；写入 `S_temp`/`RS`/`VOL_score` 真值；`universe_id='local_stock'`；`param_version='p05-v2'`；同步 `DAILY_STOCK_COLS` / `DAILY_STOCK_ALTER_COLUMNS` |
-| `daily_l2` | ALTER：`VOL_score REAL`、`universe_id TEXT`、`param_version TEXT`；`VOL_score` 恒 null；`S_temp`/`RS` 真值；`universe_id='local_l2'`；同步 `DAILY_BASKET_COLS` / ALTER 列表 |
+| `daily_l2` | ALTER：`VOL_score REAL`、`universe_id TEXT`、`param_version TEXT`；~~`VOL_score` 恒 null~~ → 篮 VOL Spec 后可非 null；`S_temp`/`RS` 真值；`universe_id='local_l2'`；同步 `DAILY_BASKET_COLS` / ALTER 列表 |
 | `daily_l1` | 同 L2，`universe_id='local_l1'` |
 | `signal_event` | 无新列；`RS` 与当日 `daily_stock` 该票一致（可算则写，不可算则 null） |
 | `run_meta` | 继续写 run 级 `param_version`（已有）；行级镜像 `p05-v2`，不改 ok_predicate |
@@ -161,10 +161,10 @@ metrics §10 的 `map_version` / `member_set` 落篮子行：**本 slice 不补*
 | 块 | 变更 |
 |----|------|
 | 右侧存续 Top（RS 高） | 表头加 **量**；`ORDER BY IFNULL(RS,-1e99) DESC, IFNULL(VOL_score,-1e99) DESC, IFNULL(amount,0) DESC` |
-| L2 扫描 / L1 自身 | 表头加 **量**；篮子行量空；主排序仍 `rank(T)` 再 `S_temp`（S 有值后生效）；VOL 不抬主序 |
+| L2 扫描 / L1 自身 | 表头加 **量**；~~篮子行量空~~ → 篮 VOL Spec 后可填；主排序仍 `rank(T)` 再 `S_temp`（S 有值后生效）；VOL 不抬主序 |
 | 今日温转热（L1 Issue） / Radar「全市场温转热 Top」 | **不加「量」列**；排序仍按成交额；可继续展示 `RS` 列（本 slice 不改这两块的表头结构与排序键） |
 
-脚注（L1/L2 表一处即可）：L2/L1「量」本 slice 为空——篮子 VOL 后放（避历史换手序列成本）。
+脚注（L1/L2 表一处即可）：~~L2/L1「量」本 slice 为空——篮子 VOL 后放…~~ → 已由篮 VOL Spec 改为中性「量=`VOL_score`（篮换手自身分位…）」句。
 
 **排序语义（钉死）：** 过滤集内存在 ≥1 个非 null `RS` 时，主序为 RS（§1.3 目标达成）。过滤集 `RS` 全 null 时仍会按 `VOL_score→amount` 退化——这是并列键的合法行为，**不**宣称「成交额冒充路径已从 SQL 消失」。
 
@@ -182,7 +182,7 @@ metrics §10 的 `map_version` / `member_set` 落篮子行：**本 slice 不补*
 | `test_colinearity_story` | ∃ 凉/寒 且 RS≥80（合成或金标） |
 | `test_T_S_spearman` | 金标+合成 Spearman ≥ `spearman_min`；不含实盘日（§2.2 豁免） |
 | `test_C5_*` 扩展或 `test_RS_raw_same_engine` | 孪生合成 vs 个股：`RS_raw` / `S_temp` 一致；**不**比截面 `RS` |
-| `test_VOL_score_stock` | 个股窗脊=OHLC；公式/`vol_score_min_samples`；**当日 turnover null → VOL null**；L2/L1 写入后仍 null |
+| `test_VOL_score_stock` | 个股窗脊=OHLC；公式/`vol_score_min_samples`；**当日 turnover null → VOL null**；~~L2/L1 写入后仍 null~~ → 篮 VOL Spec 改达闸/未达闸夹具 |
 | `test_digest_rs_vol_sort` | **仅**右侧 Top + L2/L1 表含「量」；温转热榜无「量」；排序键；NULL→空 |
 | `test_signal_event_rs_matches_daily` | 同日同票 active `signal_event.RS` 与 `daily_stock.RS` 一致；双方 null 亦一致 |
 
@@ -190,7 +190,7 @@ metrics §10 的 `map_version` / `member_set` 落篮子行：**本 slice 不补*
 
 1. 可算个股/L2/L1 asof：`RS` ∈ {0..100 整数} 或合法 null；`universe_id` / `param_version=p05-v2` 正确。  
 2. 可算个股：**且**可算 L2/L1：`S_temp`∈[0,100] 或 null；可算个股 `VOL_score` 同规。  
-3. L2/L1：`VOL_score` 恒 null。  
+3. ~~L2/L1：`VOL_score` 恒 null。~~ → **已由篮 VOL Spec 取代**（达闸可非 null）。  
 4. `signal_event.RS` 与当日个股一致（含双 null）；见 `test_signal_event_rs_matches_daily`。  
 5. digest 右侧 Top：有非 null RS 时主序为 RS（+量+额）；全 null 时允许 VOL→amount 退化（§4.3）。  
 6. §5.1 测试全绿；`todo.md` Spec C **已完成**（改写为价格 RS + C1/Spearman 夹具 + 旁路 VOL；删「量价混合可跟」）；README Still out 去掉 RS peer / Spearman / `test_C1`。  
@@ -198,7 +198,7 @@ metrics §10 的 `map_version` / `member_set` 落篮子行：**本 slice 不补*
    - metrics §5.4：实盘 Spearman 本 slice 豁免修订注；  
    - metrics §9.1：`percentile_rank` 对齐本文件 §2.1 闭合式；  
    - metrics §13：增列 `rs_w1..w4`、`vol_score_min_samples`（初值 60）。  
-8. **不要求：** 9.30 实盘重跑过门、篮子非 null 量分、量混 RS、实盘 Spearman、C2 新测、`map_version`/`member_set` 落篮子行。
+8. **不要求（Spec C 当时）：** 9.30 实盘重跑过门、~~篮子非 null 量分~~（后由篮 VOL Spec 做）、量混 RS、实盘 Spearman、C2 新测、`map_version`/`member_set` 落篮子行。
 
 ---
 
@@ -231,3 +231,4 @@ metrics §10 的 `map_version` / `member_set` 落篮子行：**本 slice 不补*
 | 2026-10-07 | 二审真项：当日 turnover null→VOL null；VOL 窗脊=replay OHLC；T0 同步 metrics §9.1/§13/`vol_score_min_samples` |
 | 2026-10-07 | final：量列仅右侧 Top+L2/L1；温转热榜不加量；C5/`RS_raw` 同引擎须落测；ROC 脊=OHLC |
 | 2026-10-11 | 篮 VOL Spec 闭合 §2.3 L2/L1 恒 null；后放列表划掉该项并链 [`2026-10-11-basket-vol-score-design.md`](2026-10-11-basket-vol-score-design.md) |
+| 2026-10-11 | CR：§2.4 / §3 数据流 / §4 / §5.1–5.2 残留「恒 null」表述划掉或标注历史 |
