@@ -25,6 +25,10 @@ def test_with_limits_em_failure_exits_zero(tmp_path, monkeypatch):
     from scripts.common.bars import bars_conn
     from scripts.sync_bars_sample import main
 
+    status_path = tmp_path / "sync_status.json"
+    monkeypatch.setattr(
+        "scripts.common.sync_status.DEFAULT_SYNC_STATUS_PATH", str(status_path)
+    )
     db = tmp_path / "b.db"
     called = {"em": 0}
 

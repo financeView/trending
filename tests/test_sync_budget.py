@@ -2,12 +2,21 @@
 from datetime import date
 
 from scripts.common.bars import apply_flag_rows, bars_conn
+from scripts.common.sync_status import read_sync_status
 from scripts.sync_bars_sample import (
     ohlc_end_row_exists,
     skip_flags,
     skip_ohlc,
     write_sync_complete,
 )
+
+
+def _isolate_sync_status(tmp_path, monkeypatch):
+    p = tmp_path / "sync_status.json"
+    monkeypatch.setattr(
+        "scripts.common.sync_status.DEFAULT_SYNC_STATUS_PATH", str(p)
+    )
+    return p
 
 
 def test_skip_ohlc_only_when_end_row_exists(tmp_path):
@@ -74,11 +83,12 @@ def test_skip_flags_requires_flag_source(tmp_path):
 
 
 def test_github_output_sync_complete(tmp_path, monkeypatch):
+    status_path = _isolate_sync_status(tmp_path, monkeypatch)
     out = tmp_path / "github_output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(out))
-    write_sync_complete(True)
-    write_sync_complete(False)
-    write_sync_complete(True, elapsed_min=201.0)
+    write_sync_complete(True, session_asof="2026-09-30")
+    write_sync_complete(False, session_asof="2026-09-30")
+    write_sync_complete(True, elapsed_min=201.0, session_asof="2026-09-30")
     text = out.read_text(encoding="utf-8")
     assert "sync_complete=true" in text
     assert "sync_complete=false" in text
@@ -86,12 +96,18 @@ def test_github_output_sync_complete(tmp_path, monkeypatch):
     assert "run_deferred=true" not in text  # Spec F: no deferred gate
     assert "run_deferred=" not in text
     assert "sync_elapsed_min=201.0" in text
+    data = read_sync_status(status_path)
+    assert data is not None
+    assert data["sync_complete"] is True
+    assert data["session_asof"] == "2026-09-30"
+    assert data["elapsed_min"] == 201.0
 
 
 def test_max_codes_counts_work_not_list_prefix(tmp_path, monkeypatch):
     """First ticker already skippable; max-codes=1 must work the next name."""
     from scripts.sync_bars_sample import main
 
+    status_path = _isolate_sync_status(tmp_path, monkeypatch)
     bars_path = str(tmp_path / "bars.db")
     conn = bars_conn(bars_path)
     end = date(2026, 9, 30)
@@ -131,6 +147,13 @@ def test_max_codes_counts_work_not_list_prefix(tmp_path, monkeypatch):
         "scripts.sync_bars_sample.latest_trade_day",
         lambda: end,
     )
+    monkeypatch.setattr(
+        "scripts.sync_bars_sample.run_spec_e_passes", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        "scripts.sync_bars_sample.codes_from_universe",
+        lambda *a, **k: ["000001.SZ", "000002.SZ", "600000.SH"],
+    )
     out = tmp_path / "github_output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(out))
     rc = main(
@@ -148,11 +171,16 @@ def test_max_codes_counts_work_not_list_prefix(tmp_path, monkeypatch):
     assert calls == ["000002.SZ"]
     assert "000001.SZ" not in calls
     assert "sync_complete=false" in out.read_text(encoding="utf-8")
+    data = read_sync_status(status_path)
+    assert data is not None
+    assert data["sync_complete"] is False
+    assert data["session_asof"] == end.isoformat()
 
 
 def test_with_limits_skipped_when_end_not_asof(tmp_path, monkeypatch):
     from scripts.sync_bars_sample import main
 
+    _isolate_sync_status(tmp_path, monkeypatch)
     called = []
 
     def _limits(*_a, **_k):
@@ -169,6 +197,13 @@ def test_with_limits_skipped_when_end_not_asof(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "scripts.sync_bars_sample.latest_trade_day",
         lambda: date(2026, 10, 9),
+    )
+    monkeypatch.setattr(
+        "scripts.sync_bars_sample.run_spec_e_passes", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        "scripts.sync_bars_sample.codes_from_universe",
+        lambda *a, **k: ["000001.SZ"],
     )
     out = tmp_path / "github_output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(out))
@@ -191,6 +226,7 @@ def test_vendor_ohlc_error_continues_to_next_code(tmp_path, monkeypatch, capsys)
     """Delisted/empty sina must not abort the whole sync job (Actions 37334793429)."""
     from scripts.sync_bars_sample import main
 
+    status_path = _isolate_sync_status(tmp_path, monkeypatch)
     calls = []
 
     def _ohlc(_conn, code, end, limiter=None):
@@ -209,6 +245,13 @@ def test_vendor_ohlc_error_continues_to_next_code(tmp_path, monkeypatch, capsys)
         "scripts.sync_bars_sample.latest_trade_day",
         lambda: date(2026, 9, 30),
     )
+    monkeypatch.setattr(
+        "scripts.sync_bars_sample.run_spec_e_passes", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        "scripts.sync_bars_sample.codes_from_universe",
+        lambda *a, **k: ["000001.SZ", "000003.SZ"],
+    )
     out = tmp_path / "github_output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(out))
     rc = main(
@@ -224,6 +267,10 @@ def test_vendor_ohlc_error_continues_to_next_code(tmp_path, monkeypatch, capsys)
     assert calls == ["000001.SZ", "000003.SZ"] or calls == ["000003.SZ", "000001.SZ"]
     assert "000001.SZ" in calls
     assert "sync_complete=true" in out.read_text(encoding="utf-8")
+    data = read_sync_status(status_path)
+    assert data is not None
+    assert data["sync_complete"] is True
+    assert data["session_asof"] == "2026-09-30"
     err = capsys.readouterr().err
     assert "000003.SZ" in err or "No value to decode" in err or "warn" in err.lower()
 

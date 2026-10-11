@@ -22,6 +22,7 @@ from scripts.common.bars import (
 )
 from scripts.common.calendar import latest_trade_day
 from scripts.common.http import RateLimiter
+from scripts.common.sync_status import write_sync_status
 from scripts.common.universe import load_quarantine_codes, load_universe_codes
 
 
@@ -106,8 +107,10 @@ def run_spec_e_passes(conn, codes, *, session_asof: dt.date) -> None:
         print("[sync_bars] warn: board_calc skipped: %s" % e, file=sys.stderr)
 
 
-def write_sync_complete(complete: bool, elapsed_min: float = 0.0) -> None:
-    """Write sync_complete (+ elapsed) for Actions. Spec F: no run_deferred gate."""
+def write_sync_complete(
+    complete: bool, elapsed_min: float = 0.0, *, session_asof: str
+) -> None:
+    """Success-end: GITHUB_OUTPUT + local sync_status.json. Spec F: no run_deferred."""
     flag = "true" if complete else "false"
     print("[sync_bars] sync_complete=%s elapsed_min=%.1f" % (flag, elapsed_min))
     path = os.environ.get("GITHUB_OUTPUT")
@@ -115,6 +118,11 @@ def write_sync_complete(complete: bool, elapsed_min: float = 0.0) -> None:
         with open(path, "a", encoding="utf-8") as f:
             f.write("sync_complete=%s\n" % flag)
             f.write("sync_elapsed_min=%.1f\n" % elapsed_min)
+    write_sync_status(
+        sync_complete=bool(complete),
+        session_asof=session_asof,
+        elapsed_min=float(elapsed_min),
+    )
 
 
 def main(argv=None) -> int:
@@ -167,6 +175,8 @@ def main(argv=None) -> int:
         codes = codes_from_universe()
     codes = sorted(set(codes))
     conn = bars_conn()
+    asof_s = session_asof.isoformat()
+    write_sync_status(sync_complete=False, session_asof=asof_s, elapsed_min=0.0)
     lim = RateLimiter(2.0)
     started = dt.datetime.utcnow()
     complete = True
@@ -231,11 +241,12 @@ def main(argv=None) -> int:
         run_spec_e_passes(conn, pass_codes, session_asof=session_asof)
     except Exception as e:  # noqa: BLE001
         print("[sync_bars] error: hard_freeze/stamp failed: %s" % e, file=sys.stderr)
+        write_sync_status(sync_complete=False, session_asof=asof_s, elapsed_min=0.0)
         return 1
     finally:
         conn.close()
     elapsed_min = (dt.datetime.utcnow() - started).total_seconds() / 60.0
-    write_sync_complete(complete, elapsed_min)
+    write_sync_complete(complete, elapsed_min, session_asof=asof_s)
     return 0
 
 

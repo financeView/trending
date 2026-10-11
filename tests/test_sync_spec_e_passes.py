@@ -6,6 +6,14 @@ from scripts.common.calendar import load_trade_dates_from_list
 from scripts.sync_bars_sample import main, run_spec_e_passes
 
 
+def _isolate_sync_status(tmp_path, monkeypatch):
+    p = tmp_path / "sync_status.json"
+    monkeypatch.setattr(
+        "scripts.common.sync_status.DEFAULT_SYNC_STATUS_PATH", str(p)
+    )
+    return p
+
+
 def test_run_spec_e_passes_invokes_both(tmp_path, monkeypatch, capsys):
     conn = bars_conn(str(tmp_path / "b.db"))
     seen: list[str] = []
@@ -38,6 +46,7 @@ def test_run_spec_e_passes_invokes_both(tmp_path, monkeypatch, capsys):
 
 def test_main_passes_use_full_universe_not_codes_argv(tmp_path, monkeypatch):
     """Spec: passes scan mapped U; --codes only limits OHLC/flags loop."""
+    _isolate_sync_status(tmp_path, monkeypatch)
     db = tmp_path / "b.db"
     got = {}
 
@@ -78,14 +87,15 @@ def test_main_passes_use_full_universe_not_codes_argv(tmp_path, monkeypatch):
 def test_incomplete_still_calls_passes_and_keeps_complete_false(
     tmp_path, monkeypatch
 ):
+    _isolate_sync_status(tmp_path, monkeypatch)
     db = tmp_path / "b.db"
     calls = {"n": 0, "complete": None}
 
     def _passes(conn, codes, *, session_asof):
         calls["n"] += 1
 
-    def _wsc(complete, elapsed_min=0.0):
-        calls["complete"] = complete
+    def _wsc(*a, **k):
+        calls["complete"] = a[0] if a else k.get("complete")
 
     monkeypatch.setattr("scripts.sync_bars_sample.run_spec_e_passes", _passes)
     monkeypatch.setattr("scripts.sync_bars_sample.write_sync_complete", _wsc)
@@ -119,6 +129,7 @@ def test_incomplete_still_calls_passes_and_keeps_complete_false(
 
 def test_main_pass_sets_flag_beyond_ohlc_end_window(tmp_path, monkeypatch):
     """Spec §5.2#8: long suspend outside --end still gets asof flag after pass."""
+    _isolate_sync_status(tmp_path, monkeypatch)
     days = []
     d = date(2024, 1, 2)
     for _ in range(25):

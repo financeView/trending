@@ -2,7 +2,16 @@ import datetime as dt
 
 from scripts.common.bars import bars_conn
 from scripts.common.hard_freeze import read_hard_freeze_pass_meta
+from scripts.common.sync_status import read_sync_status
 from scripts.sync_bars_sample import main, run_spec_e_passes
+
+
+def _isolate_sync_status(tmp_path, monkeypatch):
+    p = tmp_path / "sync_status.json"
+    monkeypatch.setattr(
+        "scripts.common.sync_status.DEFAULT_SYNC_STATUS_PATH", str(p)
+    )
+    return p
 
 
 def test_freeze_success_writes_stamp(tmp_path, monkeypatch):
@@ -58,6 +67,7 @@ def test_empty_codes_no_stamp(tmp_path, monkeypatch):
 
 
 def test_main_empty_mapped_nonzero(tmp_path, monkeypatch):
+    status_path = _isolate_sync_status(tmp_path, monkeypatch)
     monkeypatch.setattr(
         "scripts.sync_bars_sample.bars_conn",
         lambda: bars_conn(str(tmp_path / "b.db")),
@@ -77,9 +87,14 @@ def test_main_empty_mapped_nonzero(tmp_path, monkeypatch):
     rc = main(["--end", "2024-01-09"])
     assert rc == 1
     assert wrote["n"] == 0
+    data = read_sync_status(status_path)
+    assert data is not None
+    assert data["sync_complete"] is False
+    assert data["session_asof"] == "2024-01-09"
 
 
 def test_main_freeze_fail_no_sync_complete_true(tmp_path, monkeypatch):
+    status_path = _isolate_sync_status(tmp_path, monkeypatch)
     monkeypatch.setattr(
         "scripts.sync_bars_sample.bars_conn",
         lambda: bars_conn(str(tmp_path / "b.db")),
@@ -104,17 +119,22 @@ def test_main_freeze_fail_no_sync_complete_true(tmp_path, monkeypatch):
     monkeypatch.setattr("scripts.sync_bars_sample.run_spec_e_passes", _boom)
     outs = []
 
-    def _wsc(complete, elapsed_min=0.0):
-        outs.append(complete)
+    def _wsc(*a, **k):
+        outs.append(a[0] if a else k.get("complete"))
 
     monkeypatch.setattr("scripts.sync_bars_sample.write_sync_complete", _wsc)
     rc = main(["--end", "2024-01-09"])
     assert rc == 1
     assert outs == []  # must not write sync_complete on fail path
+    data = read_sync_status(status_path)
+    assert data is not None
+    assert data["sync_complete"] is False
+    assert data["session_asof"] == "2024-01-09"
 
 
 def test_stamp_write_fail_no_sync_complete(tmp_path, monkeypatch):
     """Spec §5.7: write_hard_freeze_pass_meta raise → sync non-zero, no sync_complete."""
+    status_path = _isolate_sync_status(tmp_path, monkeypatch)
     y = tmp_path / "m.yaml"
     y.write_text(
         "param_version: p-x\nhard_freeze_min_suspend_days: 20\n", encoding="utf-8"
@@ -152,11 +172,14 @@ def test_stamp_write_fail_no_sync_complete(tmp_path, monkeypatch):
     outs = []
     monkeypatch.setattr(
         "scripts.sync_bars_sample.write_sync_complete",
-        lambda complete, elapsed_min=0.0: outs.append(complete),
+        lambda *a, **k: outs.append(a[0] if a else k.get("complete")),
     )
     rc = main(["--end", "2024-01-09"])
     assert rc == 1
     assert outs == []
+    data = read_sync_status(status_path)
+    assert data is not None
+    assert data["sync_complete"] is False
 
 
 def test_board_calc_warn_does_not_block_stamp(tmp_path, monkeypatch):
@@ -183,6 +206,7 @@ def test_board_calc_warn_does_not_block_stamp(tmp_path, monkeypatch):
 
 
 def test_incomplete_still_stamps(tmp_path, monkeypatch):
+    status_path = _isolate_sync_status(tmp_path, monkeypatch)
     y = tmp_path / "m.yaml"
     y.write_text(
         "param_version: p-x\nhard_freeze_min_suspend_days: 20\n", encoding="utf-8"
@@ -191,8 +215,8 @@ def test_incomplete_still_stamps(tmp_path, monkeypatch):
     db = tmp_path / "b.db"
     calls = {"complete": None}
 
-    def _wsc(complete, elapsed_min=0.0):
-        calls["complete"] = complete
+    def _wsc(*a, **k):
+        calls["complete"] = a[0] if a else k.get("complete")
 
     monkeypatch.setattr("scripts.sync_bars_sample.write_sync_complete", _wsc)
     monkeypatch.setattr(
@@ -225,5 +249,10 @@ def test_incomplete_still_stamps(tmp_path, monkeypatch):
     rc = main(["--end", "2024-01-09", "--max-codes", "1", "--skip-flags"])
     assert rc == 0
     assert calls["complete"] is False
+    # spy replaces dual-write; early pessimistic file must still be false + asof
+    data = read_sync_status(status_path)
+    assert data is not None
+    assert data["sync_complete"] is False
+    assert data["session_asof"] == "2024-01-09"
     conn = bars_conn(str(db))
     assert read_hard_freeze_pass_meta(conn)["n"] == 20
