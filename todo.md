@@ -19,7 +19,7 @@
 
 | 项 | 现状 | 要做什么 |
 |----|------|----------|
-| **Protocol B** | `hard_freeze_min_suspend_days` / `param_version` 无代码护栏 | 钉 runbook：改 N 或 bump `param_version` 前，同环境必须跑完 hard_freeze 全量重写；可选 CI/校验「宣称新版本前旗已重算」 |
+| **Protocol B** | **已落地**（戳 + sync/`daily_run` 强卡控；Actions cache B） | Spec [`2026-10-10-protocol-b-hard-freeze-stamp-design.md`](docs/superpowers/specs/2026-10-10-protocol-b-hard-freeze-stamp-design.md) · plan [`2026-10-10-protocol-b-hard-freeze-stamp.md`](docs/superpowers/plans/2026-10-10-protocol-b-hard-freeze-stamp.md) · runbook [`hard-freeze-stamp-runbook.md`](docs/ops/hard-freeze-stamp-runbook.md) |
 | **`limit_rule` 回退** | 切回 `vendor_fields` 只停写，旧 `limit_source=board_calc_v1` 仍被 fill 读 | 文档 + 清库脚本，或 fill/summary 在 YAML 与 `limit_source` 不一致时告警 |
 | **incomplete + asof 限价** | `sync_complete=false` 时跳过 `--with-limits`，board_calc 又不补 asof | 产品抉择：是否把 asof 东财限价与 OHLC 预算解耦；未解耦前勿把 partial 当日影子成交当权威 |
 

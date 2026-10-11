@@ -57,7 +57,16 @@ catch-up / 历史追赶日：board_calc 的日期门闩用 **`session_asof`**，
 
 **挂点：** 两 pass 接在 `scripts/sync_bars_sample.py`（sync **job** 入口）里：**OHLC/flags 循环结束之后**（`with_limits` 若执行则在其后）、`write_sync_complete` **之前**；`daily_run` 仅当 `sync_complete=true` 时在 **metrics job** 跑（Spec F）。cron 必须在 sync job 内跑完两 pass。
 
-**`sync_complete=false`（OHLC 宇宙未跑完）：** 两 pass **仍执行**（基于库内已有行全量重算）；不得因 pass 本身把 `sync_complete` 打成 false。pass 异常 → stderr warn + 非零计数日志，**不**抛死整个 sync（与单票 OHLC warn 同级），以便次日续跑；`daily_run` 仍按既有门闩跳过。
+**`sync_complete=false`（OHLC 宇宙未跑完）：** 两 pass **仍执行**（基于库内已有行全量重算）；不得因 pass 本身把 `sync_complete` 打成 false。
+
+**pass 失败策略（修订）：**
+
+| pass | 异常时 |
+|------|--------|
+| `hard_freeze` | **硬失败** → sync 非零；不得 `sync_complete=true`；写戳与 Actions cache 见 Protocol B [`2026-10-10-protocol-b-hard-freeze-stamp-design.md`](./2026-10-10-protocol-b-hard-freeze-stamp-design.md)（**取代**原「两 pass 均 warn、不抛死 sync」中 hard_freeze 部分） |
+| `board_calc` | 仍 stderr warn + 非零计数日志，**不**抛死整个 sync（与单票 OHLC warn 同级），以便次日续跑 |
+
+`daily_run` 仍按既有门闩跳过 incomplete；戳不一致时由 Protocol B 在将算截面时硬失败（交易日 skip 之后，见 Protocol B §3.3）。
 
 **预算边界：** 生产 cron/only_date **不再**传 `--time-budget-min`（Spec F）；若本地/测试仍传，该预算**只约束** OHLC/flags 网络循环，两 pass 不计入。sync job 总超时 `timeout-minutes: 360`。首跑全宇宙重算接受数分钟级墙钟；不得静默截断半票宇宙（要么整票提交，要么该票跳过并记日志）。
 
@@ -72,7 +81,7 @@ catch-up / 历史追赶日：board_calc 的日期门闩用 **`session_asof`**，
 
 首跑加列后依赖上述全量重算，**禁止**只更新「本次 fetch 窗口」而留下历史 `hard_freeze_flag` 全 0。
 
-**N 加载：** sync 侧 freeze pass **读取** `config/metrics/a_share_daily.yaml` 的 `hard_freeze_min_suspend_days`（仅此旋钮；不必加载全套 MetricsParams）。metrics 读 bars 列时 **不**再读 N 重算旗。
+**N 加载：** sync 侧 freeze pass 与 Protocol B 写戳/校验 **同一解析**：默认 `config/metrics/a_share_daily.yaml`，若设 `METRICS_PARAMS_YAML` 则读该路径；同次 load 取 `hard_freeze_min_suspend_days` 与（写戳所需的）`param_version`（不必加载全套 MetricsParams）。metrics 读 bars 列时 **不**再读 N 重算旗。
 
 ---
 
@@ -166,7 +175,7 @@ hard_frozen := is_st OR hard_freeze_flag
 
 ### 4.3.1 N 变更与 `param_version`（方案 B，与「persist + 读列」锁定一致）
 
-**护栏（P0）：** 单行戳 + sync/`daily_run` 强卡控见 [`2026-10-10-protocol-b-hard-freeze-stamp-design.md`](./2026-10-10-protocol-b-hard-freeze-stamp-design.md)（设计中）。
+**护栏（P0）：** 单行戳 + sync/`daily_run` 强卡控见 [`2026-10-10-protocol-b-hard-freeze-stamp-design.md`](./2026-10-10-protocol-b-hard-freeze-stamp-design.md)（已落地）。
 
 `bars.hard_freeze_flag` 是长期停牌硬冻的 **SoT**；N 是 **sync 写盘旋钮**，不是 metrics 现算输入。
 
@@ -231,3 +240,5 @@ EM tfp 写入历史；退市/暂停上市 OR 进旗（v1.1）；用「无 bar」
 | 2026-10-08 | CR：真项修补——昨 `close_raw` 基准、`301`、HALF_UP、全量重算范围、`limit_rule` 门闩、backtest-eval 触点；次新/创业板 ST 为已知近似 |
 | 2026-10-08 | 独立 CR 真项：bars ensure-column；N 变更方案 B（persist SoT + 全量重写）；pass 与 sync 预算/incomplete 语义；夹具补迁移与 N 原子性；覆盖表对齐 §5.5 |
 | 2026-10-08 | Final nits：`session_asof`≠`--end`；daily_run 加载列；CREATE+ALTER；§1 区分契约/代码 |
+| 2026-10-10 | §2.1：hard_freeze 失败策略改由 Protocol B 硬失败覆盖；board_calc 仍 warn；§4.3.1 护栏链到戳 Spec |
+| 2026-10-10 | §2.1 N 加载：与 Protocol B 同源（含 `METRICS_PARAMS_YAML`；同次取 N + `param_version`） |

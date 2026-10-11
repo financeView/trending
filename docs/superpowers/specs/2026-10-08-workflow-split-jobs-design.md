@@ -113,6 +113,8 @@ Spec D / sw-yaml 文中「预算 200/300 + run_deferred」→ 改为指向本 Sp
 **metrics cache 硬门闩：** `actions/cache` restore 后须确认 **精确 key 命中**（`cache-hit == true`）。若 `sync_complete=true` 但精确 key **未命中**（含仅命中 `restore-keys` 旧缓存）→ **fail metrics**（`::error::`），禁止用过期 bars 算截面。  
 sync job 仍可用 `restore-keys: bars-` 加速增量拉取。
 
+**sync job 失败仍须 save（Protocol B）：** 默认单体 `actions/cache@v4` post-if 为 `success()`。当 hard_freeze 等导致 sync **非零**退出时，仍须把本 run 已写入的 `data/cache` 存到精确 key `bars-${{ github.run_id }}`：用 `actions/cache/restore` + `actions/cache/save`，save 条件含失败仍执行且 `cache-hit != 'true'`；**禁止** `save-always:`；**禁止** key 拼 `run_attempt`。同 `run_id` 的 Re-run 不能覆盖已存在 key——恢复靠新 workflow run。细节见 Protocol B [`2026-10-10-protocol-b-hard-freeze-stamp-design.md`](./2026-10-10-protocol-b-hard-freeze-stamp-design.md) §4.5。`sync_complete=false` 且 exit 0 时既有「便于 cache 保存」语义不变。
+
 #### 4.3.2 Git 树（taxonomy / heartbeat / first_seen）
 
 Spec D 的 taxonomy 步可能 **push** `config/taxonomy/*.yaml`、`data/heartbeat.json`、`data/unmapped_first_seen.json` 到 `main`。  
@@ -224,3 +226,5 @@ if: ${{ needs.sync.outputs.sync_complete == 'true' }}
 |------|------|
 | 2026-10-08 | 初版：两 job；废 deferred 门闩；废生产 time-budget 截断；cache 同 run_id；反假绿 warning |
 | 2026-10-08 | CR：metrics 须 checkout 默认分支 tip（非触发 SHA）；metrics cache 精确 key miss → fail；补验收项 |
+| 2026-10-10 | §4.3.1：交叉 Protocol B——sync 非零时仍 save `bars-${{run_id}}`（cache B） |
+| 2026-10-10 | §4.3.1：钉 restore/save、禁 save-always/run_attempt；Re-run 不覆盖 → 新 run |
