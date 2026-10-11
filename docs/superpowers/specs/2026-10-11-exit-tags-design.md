@@ -1,8 +1,8 @@
 # Spec：止盈辅助标签（开旗 + 只展示）
 
 **日期：** 2026-10-11  
-**状态：** 设计完成；plan [`2026-10-11-exit-tags.md`](../plans/2026-10-11-exit-tags.md)  
-**范围：** metrics §11 三标签（波动率放大 / 开香槟 / 危险信号）落地；`exit_tags_enabled: true`；digest/Issue 展示；个股 + L2。  
+**状态：** 已落地 (code)；plan [`2026-10-11-exit-tags.md`](../plans/2026-10-11-exit-tags.md)  
+**范围：** metrics §11 三标签（波动率放大 / 开香槟 / 危险信号）**代码已合入**（只展示；digest/Issue「止盈」列；个股 + L2 无 `danger`；L1 恒空）。同 PR 内 yaml **`exit_tags_enabled` / `param_version` 终值**由 **篮子 VOL Task 4** 收口（`p05-v5` + CI）；当前生产 yaml 仍为关 / `p05-v3`。  
 **后放（禁止混入本 slice）：** fill / paper 减仓语义；L1 标签；`tag_rate_cap` 硬熔断日更；节气非线性打分；改 `R` / 右侧天数 / 节气 / 温度树 / RS / `VOL_score`；树外 bars 预热；篮子 VOL（见姊妹 Spec）。
 
 交叉：metrics [`2026-09-29-trend-metrics-engine-design.md`](2026-09-29-trend-metrics-engine-design.md) §11 / §12 / §13 · Spec C [`2026-10-07-rs-c1-vol-design.md`](2026-10-07-rs-c1-vol-design.md) · 篮子 VOL [`2026-10-11-basket-vol-score-design.md`](2026-10-11-basket-vol-score-design.md) · 待办 [`todo.md`](../../../todo.md) P1 止盈辅助标签
@@ -198,3 +198,4 @@ replay / peer RS / VOL_score
 | 2026-10-11 | CR：香槟断窗钉死；peer=(a) asof 冻结；L2 danger 后放；Protocol B 戳；digest 列落点；yaml 键表述修正 |
 | 2026-10-11 | CR2：§4 数据流与 L2 无 danger 对齐；验收#4 加「仅止盈 slice / 同 PR 以篮 VOL#8 为准」 |
 | 2026-10-11 | Plan CR：验收#5 同 PR 终值可为 p05-v5 |
+| 2026-10-11 | Task 6（同 PR docs）：状态 → 已落地 (code)；metrics §11 修订注；todo 改写；yaml 开旗/pv 待 basket VOL Task 4 |

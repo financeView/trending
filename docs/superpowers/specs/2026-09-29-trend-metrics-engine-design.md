@@ -640,6 +640,8 @@ RS = round(100 * percentile_rank(RS_raw among peer_universe))  # 0–100 整数
 
 `tag_rate_cap` 初值 0.02（标的·日）。未达定义前保持 flag 关。
 
+> **修订注（2026-10-11，exit-tags slice）：** 实现与验收见专文 [`2026-10-11-exit-tags-design.md`](2026-10-11-exit-tags-design.md)。本 slice **只展示**（不改 fill / paper）；**L1 恒 `tags=[]`**；**L2 `danger` 后放**（由同 PR 姊妹篮子 VOL Spec 在合成序列具备可靠 Σamount 后启用）。**默认开旗**与 yaml `param_version` bump 与同 PR 姊妹 Spec 一并收口（非本 slice 单独 flip）；§13 配置表仍记 `exit_tags_enabled: false` 直至同 PR 篮子 VOL Task 4 终值。
+
 ## 12. 输出契约
 
 ```text

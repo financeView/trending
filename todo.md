@@ -29,7 +29,7 @@
 
 | 项 | 现状 | 要做什么 |
 |----|------|----------|
-| **止盈辅助标签**（原 §2.7） | `exit_tags_enabled=false`；波动放大 / 开香槟 / 危险信号未实现 | 开旗后**不得**改 R / 右侧天数 / 节气；只做辅助标签 + 可选减仓语义；对齐 metrics §11 |
+| **止盈辅助标签**（原 §2.7） | **代码已落地**（只展示）；三标签已实现（个股 `vol_expand` / `champagne` / `danger`；L2 无 `danger`；L1 恒空）；digest「止盈」列已接；yaml 仍 `exit_tags_enabled=false` / `p05-v3` | 同 PR **篮子 VOL Task 4** 终开旗 + `param_version` + CI；开旗后**不得**改 R / 右侧天数 / 节气；fill / **减仓语义后放**；对齐 metrics §11 · [`2026-10-11-exit-tags-design.md`](docs/superpowers/specs/2026-10-11-exit-tags-design.md) |
 | **节气非线性打分**（原 §2.8） | 个股已有**线性** scorer + 金标；L2 已同引擎纯函数 | NN / 额外 KPI 标定战役后放；勿 silently 改线性默认 |
 | **篮子 `VOL_score`** | 个股旁路 VOL 已 ship；L2/L1 恒 null（Spec C §2.3） | 若要做：单独切片，量**不进** RS |
 | **树外 bars 预热** | Spec D 未做 `sync_bars` 预热 | 宇宙扩张后新成分首日历史不足时再开；非日更阻塞 |
