@@ -89,3 +89,27 @@ def test_workflow_only_date_shadow_uses_asof_not_heartbeat():
     assert then, "only_date if-branch missing in live_shadow"
     assert "--from-heartbeat" not in then.group(1)
     assert "--from-heartbeat" in block
+
+
+def test_sync_cache_restore_save_protocol_b():
+    text = Path(".github/workflows/daily-trend.yml").read_text(encoding="utf-8")
+    sync = _sync_block(text)
+    assert "actions/cache/restore@v4" in sync
+    assert "actions/cache/save@v4" in sync
+    assert "save-always" not in text
+    assert "run_attempt" not in text
+    assert "bars-${{ github.run_id }}" in sync
+    m = re.search(
+        r"- name: Save bars cache\n(.*?)(?=\n      - name:|\Z)",
+        sync,
+        re.S,
+    )
+    assert m, "Save bars cache step missing"
+    save_chunk = m.group(1)
+    assert "actions/cache/save@v4" in save_chunk
+    assert "always()" in save_chunk or "failure()" in save_chunk
+    assert "cache-hit" in save_chunk
+    assert "bars-restore" in save_chunk or "bars-${{ github.run_id }}" in save_chunk
+    met = _metrics_block(text)
+    assert "bars-${{ github.run_id }}" in met
+    assert "cache-hit" in met

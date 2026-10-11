@@ -59,11 +59,13 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Restore bars cache
-        uses: actions/cache@v4
+        id: bars-restore
+        uses: actions/cache/restore@v4
         with:
           path: data/cache
           key: bars-${{ github.run_id }}
-          restore-keys: bars-
+          restore-keys: |
+            bars-
 
       - name: Unit tests
         run: python -m pytest tests/ -q
@@ -110,6 +112,13 @@ jobs:
         if: ${{ always() && steps.sync.outcome == 'success' && steps.sync.outputs.sync_complete != 'true' }}
         run: |
           echo "::warning::sync_incomplete — metrics job will be skipped"
+
+      - name: Save bars cache
+        if: ${{ always() && steps.bars-restore.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: data/cache
+          key: bars-${{ github.run_id }}
 
   metrics:
     needs: sync
