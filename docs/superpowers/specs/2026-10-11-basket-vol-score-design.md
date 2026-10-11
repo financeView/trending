@@ -1,7 +1,7 @@
 # Spec：篮子 `VOL_score`（L2/L1 换手自身分位）
 
 **日期：** 2026-10-11  
-**状态：** 设计完成；plan [`2026-10-11-basket-vol-score.md`](../plans/2026-10-11-basket-vol-score.md)  
+**状态：** 已落地；plan [`2026-10-11-basket-vol-score.md`](../plans/2026-10-11-basket-vol-score.md)  
 **范围：** 闭合 Spec C §2.3 后放——L2/L1 非 null `VOL_score`（达样本闸时）；合成篮日线附加 Σamount/Σfloat_mv；digest「量」列可填；在 Σ 可用后**启用 L2 `danger`**（止盈 Spec 已后放项）。  
 **后放（禁止混入本 slice）：** 量进 RS；`engine_state` / 裸砍 lookback；成员个股 VOL 加权冒充篮 VOL；改合成**价**权重公式（除附加 Σ 字段外）；个股止盈三标签主逻辑（见姊妹 Spec）；节气 NN；L1 `tags` 非空。
 
@@ -133,3 +133,4 @@ member bars → synthesize_basket_bars (+ amount/float_mv Σ)
 |------|------|
 | 2026-10-11 | 初版：合成 Σ 换手 + 复用 vol_score；L2+L1；覆盖 Spec C 恒 null；版本 p05-v5 |
 | 2026-10-11 | CR：Σ 配对成员；Protocol B 戳；启用 L2 danger；双处 null 清除；synth 缓存共用 |
+| 2026-10-11 | Task 4：状态 → 已落地；yaml `param_version=p05-v5` + `exit_tags_enabled=true`；**ops**：merge 后目标 `bars.db` 须硬冻 pass + 戳对齐 `p05-v5`（Protocol B）再跑 metrics |

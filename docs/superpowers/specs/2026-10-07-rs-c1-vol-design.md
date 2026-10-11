@@ -1,9 +1,9 @@
 # Spec C：价格 RS + S_temp/C1 + 旁路 VOL_score
 
 **日期：** 2026-10-07  
-**状态：** 已落地；plan [`2026-10-07-rs-c1-vol.md`](../plans/2026-10-07-rs-c1-vol.md)  
+**状态：** 已落地；plan [`2026-10-07-rs-c1-vol.md`](../plans/2026-10-07-rs-c1-vol.md)。**篮 VOL** 见 [`2026-10-11-basket-vol-score-design.md`](2026-10-11-basket-vol-score-design.md)（已落地；`p05-v5`）。  
 **范围：** metrics §9 价格相对强度（三类 peer）+ §5.4 `S_temp` + §14 `test_C1` / Spearman 夹具门禁 + 个股旁路量分 `VOL_score`；digest §1.3 真 RS 排序与「量」列。  
-**后放（禁止混入本 slice）：** 量能线性/乘法混入 `RS`（否决的「量价混合 RS v1.1」）；L2/L1 非 null `VOL_score`（见 §2.3 原因）；实盘 asof 日 Spearman；Spec D 全 A / YAML 日拉；Spec E `board_calc` / 硬冻旗；C2 开仓夹具扩面；L2/L1 全历史 replay / `engine_state`；改温度决策树。
+**后放（禁止混入本 slice）：** 量能线性/乘法混入 `RS`（否决的「量价混合 RS v1.1」）；~~L2/L1 非 null `VOL_score`~~ → 已由篮 VOL Spec 闭合；实盘 asof 日 Spearman；Spec D 全 A / YAML 日拉；Spec E `board_calc` / 硬冻旗；C2 开仓夹具扩面；L2/L1 全历史 replay / `engine_state`；改温度决策树。
 
 交叉：metrics [`2026-09-29-trend-metrics-engine-design.md`](2026-09-29-trend-metrics-engine-design.md) §4 / §5.4 / §9 / §14 · L2 [`2026-10-06-l2-same-engine-digest-design.md`](2026-10-06-l2-same-engine-digest-design.md) · L1 [`2026-10-07-l1-same-engine-design.md`](2026-10-07-l1-same-engine-design.md) · market-data [`2026-10-01-market-data-contract-design.md`](2026-10-01-market-data-contract-design.md) §6 · 待办 [`todo.md`](../../../todo.md) §1.3 / §2.2 / Spec C
 
@@ -71,7 +71,7 @@ RS     = round(100 * percentile_rank(RS_raw among peer_universe))  # 0–100 整
 - 用途：同档 \(T\) 内排序；**不得**替代决策树切档或单独触发右侧（C2 逻辑本 slice 不改代码路径）。  
 - CI Spearman：本 slice **临时豁免** metrics §5.4「金标+抽样实盘日」中的实盘腿——仅 **金标+合成夹具** 上 `Spearman(rank(T), S_temp) ≥ spearman_min`（0.55）。实盘抽样日 Spearman **后放**；metrics 权威文在本 slice 落地时加一句修订注指向本豁免，避免静默分叉。
 
-### 2.3 旁路 `VOL_score`（个股必做；篮子后放）
+### 2.3 旁路 `VOL_score`（个股必做；~~篮子后放~~ → 已闭合）
 
 **个股**
 
@@ -86,11 +86,10 @@ VOL_score  = round(100 * percentile_rank(turnover_t among window))  # 公式同 
 - `n < vol_score_min_samples`（默认 **60**，入 yaml / `MetricsParams`）或 `n≤1` → `VOL_score=null`。  
 - **不**排除涨停日（本 slice 不加特殊规则；后放可加）。
 
-**L2 / L1（本 slice）**
+**L2 / L1（本 slice 曾后放；现已由篮 VOL Spec 闭合）**
 
-- 列存在，写入值 **恒 SQL NULL**。  
-- **原因（须在实现/digest 脚注可追溯）：** 非 null 篮子量分需要按日攒 Σamount/Σfloat_mv 历史序列再自身分位，成本与已后放的 L2/L1 全历史 replay / `engine_state` 同型；本 slice 优先闭合价格 RS + 个股量旁路，避免再开一条篮子时序工程。后续可单开补丁把篮子量分做成与个股同型（Σamount/Σmv → 自身分位）。  
-- digest 篮子行「量」列空；排序在 `VOL_score` 全 null 时自然退化为 `RS → amount`。
+- ~~列存在，写入值恒 SQL NULL。~~ **已取代：** 见 [`2026-10-11-basket-vol-score-design.md`](2026-10-11-basket-vol-score-design.md)——合成 Σamount/Σfloat_mv → 与个股同型自身分位；达闸可非 null；digest「量」可填。  
+- **原后放原因（历史）：** 当时避篮子换手时序成本；本 Spec 优先闭合价格 RS + 个股量旁路。
 
 ### 2.4 明确不做
 
@@ -231,3 +230,4 @@ metrics §10 的 `map_version` / `member_set` 落篮子行：**本 slice 不补*
 | 2026-10-07 | CR 真项修补：闭合 `percentile_rank`；篮子 peer=温度可算；事件时序 peer→内存 RS→append；VOL 窗含 t + `vol_score_min_samples`；Spearman 实盘豁免+metrics 注；C5=`RS_raw`；Done-when/测试补事件 RS 与排序语义；Spec B 篮子 S/RS NULL 被取代；C1 作用域 |
 | 2026-10-07 | 二审真项：当日 turnover null→VOL null；VOL 窗脊=replay OHLC；T0 同步 metrics §9.1/§13/`vol_score_min_samples` |
 | 2026-10-07 | final：量列仅右侧 Top+L2/L1；温转热榜不加量；C5/`RS_raw` 同引擎须落测；ROC 脊=OHLC |
+| 2026-10-11 | 篮 VOL Spec 闭合 §2.3 L2/L1 恒 null；后放列表划掉该项并链 [`2026-10-11-basket-vol-score-design.md`](2026-10-11-basket-vol-score-design.md) |

@@ -85,8 +85,8 @@ def test_replay_from_ohlc_snap_includes_sigma_pctile():
 
 def test_a_share_daily_exit_tag_thresholds():
     params = load_params(METRICS_YAML)
-    assert params.param_version == "p05-v3"
-    assert params.exit_tags_enabled is False
+    assert params.param_version == "p05-v5"
+    assert params.exit_tags_enabled is True
     assert params.vol_expand_pctile == 0.90
     assert params.champ_k == 3
     assert params.champ_excess == 0.05

@@ -14,10 +14,15 @@ from pathlib import Path
 
 from scripts.common.bars import apply_flag_rows, apply_limit_rows, bars_conn
 from scripts.common.db import get_conn, init_schema
+from scripts.common.hard_freeze import (
+    load_hard_freeze_pass_config,
+    write_hard_freeze_pass_meta,
+)
 from scripts.metrics.params import load_params
 
 ROOT = Path(__file__).resolve().parents[1]
 PARAMS = load_params(ROOT / "config" / "metrics" / "a_share_daily.yaml")
+HF_CFG = load_hard_freeze_pass_config(ROOT / "config" / "metrics" / "a_share_daily.yaml")
 
 # Enough for SMA/ADX/σ%ile under shortened params (not production 252).
 SHORT_N = 40
@@ -116,7 +121,16 @@ def _patch_run(tmp_path, monkeypatch, members, *, short_metrics: bool = True):
         short = _short_params()
         assert short.min_history_temp == SHORT_N
         monkeypatch.setattr("scripts.daily_run.load_metrics_params", lambda: short)
-    return str(tmp_path / "bars.db")
+    bars_path = str(tmp_path / "bars.db")
+    # CLI main() enforces Protocol B stamp vs production yaml (not short-params patch).
+    conn = bars_conn(bars_path)
+    write_hard_freeze_pass_meta(
+        conn,
+        n=HF_CFG.min_suspend_days,
+        param_version=HF_CFG.param_version,
+    )
+    conn.close()
+    return bars_path
 
 
 def test_synthetic_bars_write_nonnull_T(tmp_path, monkeypatch):
@@ -151,13 +165,13 @@ def test_synthetic_bars_write_nonnull_T(tmp_path, monkeypatch):
     # R may or may not be on; scores are written (SQL NULL on non-right / exit).
     assert score is None or isinstance(score, float)
     assert score_raw is None or isinstance(score_raw, float)
-    assert pv == "p05-v3"
+    assert pv == "p05-v5"
     assert universe_id == "local_stock"
     meta = tconn.execute(
         "SELECT param_version, map_version, status FROM run_meta WHERE trade_date=?",
         (D.isoformat(),),
     ).fetchone()
-    assert meta == ("p05-v3", "p05-v1", "ok")
+    assert meta == ("p05-v5", "p05-v1", "ok")
     l2n = tconn.execute("SELECT COUNT(*) FROM daily_l2").fetchone()[0]
     l1n = tconn.execute("SELECT COUNT(*) FROM daily_l1").fetchone()[0]
     assert l2n >= 1 and l1n >= 1
