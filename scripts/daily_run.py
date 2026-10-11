@@ -17,6 +17,7 @@ if _ROOT not in sys.path:
 
 from scripts.common import calendar as cal
 from scripts.common.bars import DEFAULT_BARS_DB, bars_conn
+from scripts.common.hard_freeze import check_hard_freeze_stamp
 from scripts.common.coverage import (
     CoverageMetrics,
     OK_PREDICATE_VERSION,
@@ -822,6 +823,10 @@ def main(argv=None) -> int:
         else:
             print("[daily_run] empty queue")
             return 0
+
+    stamp_rc = check_hard_freeze_stamp(args.bars_db or None)
+    if stamp_rc != 0:
+        return stamp_rc
 
     print("[daily_run] queue=%s" % [d.isoformat() for d in queue])
     # Spec D: one clist snapshot for session_asof; asof run_meta only.
