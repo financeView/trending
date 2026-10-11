@@ -9,12 +9,14 @@ import argparse
 import datetime as dt
 import os
 import sys
+from contextlib import ExitStack
 
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from scripts.common.bars import (
+    baostock_session,
     bars_conn,
     sync_baostock_flags,
     sync_em_limits_asof,
@@ -181,40 +183,59 @@ def main(argv=None) -> int:
     started = dt.datetime.utcnow()
     complete = True
     worked = 0
-    for code in codes:
-        if args.time_budget_min and args.time_budget_min > 0:
-            elapsed = (dt.datetime.utcnow() - started).total_seconds() / 60.0
-            if elapsed >= args.time_budget_min:
-                complete = False
-                print("[sync_bars] time budget hit after %.1f min" % elapsed)
-                break
-        need_ohlc = not args.skip_ohlc and not skip_ohlc(conn, code, end)
-        need_flags = not args.skip_flags and not skip_flags(conn, code, end)
-        if not need_ohlc and not need_flags:
-            continue
-        if args.max_codes and args.max_codes > 0 and worked >= args.max_codes:
-            complete = False
-            print("[sync_bars] max-codes=%d hit; remaining work" % args.max_codes)
-            break
-        if need_ohlc:
+    # One BaoStock login for the whole flags pass (not per ticker).
+    manage_bs_session = True
+    with ExitStack() as stack:
+        if not args.skip_flags:
             try:
-                n = sync_symbol_bars(conn, code, end, limiter=lim)
-                print("[sync_bars] ohlc %s rows=%d end=%s" % (code, n, end))
-            except Exception as e:  # noqa: BLE001 — one dead name must not kill the job
-                print(
-                    "[sync_bars] warn: ohlc %s skipped: %s" % (code, e),
-                    file=sys.stderr,
-                )
-        if need_flags:
-            try:
-                nf = sync_baostock_flags(conn, code, end, limiter=lim)
-                print("[sync_bars] flags %s rows=%d" % (code, nf))
+                stack.enter_context(baostock_session())
+                manage_bs_session = False
             except Exception as e:  # noqa: BLE001
                 print(
-                    "[sync_bars] warn: flags %s skipped: %s" % (code, e),
+                    "[sync_bars] warn: baostock batch login failed (%s); "
+                    "falling back to per-ticker login" % e,
                     file=sys.stderr,
                 )
-        worked += 1
+        for code in codes:
+            if args.time_budget_min and args.time_budget_min > 0:
+                elapsed = (dt.datetime.utcnow() - started).total_seconds() / 60.0
+                if elapsed >= args.time_budget_min:
+                    complete = False
+                    print("[sync_bars] time budget hit after %.1f min" % elapsed)
+                    break
+            need_ohlc = not args.skip_ohlc and not skip_ohlc(conn, code, end)
+            need_flags = not args.skip_flags and not skip_flags(conn, code, end)
+            if not need_ohlc and not need_flags:
+                continue
+            if args.max_codes and args.max_codes > 0 and worked >= args.max_codes:
+                complete = False
+                print("[sync_bars] max-codes=%d hit; remaining work" % args.max_codes)
+                break
+            if need_ohlc:
+                try:
+                    n = sync_symbol_bars(conn, code, end, limiter=lim)
+                    print("[sync_bars] ohlc %s rows=%d end=%s" % (code, n, end))
+                except Exception as e:  # noqa: BLE001 — one dead name must not kill the job
+                    print(
+                        "[sync_bars] warn: ohlc %s skipped: %s" % (code, e),
+                        file=sys.stderr,
+                    )
+            if need_flags:
+                try:
+                    nf = sync_baostock_flags(
+                        conn,
+                        code,
+                        end,
+                        limiter=lim,
+                        manage_session=manage_bs_session,
+                    )
+                    print("[sync_bars] flags %s rows=%d" % (code, nf))
+                except Exception as e:  # noqa: BLE001
+                    print(
+                        "[sync_bars] warn: flags %s skipped: %s" % (code, e),
+                        file=sys.stderr,
+                    )
+            worked += 1
     if args.with_limits and complete:
         if end != session_asof:
             print(

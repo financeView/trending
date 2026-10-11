@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
 from scripts.common.http import RateLimiter, call_with_retry
 from scripts.common.ts_code import to_baostock_code, to_sina_symbol, to_ts_code
@@ -284,47 +285,66 @@ def apply_flag_rows(
     return n
 
 
+@contextmanager
+def baostock_session() -> Iterator[None]:
+    """One login for a batch of flag queries; pair with manage_session=False."""
+    import baostock as bs
+
+    lg = bs.login()
+    if lg.error_code != "0":
+        raise RuntimeError("baostock login: %s" % lg.error_msg)
+    try:
+        yield
+    finally:
+        bs.logout()
+
+
 def fetch_baostock_flags(
     ts_code: str,
     start: date,
     end: date,
     *,
     limiter: Optional[RateLimiter] = None,
+    manage_session: bool = True,
 ) -> List[Tuple[str, str, int, int]]:
-    """网络：BaoStock 日线 tradestatus / isST → (ts_code, date, is_suspended, is_st)。"""
+    """网络：BaoStock 日线 tradestatus / isST → (ts_code, date, is_suspended, is_st)。
+
+    ``manage_session=True`` (default): login/logout per call (CLI / single-name).
+    ``manage_session=False``: caller must hold ``baostock_session()``.
+    """
     import baostock as bs
 
     ts = to_ts_code(ts_code)
     code = to_baostock_code(ts)
     limiter = limiter or RateLimiter(2.0)
 
+    def _do_query() -> List[Tuple[str, str, int, int]]:
+        rs = bs.query_history_k_data_plus(
+            code,
+            "date,code,tradestatus,isST",
+            start_date=start.isoformat(),
+            end_date=end.isoformat(),
+            frequency="d",
+            adjustflag="3",
+        )
+        if rs.error_code != "0":
+            raise RuntimeError("baostock query %s: %s" % (code, rs.error_msg))
+        out: List[Tuple[str, str, int, int]] = []
+        while rs.error_code == "0" and rs.next():
+            row = rs.get_row_data()
+            # tradestatus: 1=正常, 0=停牌；isST: 1=ST
+            trade_status = str(row[2]).strip()
+            is_st_raw = str(row[3]).strip()
+            is_suspended = 0 if trade_status == "1" else 1
+            is_st = 1 if is_st_raw in ("1", "True", "true") else 0
+            out.append((ts, row[0], is_suspended, is_st))
+        return out
+
     def _query():
-        lg = bs.login()
-        if lg.error_code != "0":
-            raise RuntimeError("baostock login: %s" % lg.error_msg)
-        try:
-            rs = bs.query_history_k_data_plus(
-                code,
-                "date,code,tradestatus,isST",
-                start_date=start.isoformat(),
-                end_date=end.isoformat(),
-                frequency="d",
-                adjustflag="3",
-            )
-            if rs.error_code != "0":
-                raise RuntimeError("baostock query %s: %s" % (code, rs.error_msg))
-            out: List[Tuple[str, str, int, int]] = []
-            while rs.error_code == "0" and rs.next():
-                row = rs.get_row_data()
-                # tradestatus: 1=正常, 0=停牌；isST: 1=ST
-                trade_status = str(row[2]).strip()
-                is_st_raw = str(row[3]).strip()
-                is_suspended = 0 if trade_status == "1" else 1
-                is_st = 1 if is_st_raw in ("1", "True", "true") else 0
-                out.append((ts, row[0], is_suspended, is_st))
-            return out
-        finally:
-            bs.logout()
+        if manage_session:
+            with baostock_session():
+                return _do_query()
+        return _do_query()
 
     return call_with_retry(
         _query, limiter, desc="baostock_flags_%s" % code, attempts=2, backoffs=(2, 5)
@@ -338,10 +358,13 @@ def sync_baostock_flags(
     *,
     start: Optional[date] = None,
     limiter: Optional[RateLimiter] = None,
+    manage_session: bool = True,
 ) -> int:
     """拉取 BaoStock flags 并 UPSERT 进 bars。"""
     start = start or (end - timedelta(days=400))
-    rows = fetch_baostock_flags(ts_code, start, end, limiter=limiter)
+    rows = fetch_baostock_flags(
+        ts_code, start, end, limiter=limiter, manage_session=manage_session
+    )
     return apply_flag_rows(conn, rows)
 
 
