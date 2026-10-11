@@ -235,4 +235,5 @@ def replay_from_ohlc(
         snap["is_suspended"] = bool(day.get("is_suspended"))
         snap["RS_raw"] = rs_series[i] if i < len(rs_series) else None
         snap["S_temp"] = day.get("S_temp")
+        snap["sigma_pctile"] = day.get("sigma_pctile")
     return snaps

@@ -1,10 +1,16 @@
 """Exit-tag params load (Task 0) and later assign/digest tests."""
+from __future__ import annotations
+
+import math
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
 
 from scripts.common import db as dbmod
 from scripts.metrics.params import load_params
+from scripts.metrics.pipeline import replay_from_ohlc
+from tests.test_daily_run_metrics_wire import SHORT_N, _short_params
 
 ROOT = Path(__file__).resolve().parents[1]
 METRICS_YAML = ROOT / "config" / "metrics" / "a_share_daily.yaml"
@@ -29,6 +35,40 @@ def test_load_params_requires_exit_tag_thresholds(tmp_path):
     p.write_text(_yaml_without_key("vol_expand_pctile"), encoding="utf-8")
     with pytest.raises((KeyError, ValueError)):
         load_params(p)
+
+
+def _uptrend_ohlc(n: int) -> list[dict]:
+    start = date(2024, 1, 2)
+    out: list[dict] = []
+    for i in range(n):
+        close = 10.0 * (1.015**i)
+        d = start + timedelta(days=i)
+        out.append(
+            {
+                "trade_date": d.isoformat(),
+                "close_qfq": close,
+                "high_qfq": close * 1.02,
+                "low_qfq": close * 0.99,
+                "open_qfq": close * 0.995,
+                "is_st": 0,
+                "is_suspended": 0,
+            }
+        )
+    return out
+
+
+def test_replay_from_ohlc_snap_includes_sigma_pctile():
+    """Task 2: replay snaps expose sigma_pctile for vol_expand tagging."""
+    params = _short_params()
+    min_hist = SHORT_N
+    records = _uptrend_ohlc(min_hist + 15)
+    snaps = replay_from_ohlc(params, records, min_history=min_hist)
+    assert snaps
+    asof = snaps[-1]
+    assert "sigma_pctile" in asof
+    sp = asof.get("sigma_pctile")
+    assert sp is not None
+    assert math.isfinite(float(sp))
 
 
 def test_a_share_daily_exit_tag_thresholds():
