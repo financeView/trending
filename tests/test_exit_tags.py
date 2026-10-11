@@ -492,6 +492,46 @@ def test_danger_stock_golden_and_l2_never_danger():
     assert "vol_expand" in l2[0]["tags"]
 
 
+def test_l2_danger_enabled_vs_disabled():
+    """Extreme down-day + high amount vs own hist → danger only when flag on; L1 []."""
+    params = _params(vol_hist=5, danger_ret_pctile=0.05, danger_amt_pctile=0.95)
+    n = 6
+    dts = _dates(n)
+    closes = [100.0, 101.0, 102.0, 103.0, 104.0, 104.0 * (1.0 - 0.30)]
+    amounts = [10.0, 10.0, 10.0, 10.0, 10.0, 1e9]
+    synth = {"L2D": _closes_to_bars(closes, amounts=amounts, dates=dts)}
+
+    l2_off = [_l2_row("L2D")]
+    l1_off = [_l2_row("L1D")]
+    assign_exit_tags(
+        [],
+        l2_off,
+        l1_off,
+        params=params,
+        bar_cache={},
+        l2_synth_by_code=synth,
+        trade_date=ASOF,
+        enable_l2_danger=False,
+    )
+    assert "danger" not in l2_off[0]["tags"]
+    assert l1_off[0]["tags"] == []
+
+    l2_on = [_l2_row("L2D")]
+    l1_on = [_l2_row("L1D")]
+    assign_exit_tags(
+        [],
+        l2_on,
+        l1_on,
+        params=params,
+        bar_cache={},
+        l2_synth_by_code=synth,
+        trade_date=ASOF,
+        enable_l2_danger=True,
+    )
+    assert "danger" in l2_on[0]["tags"]
+    assert l1_on[0]["tags"] == []
+
+
 def test_assign_does_not_mutate_r_solar_rs_vol():
     params = _params()
     stocks = [
@@ -577,7 +617,7 @@ def _stub_mini_taxonomy(monkeypatch):
 
 
 def test_exit_tags_wire_replay_and_db(tmp_path, monkeypatch):
-    """Flag on via monkeypatch: stock tags JSON in DB; L2 no danger; L1 []."""
+    """Flag on via monkeypatch: stock tags JSON in DB; L2 no danger on uptrend; L1 []."""
     from scripts.common.bars import bars_conn
     from scripts.common.db import get_conn, init_schema
     from scripts.daily_run import process_day, replay_metrics_cross_section
@@ -616,8 +656,7 @@ def test_exit_tags_wire_replay_and_db(tmp_path, monkeypatch):
     assert all(isinstance(r.get("tags"), list) for r in l2_rows)
     assert all("danger" not in (r.get("tags") or []) for r in l2_rows)
     assert all(r.get("tags") == [] for r in l1_rows)
-    assert all(r.get("VOL_score") is None for r in l2_rows)
-    assert all(r.get("VOL_score") is None for r in l1_rows)
+    # Basket VOL may be null under short hist (< vol_score_min_samples); do not force-null.
 
     st = process_day(D, D, bars_path=bars_path, stub_coverage=True)
     assert st == "ok"

@@ -626,7 +626,7 @@ def replay_metrics_cross_section(
             l2_synth_by_code={k: synth_by_code[k] for k in l2_codes if k in synth_by_code},
             quarantine=qua,
             trade_date=td,
-            enable_l2_danger=False,
+            enable_l2_danger=True,
         )
 
         rs_by_ts = {r["ts_code"]: r.get("RS") for r in stock_rows}
