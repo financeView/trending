@@ -69,6 +69,12 @@ class MetricsParams:
     knots_d: Tuple[Knot, ...]
     knots_v: Tuple[Knot, ...]
     exit_tags_enabled: bool
+    vol_expand_pctile: float
+    champ_k: int
+    champ_excess: float
+    danger_ret_pctile: float
+    danger_amt_pctile: float
+    tag_rate_cap: float
 
     @property
     def min_history_temp(self) -> int:
@@ -130,4 +136,10 @@ def load_params(path: PathLike) -> MetricsParams:
         knots_d=_knots(raw["knots_d"]),
         knots_v=_knots(raw["knots_v"]),
         exit_tags_enabled=bool(raw.get("exit_tags_enabled", False)),
+        vol_expand_pctile=float(raw["vol_expand_pctile"]),
+        champ_k=int(raw["champ_k"]),
+        champ_excess=float(raw["champ_excess"]),
+        danger_ret_pctile=float(raw["danger_ret_pctile"]),
+        danger_amt_pctile=float(raw["danger_amt_pctile"]),
+        tag_rate_cap=float(raw["tag_rate_cap"]),
     )
