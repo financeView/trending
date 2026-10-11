@@ -617,7 +617,7 @@ def _stub_mini_taxonomy(monkeypatch):
 
 
 def test_exit_tags_wire_replay_and_db(tmp_path, monkeypatch):
-    """Flag on via monkeypatch: stock tags JSON in DB; L2 no danger on uptrend; L1 []."""
+    """Params flag on via monkeypatch; daily_run enable_l2_danger=True; L2 no danger on uptrend; L1 []."""
     from scripts.common.bars import bars_conn
     from scripts.common.db import get_conn, init_schema
     from scripts.daily_run import process_day, replay_metrics_cross_section
