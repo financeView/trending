@@ -1,4 +1,4 @@
-"""Spec C stock VOL_score: turnover gates, own-history window, basket null."""
+"""Spec C stock VOL_score + basket VOL wire (own-history turnover percentile)."""
 from __future__ import annotations
 
 from dataclasses import replace
@@ -8,7 +8,11 @@ import pytest
 
 from scripts.common.bars import bars_conn
 from scripts.daily_run import replay_metrics_cross_section
-from scripts.metrics.vol_score import compute_vol_scores, turnover_from_bar
+from scripts.metrics.vol_score import (
+    assign_vol_scores,
+    compute_vol_scores,
+    turnover_from_bar,
+)
 from tests.test_daily_run_metrics_wire import (
     SHORT_N,
     _seed_uptrend,
@@ -85,10 +89,7 @@ def test_bar_trade_date_str_normalizes_datetime():
     assert _bar_trade_date_str(None) is None
 
 
-def test_basket_vol_score_always_null_after_wire(tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        "scripts.daily_run.load_metrics_params", lambda: _short_params()
-    )
+def _stub_mini_basket_taxonomy(monkeypatch):
     monkeypatch.setattr(
         "scripts.metrics.aggregate.taxonomy_for_stock",
         lambda ts, **kw: ("370100", "l1_test"),
@@ -122,8 +123,15 @@ def test_basket_vol_score_always_null_after_wire(tmp_path, monkeypatch):
         lambda: {"l1_test": ["000001.SZ"]},
     )
 
+
+def test_basket_vol_null_below_min_samples(tmp_path, monkeypatch):
+    """n < vol_score_min_samples → L2/L1 VOL_score stays null."""
+    params = replace(_short_params(), vol_score_min_samples=60)
+    monkeypatch.setattr("scripts.daily_run.load_metrics_params", lambda: params)
+    _stub_mini_basket_taxonomy(monkeypatch)
+
     D = date(2024, 1, 10)
-    dates = _weekdays_ending(D, SHORT_N + 8)
+    dates = _weekdays_ending(D, SHORT_N + 8)  # << 60
     monkeypatch.setattr(
         "scripts.daily_run.cal.trading_days_inclusive",
         lambda start, end: [d for d in dates if start <= d <= end],
@@ -136,10 +144,103 @@ def test_basket_vol_score_always_null_after_wire(tmp_path, monkeypatch):
     _stock, l2_rows, l1_rows, _events = replay_metrics_cross_section(
         D,
         bars_path=bars_path,
-        params=_short_params(),
+        params=params,
         universe=["000001.SZ"],
     )
     assert l2_rows, "expected L2 rows from wire fixture"
     assert l1_rows, "expected L1 rows from wire fixture"
     assert all(r.get("VOL_score") is None for r in l2_rows)
     assert all(r.get("VOL_score") is None for r in l1_rows)
+
+
+def test_basket_vol_matches_compute_vol_scores_on_synth_turnovers(tmp_path, monkeypatch):
+    """asof L2/L1 VOL_score equals compute_vol_scores on captured synth turnovers."""
+    params = replace(_short_params(), vol_hist=80, vol_score_min_samples=60)
+    monkeypatch.setattr("scripts.daily_run.load_metrics_params", lambda: params)
+    _stub_mini_basket_taxonomy(monkeypatch)
+
+    D = date(2024, 1, 10)
+    td = D.isoformat()
+    dates = _weekdays_ending(D, 80)
+    monkeypatch.setattr(
+        "scripts.daily_run.cal.trading_days_inclusive",
+        lambda start, end: [d for d in dates if start <= d <= end],
+    )
+
+    import scripts.daily_run as dr
+
+    synth_calls: list[list] = []
+    real_synth = dr.synthesize_basket_bars
+
+    def spy_synth(member_bars, *, trade_dates):
+        out = real_synth(member_bars, trade_dates=trade_dates)
+        synth_calls.append(out)
+        return out
+
+    monkeypatch.setattr(dr, "synthesize_basket_bars", spy_synth)
+
+    bars_path = str(tmp_path / "bars.db")
+    conn = bars_conn(bars_path)
+    _seed_uptrend(conn, "000001.SZ", dates, start_px=10.0)
+    conn.close()
+
+    _stock, l2_rows, l1_rows, _events = replay_metrics_cross_section(
+        D,
+        bars_path=bars_path,
+        params=params,
+        universe=["000001.SZ"],
+    )
+    assert l2_rows and l1_rows
+    assert len(synth_calls) >= 2  # L2 then L1
+    captured = {"370100": synth_calls[0], "l1_test": synth_calls[1]}
+
+    def expected_asof(synth):
+        turnovers = [
+            turnover_from_bar(b.get("amount"), b.get("float_mv")) for b in synth
+        ]
+        scores = compute_vol_scores(
+            turnovers,
+            vol_hist=params.vol_hist,
+            min_samples=params.vol_score_min_samples,
+        )
+        for i, b in enumerate(synth):
+            raw = b.get("trade_date")
+            bar_td = raw.isoformat()[:10] if hasattr(raw, "isoformat") else str(raw)[:10]
+            if bar_td == td:
+                return scores[i] if i < len(scores) else None
+        return None
+
+    assert l2_rows[0]["VOL_score"] == expected_asof(captured["370100"])
+    assert l1_rows[0]["VOL_score"] == expected_asof(captured["l1_test"])
+    assert isinstance(l2_rows[0]["VOL_score"], int)
+    assert 0 <= l2_rows[0]["VOL_score"] <= 100
+
+
+def test_assign_vol_does_not_change_rs():
+    rows = [
+        {"code": "370100", "RS": 77.5, "VOL_score": None},
+        {"code": "370200", "RS": 12.0, "VOL_score": None},
+    ]
+    series = {
+        "370100": [
+            {"trade_date": f"2024-01-{i:02d}", "amount": 1e8, "float_mv": 1e10}
+            for i in range(1, 21)
+        ]
+        + [{"trade_date": "2024-02-01", "amount": 2e8, "float_mv": 1e10}],
+        "370200": [
+            {"trade_date": f"2024-01-{i:02d}", "amount": 1e8, "float_mv": 1e10}
+            for i in range(1, 21)
+        ]
+        + [{"trade_date": "2024-02-01", "amount": 5e7, "float_mv": 1e10}],
+    }
+    before = [r["RS"] for r in rows]
+    assign_vol_scores(
+        rows,
+        series,
+        trade_date="2024-02-01",
+        vol_hist=40,
+        min_samples=10,
+        code_key="code",
+    )
+    assert [r["RS"] for r in rows] == before
+    assert all(isinstance(r["VOL_score"], int) for r in rows)

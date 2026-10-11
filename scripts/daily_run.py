@@ -60,7 +60,7 @@ from scripts.metrics.peer_rs import (
     stock_peer_eligible,
 )
 from scripts.metrics.pipeline import replay_from_ohlc
-from scripts.metrics.vol_score import compute_vol_scores, turnover_from_bar
+from scripts.metrics.vol_score import assign_vol_scores
 
 _EPHEMERAL_DAILY_KEYS = ("_sigma_pctile", "_is_suspended", "RS_raw")
 
@@ -435,7 +435,7 @@ def _basket_asof_row(
         "members_total": members_total,
         "warm_to_hot_member_count": warm_count,
         "amount": amount_sum if any_amount else None,
-        "VOL_score": None,  # baskets always null this slice (Spec C §2.3)
+        "VOL_score": None,  # placeholder; overwritten by assign_vol_scores
         "_sigma_pctile": sigma_pctile,
     }
 
@@ -517,13 +517,13 @@ def replay_metrics_cross_section(
         dates = _l2_trade_dates(bar_cache, D)
 
         l2_rows: list[dict] = []
-        l2_synth_by_code: dict[str, list[dict]] = {}
+        synth_by_code: dict[str, list[dict]] = {}
         for code, members in mapping.items():
             if not members:
                 continue
             member_bars = {ts: bar_cache[ts] for ts in members if bar_cache.get(ts)}
             synth = synthesize_basket_bars(member_bars, trade_dates=dates)
-            l2_synth_by_code[code] = synth
+            synth_by_code[code] = synth
             snap = None
             if synth:
                 snaps = replay_from_ohlc(params, synth, min_history=min_hist)
@@ -569,6 +569,7 @@ def replay_metrics_cross_section(
                 continue
             member_bars = {ts: bar_cache[ts] for ts in members if bar_cache.get(ts)}
             synth = synthesize_basket_bars(member_bars, trade_dates=dates)
+            synth_by_code[l1_id] = synth
             snap = None
             if synth:
                 snaps = replay_from_ohlc(params, synth, min_history=min_hist)
@@ -594,24 +595,15 @@ def replay_metrics_cross_section(
         assign_peer_rs(l2_rows, eligible=basket_peer_eligible)
         assign_peer_rs(l1_rows, eligible=basket_peer_eligible)
 
-        # Stock own-history VOL_score on OHLC spine; baskets stay null.
-        for r in stock_rows:
-            records = bar_cache.get(r["ts_code"]) or []
-            turnovers = [
-                turnover_from_bar(b.get("amount"), b.get("float_mv"))
-                for b in records
-            ]
-            scores = compute_vol_scores(
-                turnovers,
-                vol_hist=params.vol_hist,
-                min_samples=params.vol_score_min_samples,
-            )
-            vol = None
-            for i, b in enumerate(records):
-                bar_td = _bar_trade_date_str(b.get("trade_date"))
-                if bar_td == td:
-                    vol = scores[i] if i < len(scores) else None
-            r["VOL_score"] = vol
+        # Own-history VOL_score: stocks from bar_cache; L2/L1 from shared synth cache.
+        vol_kw = dict(
+            trade_date=td,
+            vol_hist=params.vol_hist,
+            min_samples=params.vol_score_min_samples,
+        )
+        assign_vol_scores(stock_rows, bar_cache, code_key="ts_code", **vol_kw)
+        assign_vol_scores(l2_rows, synth_by_code, code_key="code", **vol_kw)
+        assign_vol_scores(l1_rows, synth_by_code, code_key="code", **vol_kw)
 
         pv = params.param_version
         for r in stock_rows:
@@ -620,19 +612,18 @@ def replay_metrics_cross_section(
         for r in l2_rows:
             r["universe_id"] = "local_l2"
             r["param_version"] = pv
-            r["VOL_score"] = None
         for r in l1_rows:
             r["universe_id"] = "local_l1"
             r["param_version"] = pv
-            r["VOL_score"] = None
 
+        l2_codes = [r["code"] for r in l2_rows]
         assign_exit_tags(
             stock_rows,
             l2_rows,
             l1_rows,
             params=params,
             bar_cache=bar_cache,
-            l2_synth_by_code=l2_synth_by_code,
+            l2_synth_by_code={k: synth_by_code[k] for k in l2_codes if k in synth_by_code},
             quarantine=qua,
             trade_date=td,
             enable_l2_danger=False,
