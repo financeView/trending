@@ -1,7 +1,7 @@
 # Spec：`limit_rule` 回退强卡控（P0）
 
 **日期：** 2026-10-11  
-**状态：** 设计中；plan [`2026-10-11-limit-rule-rollback-guard.md`](../plans/2026-10-11-limit-rule-rollback-guard.md)  
+**状态：** 已落地；plan [`2026-10-11-limit-rule-rollback-guard.md`](../plans/2026-10-11-limit-rule-rollback-guard.md)  
 
 **范围：** `todo.md` P0 **`limit_rule` 回退**——yaml 切回 `vendor_fields` 后，库内残留 `limit_source=board_calc_v1` 仍被 fill 当限价用时的护栏。  
 **后放（禁止混入本 slice）：** 自动清库脚本 / 批量 NULL 化 board_calc 限价；incomplete×asof（见姊妹 Spec）；改 `board_calc` 公式；静默改 `limit_rule` 却不 bump `cost_version`（既有禁令保留）；Protocol B 戳语义；env 旁路本门。
@@ -149,3 +149,4 @@ sync / board_calc pass：**不变**。
 | 2026-10-11 | 初版：Approach 2；EXISTS；fill/影子入口；不清库 |
 | 2026-10-11 | CR：全库 EXISTS 钉死；挂点 `run_asof`；不门 `paper_book`；`--bars-db` 同源；无 env 旁路；修验收措辞 |
 | 2026-10-11 | 复审：门序与 incomplete 对齐（0-skip 后、sync 门后）；收紧 §2.1 措辞 |
+| 2026-10-11 | 已落地：`check_limit_rule_bars` + `run_asof` 门；与 incomplete 同 PR |

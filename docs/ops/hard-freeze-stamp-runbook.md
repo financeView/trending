@@ -10,3 +10,15 @@
 ## live_shadow sync_status gate
 
 `live_shadow_step.run_asof` hard-fails before `fill_day` unless `data/cache/sync_status.json` has `sync_complete=true` and `session_asof >=` the fill day `T` (Spec F catch-up: tip covers earlier `T`). Incomplete sync, hard_freeze fail, missing file, or a stale tip (`session_asof < T`) → exit 1; calendar / missing_bars skips still exit 0. Re-run a **full** sync so the tip covers the shadow day before claiming fills. Debug-only: `TRENDING_ALLOW_INCOMPLETE_FILL=1` (never for CI).
+
+## limit_rule rollback (vendor_fields)
+
+Production `costs.yaml` stays `board_calc_v1` so this gate is idle. Before switching to `vendor_fields`, clear residual calculated limits on the **same** `bars.db` used for fill (whole DB; no date window), then bump `cost_version`:
+
+```sql
+UPDATE bars
+SET limit_up=NULL, limit_down=NULL, limit_source=NULL
+WHERE limit_source='board_calc_v1';
+```
+
+Check: `python scripts/check_limit_rule_bars.py --bars-db PATH --limit-rule vendor_fields` (exit 0). Leaving residue → `live_shadow` exit 1.

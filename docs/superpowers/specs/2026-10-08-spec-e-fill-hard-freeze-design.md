@@ -91,7 +91,7 @@ catch-up / 历史追赶日：board_calc 的日期门闩用 **`session_asof`**，
 
 | 条件 | 行为 |
 |------|------|
-| `limit_rule != board_calc_v1` | **整 pass 跳过**（不写盘） |
+| `limit_rule != board_calc_v1` | **整 pass 跳过**（不写盘）；切回 `vendor_fields` 前须**全库**清残留 `limit_source=board_calc_v1` 双侧限价，否则 `live_shadow` 强卡控红（见 [`2026-10-11-limit-rule-rollback-guard-design.md`](2026-10-11-limit-rule-rollback-guard-design.md)） |
 | `D < session_asof` ∧ `limit_up` 与 `limit_down` **皆空** ∧ 基准价有限且 >0 | 推算并 UPSERT 到该 bar |
 | `D = session_asof` | **禁止** board_calc；缺 vendor → 个股意图日仍 `data_gap` |
 | 已有任一非空 `limit_*`（含 `em_f51f52` 等） | **不覆盖** |
