@@ -25,21 +25,21 @@
 | 决策 | 选择 |
 |------|------|
 | 架构 | **Approach 1**：指标管线末段纯函数写 `tags`；不碰 fill |
-| 上线姿态 | **开旗** `exit_tags_enabled: true`；bump `param_version` → **`p05-v4`**（当前 yaml 为 `p05-v3`） |
+| 上线姿态 | **开旗** `exit_tags_enabled: true`；同 PR 终值 bump → **`p05-v5`**（与篮 VOL Task 4 一次收口；不要求中间 `p05-v4`） |
 | Protocol B | bump 后须对目标 `bars.db` **重跑硬冻 pass + 写戳**（N 未变亦然）；否则 `daily_run` 戳校验失败（见 Protocol B §4.1） |
 | 交易效力 | **只展示**；不改 fill / paper 仓位 |
-| 实体 | **个股**三标签；**L2** 仅 `vol_expand` + `champagne`（**L2 `danger` 本 slice 不打**，见 §3.2）；L1 恒 `tags=[]` |
+| 实体 | **个股**三标签；**L2** `vol_expand` + `champagne` + **`danger`（合成 Σamount 可用且 `enable_l2_danger=True`）**；L1 恒 `tags=[]` |
 | 稀疏度 | 观测 + 超 cap **stderr 告警**；本轮不硬熔断 |
-| 文档拆分 | 与篮子 VOL **独立 Spec**；实现顺序本 Spec 先 |
+| 文档拆分 | 与篮子 VOL **独立 Spec**；同 PR 串行本 Spec → 篮 VOL |
 
 ### 2.1 非目标
 
 - 分仓减仓表、危险优先清仓等策略动作。  
 - L1 `tags` 非空。  
-- **L2 `danger`**（合成序列尚无可靠 `amount` 历史；由篮子 VOL Spec 在附加 Σamount 后启用）。  
+- ~~**L2 `danger`**（合成尚无可靠 amount）~~ → **已由篮 VOL Spec 启用**（见 [`2026-10-11-basket-vol-score-design.md`](2026-10-11-basket-vol-score-design.md)）。  
 - 新建侧表或旁路批处理 job。  
 - 把标签嵌进温度/节气 FSM。  
-- 本 slice 不实现篮子 `VOL_score`、不改 `synthesize_basket_bars` 字段（姊妹 Spec）。
+- ~~本 slice 不实现篮子 `VOL_score`~~ → 同 PR 由姊妹 Spec 落地。
 
 ---
 
@@ -62,7 +62,7 @@ scripts/metrics/exit_tags.py
 
 ### 3.2 三标签定义
 
-参数键入 `config/metrics/a_share_daily.yaml` + `MetricsParams`（§13 初值）。yaml 已有 `exit_tags_enabled: false`；本 slice 改为 `true`，并**补齐**下列阈值键（及 `MetricsParams` 字段；缺键则 load 失败）：
+参数键入 `config/metrics/a_share_daily.yaml` + `MetricsParams`（§13 初值）。生产 yaml：`exit_tags_enabled: true` / `param_version: p05-v5`；下列阈值键（及 `MetricsParams` 字段；**缺键则 load 失败**，含 `exit_tags_enabled`）：
 
 | 键 | 初值 |
 |----|------|
@@ -72,13 +72,13 @@ scripts/metrics/exit_tags.py
 | `danger_ret_pctile` | 0.05 |
 | `danger_amt_pctile` | 0.95 |
 | `tag_rate_cap` | 0.02 |
-| `exit_tags_enabled` | **true**（本 slice 起） |
+| `exit_tags_enabled` | **true**（`p05-v5`） |
 
-| 稳定 id | 展示名 | 个股 | L2（本 slice） |
+| 稳定 id | 展示名 | 个股 | L2（已落地） |
 |---------|--------|------|----------------|
 | `vol_expand` | 波动率放大 | ✓ | ✓ |
 | `champagne` | 开香槟 | ✓ | ✓ |
-| `danger` | 危险信号 | ✓ | **不打**（后放篮子 VOL） |
+| `danger` | 危险信号 | ✓ | ✓（`enable_l2_danger` + 合成 Σamount 脊；否则不打） |
 
 触发（全满足）：
 
@@ -86,7 +86,7 @@ scripts/metrics/exit_tags.py
 |---------|------|
 | `vol_expand` | `right_side` 真 **且** `solar_term ∈ {小暑,大暑}` **且** 当日 `sigma_pctile ≥ vol_expand_pctile` |
 | `champagne` | 见下「香槟窗（钉死）」 |
-| `danger` | 自身 `vol_hist` 窗内：日收益分位 ≤ `danger_ret_pctile` **且** 成交额分位 ≥ `danger_amt_pctile`（**仅个股**） |
+| `danger` | 自身 `vol_hist` 窗内：日收益分位 ≤ `danger_ret_pctile` **且** 成交额分位 ≥ `danger_amt_pctile`（个股必算；L2 仅当 `enable_l2_danger` 且合成脊 amount 可用） |
 
 **日收益：** 前复权收盘相对该实体 **OHLC/合成交易日脊**上前日：`close_t/close_{prev}-1`。脊 = 个股 `bar_cache` 序列 / L2 与 replay 同源的合成序列（合成省略日不在脊上）。
 
@@ -105,7 +105,7 @@ scripts/metrics/exit_tags.py
 
 不要求对历史日重算 `RS_raw` / 逐日 peer 资格（Strategy A 仅物化 asof 行）。
 
-**危险信号窗（仅个股）：** 与个股 VOL 相同交易日脊；窗长至多 `vol_hist`（含当日）；分位用与 Spec C §2.1 相同的 `percentile_rank` 语义（先得 \(p\in[0,1]\)，再与阈值比较）。当日收益或 amount 不可算 → 不打 `danger`。窗内有效收益样本或 amount 样本不足以定义分位（\(n\le 1\)）→ 不打。
+**危险信号窗：** 与 VOL 相同交易日脊（个股 `bar_cache` / L2 合成脊）；窗长至多 `vol_hist`（含当日）；分位用与 Spec C §2.1 相同的 `percentile_rank` 语义（先得 \(p\in[0,1]\)，再与阈值比较）。当日收益或 amount 不可算 → 不打 `danger`。窗内有效收益样本或 amount 样本不足以定义分位（\(n\le 1\)）→ 不打。L2：wire 传 `enable_l2_danger=True`（篮 VOL 落地后）；否则 L2 永不打 `danger`。
 
 **`vol_expand` 的 `sigma_pctile`：** 来自该实体 asof 特征（个股 / L2 合成 `replay_from_ohlc`）。实现须保证 asof 可得：在 `replay_from_ohlc` 把 `sigma_pctile` 拷进 snap（与 `S_temp` 同级；**今日未拷**），再经 ephemeral 行字段（如 `_sigma_pctile`）供 `assign_exit_tags` 读取，**upsert 前剥离**（不入 `COLS`）。不可算 → 不打 `vol_expand`。
 
@@ -156,14 +156,14 @@ danger     → 危险信号
 replay / peer RS / VOL_score
   → assign_exit_tags  (flag off → all [])
        stock: vol_expand + champagne + danger → tags[]
-       L2:    vol_expand + champagne（无 danger）→ tags[]
+       L2:    vol_expand + champagne + danger（enable_l2_danger ∧ Σamount 脊）→ tags[]
        L1: []
        rates → optional warn
   → upsert daily_*（含 tags）
   → digest/Issue 渲染「止盈」列
 ```
 
-（篮 VOL 落地后：L2 在合成含配对 Σamount 时可另含 `danger`——见篮子 VOL Spec；本 Spec 单独验收仍按无 danger。）
+（历史：止盈 Spec 单独验收时 L2 无 danger；同 PR 篮 VOL 后上式为准。）
 
 ---
 
@@ -201,3 +201,4 @@ replay / peer RS / VOL_score
 | 2026-10-11 | Plan CR：验收#5 同 PR 终值可为 p05-v5 |
 | 2026-10-11 | Task 6（同 PR docs）：状态 → 已落地 (code)；metrics §11 修订注；todo 改写；yaml 开旗/pv 待 basket VOL Task 4 |
 | 2026-10-11 | 篮 VOL Task 4：yaml 开旗 + `p05-v5`；状态 → 已落地；Protocol B ops 注 |
+| 2026-10-11 | 完整 CR：§2/§3.2/§4 正文对齐同 PR 终态（L2 danger + p05-v5）；删 p05-v4 /「L2 不打」双源 |

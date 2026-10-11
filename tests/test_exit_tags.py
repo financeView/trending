@@ -47,6 +47,9 @@ def test_load_params_requires_exit_tag_thresholds(tmp_path):
     p.write_text(_yaml_without_key("vol_expand_pctile"), encoding="utf-8")
     with pytest.raises((KeyError, ValueError)):
         load_params(p)
+    p.write_text(_yaml_without_key("exit_tags_enabled"), encoding="utf-8")
+    with pytest.raises((KeyError, ValueError)):
+        load_params(p)
 
 
 def _uptrend_ohlc(n: int) -> list[dict]:

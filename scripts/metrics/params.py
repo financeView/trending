@@ -135,7 +135,7 @@ def load_params(path: PathLike) -> MetricsParams:
         knots_g=_knots(raw["knots_g"]),
         knots_d=_knots(raw["knots_d"]),
         knots_v=_knots(raw["knots_v"]),
-        exit_tags_enabled=bool(raw.get("exit_tags_enabled", False)),
+        exit_tags_enabled=bool(raw["exit_tags_enabled"]),
         vol_expand_pctile=float(raw["vol_expand_pctile"]),
         champ_k=int(raw["champ_k"]),
         champ_excess=float(raw["champ_excess"]),
