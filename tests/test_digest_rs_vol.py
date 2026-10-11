@@ -136,7 +136,7 @@ def test_l2_and_l1_headers_include_liang_warm_tables_do_not(tmp_path, monkeypatc
                 "T": "热",
                 "S_temp": 0.7,
                 "RS": 1.0,
-                "VOL_score": None,
+                "VOL_score": 80.0,
                 "right_side": 1,
                 "tag_warm_to_hot": 1,
                 "solar_term": "谷雨",
@@ -188,9 +188,11 @@ def test_l2_and_l1_headers_include_liang_warm_tables_do_not(tmp_path, monkeypatc
     )
     assert "量" not in warm_header
 
-    # Basket VOL null → empty「量」cell; footnote once on L1/L2 block
+    # L1 VOL null → empty「量」; L2 shows VOL_score; footnote explains 量
     assert "| 凉 | l1_finance | 金融 |  |  |" in self_sec
-    assert "量" in l1_md and ("本 slice" in l1_md or "后放" in l1_md)
+    assert "| 热 | 801780 |" in l2_sec and "| 80 |" in l2_sec
+    assert "L2/L1「量」本 slice 为空——篮子 VOL 后放" not in l1_md
+    assert "量=VOL_score（篮换手自身分位" in l1_md
 
     radar = render_radar_issue(conn, td, load_l1_buckets())
     hot = radar.split("全市场温转热")[1]

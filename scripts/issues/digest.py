@@ -245,7 +245,7 @@ def render_l1_issue(
             l1_id,
             name_zh,
             "" if rs is None else rs,
-            "" if vol is None else vol,
+            _fmt_cell(vol),
             _fmt_yn(right),
             "" if solar is None else solar,
             _fmt_yn(tag),
@@ -280,7 +280,7 @@ def render_l1_issue(
                     r[0],
                     l2_names.get(str(r[0]), ""),
                     r[3],
-                    r[4],  # VOL_score — baskets null this slice
+                    _fmt_cell(r[4]),
                     _fmt_tags(r[10]),
                     _fmt_yn(r[5]),
                     r[7],
@@ -293,9 +293,7 @@ def render_l1_issue(
             ],
         )
     )
-    lines.append(
-        "注：L2/L1「量」本 slice 为空——篮子 VOL 后放（避历史换手序列成本）。"
-    )
+    lines.append("注：量=VOL_score（篮换手自身分位；样本不足为空）。")
     lines.append(
         "注：在右侧=是否仍处右侧存续（状态）；今日温转热=板块自身当日进场或温→热再确认（事件）。"
         "成分热以上=当日成分 T∈{热,沸} 个数（按行上 l1_id / sw_l2_code 过滤）。"
