@@ -20,8 +20,8 @@
 | 项 | 现状 | 要做什么 |
 |----|------|----------|
 | **Protocol B** | **已落地**（戳 + sync/`daily_run` 强卡控；Actions cache B） | Spec [`2026-10-10-protocol-b-hard-freeze-stamp-design.md`](docs/superpowers/specs/2026-10-10-protocol-b-hard-freeze-stamp-design.md) · plan [`2026-10-10-protocol-b-hard-freeze-stamp.md`](docs/superpowers/plans/2026-10-10-protocol-b-hard-freeze-stamp.md) · runbook [`hard-freeze-stamp-runbook.md`](docs/ops/hard-freeze-stamp-runbook.md) |
-| **`limit_rule` 回退** | Spec 已写（强卡控；不清库） | 待 plan/实现：`vendor_fields` ∧ 库内仍有 `board_calc_v1` 限价 → fill/影子非零 · [`2026-10-11-limit-rule-rollback-guard-design.md`](docs/superpowers/specs/2026-10-11-limit-rule-rollback-guard-design.md) |
-| **incomplete + asof 限价** | Spec 已写（不拆耦；本地 SoT + 强卡控） | 待 plan/实现：`sync_status.json`；`live_shadow.run_asof` 门闩（`session_asof≥T`）；拆耦后放 · [`2026-10-11-incomplete-asof-authority-design.md`](docs/superpowers/specs/2026-10-11-incomplete-asof-authority-design.md) |
+| **`limit_rule` 回退** | Spec+plan 已写（强卡控；不清库） | 待实现：`vendor_fields` ∧ 全库 `board_calc_v1` → `live_shadow.run_asof` 非零 · Spec [`…-limit-rule-rollback-guard-design.md`](docs/superpowers/specs/2026-10-11-limit-rule-rollback-guard-design.md) · plan [`…-limit-rule-rollback-guard.md`](docs/superpowers/plans/2026-10-11-limit-rule-rollback-guard.md) |
+| **incomplete + asof 限价** | Spec+plan 已写（不拆耦；SoT + 强卡控） | 待实现：`sync_status.json`；`session_asof≥fill_asof`；先于 limit_rule 门 · Spec [`…-incomplete-asof-authority-design.md`](docs/superpowers/specs/2026-10-11-incomplete-asof-authority-design.md) · plan [`…-incomplete-asof-authority.md`](docs/superpowers/plans/2026-10-11-incomplete-asof-authority.md) |
 
 ---
 

@@ -1,7 +1,8 @@
 # Spec：`limit_rule` 回退强卡控（P0）
 
 **日期：** 2026-10-11  
-**状态：** 设计中（待 plan）  
+**状态：** 设计中；plan [`2026-10-11-limit-rule-rollback-guard.md`](../plans/2026-10-11-limit-rule-rollback-guard.md)  
+
 **范围：** `todo.md` P0 **`limit_rule` 回退**——yaml 切回 `vendor_fields` 后，库内残留 `limit_source=board_calc_v1` 仍被 fill 当限价用时的护栏。  
 **后放（禁止混入本 slice）：** 自动清库脚本 / 批量 NULL 化 board_calc 限价；incomplete×asof（见姊妹 Spec）；改 `board_calc` 公式；静默改 `limit_rule` 却不 bump `cost_version`（既有禁令保留）；Protocol B 戳语义；env 旁路本门。
 

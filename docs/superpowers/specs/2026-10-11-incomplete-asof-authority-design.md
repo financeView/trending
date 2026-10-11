@@ -1,7 +1,8 @@
 # Spec：incomplete × asof 非权威强卡控（P0）
 
 **日期：** 2026-10-11  
-**状态：** 设计中（待 plan）  
+**状态：** 设计中；plan [`2026-10-11-incomplete-asof-authority.md`](../plans/2026-10-11-incomplete-asof-authority.md)  
+
 **范围：** `todo.md` P0 **incomplete + asof 限价**——OHLC 未完成时跳过 `--with-limits`、asof 禁 board_calc；本地绕过 Actions 仍可能对 partial bars 跑**当日影子成交**。  
 **后放（禁止混入本 slice）：** asof 东财限价与 OHLC 预算**拆耦**；asof 日 `board_calc`；改 Spec F job 图；`limit_rule` 回退（姊妹 Spec）；付费 `stk_limit`；给 `paper_book` / Audit H 默认硬门。
 
