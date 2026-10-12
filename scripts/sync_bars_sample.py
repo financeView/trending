@@ -16,6 +16,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from scripts.common.bars import (
+    DEFAULT_BARS_DB,
     baostock_session,
     bars_conn,
     sync_baostock_flags,
@@ -26,6 +27,9 @@ from scripts.common.calendar import latest_trade_day
 from scripts.common.http import RateLimiter
 from scripts.common.sync_status import write_sync_status
 from scripts.common.universe import load_quarantine_codes, load_universe_codes
+
+# Probe one mapped name in Actions logs (does not change skip rules).
+_DIAG_SAMPLE_CODE = "300897.SZ"
 
 
 def codes_from_universe(path: str = "") -> list[str]:
@@ -48,14 +52,10 @@ def ohlc_end_row_exists(conn, ts_code: str, end: dt.date) -> bool:
     return row is not None
 
 
-def skip_ohlc(conn, ts_code: str, end: dt.date, min_history: int = 252) -> bool:
-    """Skip fetch only if end-day OHLC exists and history is already full.
-
-    IPOs with an end row but fewer than ``min_history`` sessions are still fetched
-    (window stays end-400). Spec: 252 is a resume heuristic, not an ok gate.
-    """
+def ohlc_skip_gap(conn, ts_code: str, end: dt.date, min_history: int = 252):
+    """Why OHLC cannot skip: ``miss_ohlc_end`` | ``ohlc_hist_short``; None = ok to skip."""
     if not ohlc_end_row_exists(conn, ts_code, end):
-        return False
+        return "miss_ohlc_end"
     n = conn.execute(
         """
         SELECT COUNT(*) FROM bars
@@ -63,7 +63,18 @@ def skip_ohlc(conn, ts_code: str, end: dt.date, min_history: int = 252) -> bool:
         """,
         (ts_code, end.isoformat()),
     ).fetchone()[0]
-    return int(n) >= int(min_history)
+    if int(n) < int(min_history):
+        return "ohlc_hist_short"
+    return None
+
+
+def skip_ohlc(conn, ts_code: str, end: dt.date, min_history: int = 252) -> bool:
+    """Skip fetch only if end-day OHLC exists and history is already full.
+
+    IPOs with an end row but fewer than ``min_history`` sessions are still fetched
+    (window stays end-400). Spec: 252 is a resume heuristic, not an ok gate.
+    """
+    return ohlc_skip_gap(conn, ts_code, end, min_history) is None
 
 
 def skip_flags(conn, ts_code: str, end: dt.date) -> bool:
@@ -74,6 +85,133 @@ def skip_flags(conn, ts_code: str, end: dt.date) -> bool:
         (ts_code, end.isoformat()),
     ).fetchone()
     return bool(row and row[0])
+
+
+def end_day_coverage(conn, codes: list[str], end: dt.date) -> dict:
+    """Mapped-universe coverage on ``end`` (OHLC / flags / both)."""
+    end_s = end.isoformat()
+    want = set(codes)
+    ohlc_codes = {
+        r[0]
+        for r in conn.execute(
+            """
+            SELECT ts_code FROM bars
+            WHERE trade_date=? AND close_qfq IS NOT NULL
+            """,
+            (end_s,),
+        )
+        if r[0] in want
+    }
+    flag_codes = {
+        r[0]
+        for r in conn.execute(
+            """
+            SELECT ts_code FROM bars
+            WHERE trade_date=? AND flag_source IS NOT NULL AND flag_source != ''
+            """,
+            (end_s,),
+        )
+        if r[0] in want
+    }
+    both = ohlc_codes & flag_codes
+    max_td = conn.execute("SELECT MAX(trade_date) FROM bars").fetchone()[0]
+    max_flag_td = conn.execute(
+        """
+        SELECT MAX(trade_date) FROM bars
+        WHERE flag_source IS NOT NULL AND flag_source != ''
+        """
+    ).fetchone()[0]
+    return {
+        "universe": len(want),
+        "end": end_s,
+        "ohlc": len(ohlc_codes),
+        "flags": len(flag_codes),
+        "both": len(both),
+        "max_trade_date": max_td,
+        "max_flag_trade_date": max_flag_td,
+    }
+
+
+def print_bars_preflight(
+    conn,
+    codes: list[str],
+    end: dt.date,
+    *,
+    session_asof: dt.date,
+    bars_path: str,
+    sample_code: str = _DIAG_SAMPLE_CODE,
+) -> None:
+    """Restore/sync entry diagnostics — path, integrity, end-day coverage, sample probe."""
+    path = os.path.abspath(bars_path)
+    size = os.path.getsize(path) if os.path.isfile(path) else -1
+    try:
+        qchk = conn.execute("PRAGMA quick_check").fetchone()[0]
+    except Exception as e:  # noqa: BLE001
+        qchk = "error:%s" % e
+    cov = end_day_coverage(conn, codes, end)
+    print(
+        "[sync_bars] diag preflight path=%s size_bytes=%d quick_check=%s "
+        "end=%s session_asof=%s universe=%d end_ohlc=%d end_flags=%d "
+        "end_tip_both=%d max_trade_date=%s max_flag_trade_date=%s"
+        % (
+            path,
+            size,
+            qchk,
+            cov["end"],
+            session_asof.isoformat(),
+            cov["universe"],
+            cov["ohlc"],
+            cov["flags"],
+            cov["both"],
+            cov["max_trade_date"],
+            cov["max_flag_trade_date"],
+        )
+    )
+    probe = sample_code if sample_code in set(codes) else (codes[0] if codes else "")
+    if not probe:
+        return
+    end_s = end.isoformat()
+    row = conn.execute(
+        """
+        SELECT close_qfq, flag_source FROM bars WHERE ts_code=? AND trade_date=?
+        """,
+        (probe, end_s),
+    ).fetchone()
+    hist_n = conn.execute(
+        """
+        SELECT COUNT(*) FROM bars
+        WHERE ts_code=? AND trade_date<=? AND close_qfq IS NOT NULL
+        """,
+        (probe, end_s),
+    ).fetchone()[0]
+    max_td = conn.execute(
+        "SELECT MAX(trade_date) FROM bars WHERE ts_code=?", (probe,)
+    ).fetchone()[0]
+    max_flag_td = conn.execute(
+        """
+        SELECT MAX(trade_date) FROM bars
+        WHERE ts_code=? AND flag_source IS NOT NULL AND flag_source != ''
+        """,
+        (probe,),
+    ).fetchone()[0]
+    gap = ohlc_skip_gap(conn, probe, end)
+    print(
+        "[sync_bars] diag sample %s end=%s close_qfq=%s flag_source=%s "
+        "hist_ohlc_le_end=%s max_trade_date=%s max_flag_trade_date=%s "
+        "skip_ohlc=%s skip_flags=%s ohlc_gap=%s"
+        % (
+            probe,
+            end_s,
+            None if not row else row[0],
+            None if not row else row[1],
+            int(hist_n),
+            max_td,
+            max_flag_td,
+            skip_ohlc(conn, probe, end),
+            skip_flags(conn, probe, end),
+            gap,
+        )
+    )
 
 
 def run_spec_e_passes(conn, codes, *, session_asof: dt.date) -> None:
@@ -177,14 +315,27 @@ def main(argv=None) -> int:
         codes = codes_from_universe()
     codes = sorted(set(codes))
     conn = bars_conn()
+    row_db = conn.execute("PRAGMA database_list").fetchone()
+    bars_path = (row_db[2] if row_db and row_db[2] else "") or os.path.abspath(
+        DEFAULT_BARS_DB
+    )
     asof_s = session_asof.isoformat()
     write_sync_status(sync_complete=False, session_asof=asof_s, elapsed_min=0.0)
+    print_bars_preflight(
+        conn, codes, end, session_asof=session_asof, bars_path=bars_path
+    )
     # 4/s: warm resume stays under Actions 6h; was 2/s + per-ticker login.
     lim = RateLimiter(4.0)
     started = dt.datetime.utcnow()
     complete = True
     worked = 0
     skipped = 0
+    failed_ohlc = 0
+    failed_flags = 0
+    reason_skippable = 0
+    reason_miss_ohlc_end = 0
+    reason_ohlc_hist_short = 0
+    reason_miss_flags = 0
     bs_sess = None
     with ExitStack() as stack:
         if not args.skip_flags:
@@ -204,11 +355,21 @@ def main(argv=None) -> int:
                     complete = False
                     print("[sync_bars] time budget hit after %.1f min" % elapsed)
                     break
+            # Gate must stay on skip_ohlc (tests monkeypatch it); gap is diag-only.
             need_ohlc = not args.skip_ohlc and not skip_ohlc(conn, code, end)
             need_flags = not args.skip_flags and not skip_flags(conn, code, end)
             if not need_ohlc and not need_flags:
                 skipped += 1
+                reason_skippable += 1
                 continue
+            if need_ohlc:
+                gap = ohlc_skip_gap(conn, code, end)
+                if gap == "miss_ohlc_end":
+                    reason_miss_ohlc_end += 1
+                elif gap == "ohlc_hist_short":
+                    reason_ohlc_hist_short += 1
+            if need_flags:
+                reason_miss_flags += 1
             if args.max_codes and args.max_codes > 0 and worked >= args.max_codes:
                 complete = False
                 print("[sync_bars] max-codes=%d hit; remaining work" % args.max_codes)
@@ -218,6 +379,7 @@ def main(argv=None) -> int:
                     n = sync_symbol_bars(conn, code, end, limiter=lim)
                     print("[sync_bars] ohlc %s rows=%d end=%s" % (code, n, end))
                 except Exception as e:  # noqa: BLE001 — one dead name must not kill the job
+                    failed_ohlc += 1
                     print(
                         "[sync_bars] warn: ohlc %s skipped: %s" % (code, e),
                         file=sys.stderr,
@@ -234,6 +396,7 @@ def main(argv=None) -> int:
                     )
                     print("[sync_bars] flags %s rows=%d" % (code, nf))
                 except Exception as e:  # noqa: BLE001
+                    failed_flags += 1
                     print(
                         "[sync_bars] warn: flags %s skipped: %s" % (code, e),
                         file=sys.stderr,
@@ -246,8 +409,32 @@ def main(argv=None) -> int:
                     % (worked, skipped, elapsed)
                 )
     print(
-        "[sync_bars] loop done worked=%d skipped=%d complete=%s"
-        % (worked, skipped, complete)
+        "[sync_bars] diag reasons skippable=%d miss_ohlc_end=%d "
+        "ohlc_hist_short=%d miss_flags=%d"
+        % (
+            reason_skippable,
+            reason_miss_ohlc_end,
+            reason_ohlc_hist_short,
+            reason_miss_flags,
+        )
+    )
+    post = end_day_coverage(conn, codes, end)
+    print(
+        "[sync_bars] diag postflight end=%s end_ohlc=%d end_flags=%d "
+        "end_tip_both=%d max_trade_date=%s max_flag_trade_date=%s"
+        % (
+            post["end"],
+            post["ohlc"],
+            post["flags"],
+            post["both"],
+            post["max_trade_date"],
+            post["max_flag_trade_date"],
+        )
+    )
+    print(
+        "[sync_bars] loop done worked=%d skipped=%d failed_ohlc=%d failed_flags=%d "
+        "complete=%s"
+        % (worked, skipped, failed_ohlc, failed_flags, complete)
     )
     if args.with_limits and complete:
         if end != session_asof:

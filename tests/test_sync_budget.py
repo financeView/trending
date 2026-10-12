@@ -4,7 +4,9 @@ from datetime import date
 from scripts.common.bars import apply_flag_rows, bars_conn
 from scripts.common.sync_status import read_sync_status
 from scripts.sync_bars_sample import (
+    end_day_coverage,
     ohlc_end_row_exists,
+    ohlc_skip_gap,
     skip_flags,
     skip_ohlc,
     write_sync_complete,
@@ -79,6 +81,28 @@ def test_skip_flags_requires_flag_source(tmp_path):
     assert skip_flags(conn, "000001.SZ", end) is False
     apply_flag_rows(conn, [("000001.SZ", "2026-09-30", 0, 0)])
     assert skip_flags(conn, "000001.SZ", end) is True
+    conn.close()
+
+
+def test_ohlc_skip_gap_and_end_day_coverage(tmp_path):
+    conn = bars_conn(str(tmp_path / "bars.db"))
+    end = date(2026, 9, 30)
+    assert ohlc_skip_gap(conn, "000001.SZ", end) == "miss_ohlc_end"
+    conn.execute(
+        """
+        INSERT INTO bars (ts_code, trade_date, close_qfq, bar_source)
+        VALUES ('000001.SZ', '2026-09-30', 11, 'sina')
+        """
+    )
+    conn.commit()
+    assert ohlc_skip_gap(conn, "000001.SZ", end) == "ohlc_hist_short"
+    apply_flag_rows(conn, [("000001.SZ", "2026-09-30", 0, 0)])
+    cov = end_day_coverage(conn, ["000001.SZ", "000002.SZ"], end)
+    assert cov["universe"] == 2
+    assert cov["ohlc"] == 1
+    assert cov["flags"] == 1
+    assert cov["both"] == 1
+    assert cov["end"] == "2026-09-30"
     conn.close()
 
 
