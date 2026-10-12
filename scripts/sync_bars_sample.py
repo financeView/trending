@@ -179,23 +179,24 @@ def main(argv=None) -> int:
     conn = bars_conn()
     asof_s = session_asof.isoformat()
     write_sync_status(sync_complete=False, session_asof=asof_s, elapsed_min=0.0)
-    lim = RateLimiter(2.0)
+    # 4/s: warm resume stays under Actions 6h; was 2/s + per-ticker login.
+    lim = RateLimiter(4.0)
     started = dt.datetime.utcnow()
     complete = True
     worked = 0
-    # One BaoStock login for the whole flags pass (not per ticker).
-    manage_bs_session = True
+    skipped = 0
+    bs_sess = None
     with ExitStack() as stack:
         if not args.skip_flags:
             try:
-                stack.enter_context(baostock_session())
-                manage_bs_session = False
+                bs_sess = stack.enter_context(baostock_session())
             except Exception as e:  # noqa: BLE001
                 print(
                     "[sync_bars] warn: baostock batch login failed (%s); "
                     "falling back to per-ticker login" % e,
                     file=sys.stderr,
                 )
+                bs_sess = None
         for code in codes:
             if args.time_budget_min and args.time_budget_min > 0:
                 elapsed = (dt.datetime.utcnow() - started).total_seconds() / 60.0
@@ -206,6 +207,7 @@ def main(argv=None) -> int:
             need_ohlc = not args.skip_ohlc and not skip_ohlc(conn, code, end)
             need_flags = not args.skip_flags and not skip_flags(conn, code, end)
             if not need_ohlc and not need_flags:
+                skipped += 1
                 continue
             if args.max_codes and args.max_codes > 0 and worked >= args.max_codes:
                 complete = False
@@ -227,7 +229,8 @@ def main(argv=None) -> int:
                         code,
                         end,
                         limiter=lim,
-                        manage_session=manage_bs_session,
+                        manage_session=bs_sess is None,
+                        session=bs_sess,
                     )
                     print("[sync_bars] flags %s rows=%d" % (code, nf))
                 except Exception as e:  # noqa: BLE001
@@ -236,6 +239,16 @@ def main(argv=None) -> int:
                         file=sys.stderr,
                     )
             worked += 1
+            if worked % 100 == 0:
+                elapsed = (dt.datetime.utcnow() - started).total_seconds() / 60.0
+                print(
+                    "[sync_bars] progress worked=%d skipped=%d elapsed_min=%.1f"
+                    % (worked, skipped, elapsed)
+                )
+    print(
+        "[sync_bars] loop done worked=%d skipped=%d complete=%s"
+        % (worked, skipped, complete)
+    )
     if args.with_limits and complete:
         if end != session_asof:
             print(

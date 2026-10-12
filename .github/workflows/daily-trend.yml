@@ -89,13 +89,16 @@ jobs:
           fi
           # stderr for calendar warn; stdout must be a bare YYYY-MM-DD
           ASOF=$(python -c "from scripts.common.calendar import latest_trade_day; print(latest_trade_day().isoformat())" 2>/dev/null)
+          # Sync always tips to ASOF so warm bars cache can skip; only_date only
+          # binds metrics/shadow to DATE (not sync --end). session_asof stays ASOF.
           END="$ASOF"
           LIMIT_ARGS=(--with-limits)
           if [ -n "$DATE" ] && [ "$ONLY" = "true" ]; then
-            END="$DATE"
             if [ "$DATE" != "$ASOF" ]; then
               LIMIT_ARGS=()
-              echo "[sync] skip --with-limits (only_date=$DATE != asof $ASOF)"
+              echo "[sync] only_date=$DATE tip_asof=$ASOF (sync --end=$ASOF; skip --with-limits)"
+            else
+              echo "[sync] only_date=$DATE end=$ASOF"
             fi
           elif [ -n "$DATE" ]; then
             echo "[sync] catch-up from $DATE end=$ASOF"

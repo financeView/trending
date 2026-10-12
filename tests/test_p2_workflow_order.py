@@ -47,6 +47,9 @@ def test_actions_unit_tests_then_taxonomy_then_sync():
     assert "continue-on-error" not in tax_chunk
     assert "only_date requires date" in sync
     assert "sync_incomplete" in sync
+    # only_date must not force sync --end=$DATE (warm tip resume); tip stays ASOF
+    assert 'END="$DATE"' not in sync
+    assert "tip_asof" in sync or 'END="$ASOF"' in sync
 
 
 def test_metrics_ordered_daily_shadow_commit_issues():

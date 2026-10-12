@@ -285,18 +285,54 @@ def apply_flag_rows(
     return n
 
 
-@contextmanager
-def baostock_session() -> Iterator[None]:
-    """One login for a batch of flag queries; pair with manage_session=False."""
-    import baostock as bs
+class BaostockSession:
+    """Batch login with periodic / on-error re-login (long Actions runs)."""
 
-    lg = bs.login()
-    if lg.error_code != "0":
-        raise RuntimeError("baostock login: %s" % lg.error_msg)
-    try:
-        yield
-    finally:
-        bs.logout()
+    def __init__(self, *, relogin_every: int = 200):
+        self.relogin_every = max(1, int(relogin_every))
+        self._queries = 0
+        self._bs = None
+
+    def __enter__(self) -> "BaostockSession":
+        import baostock as bs
+
+        self._bs = bs
+        self._login()
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        try:
+            if self._bs is not None:
+                self._bs.logout()
+        except Exception:  # noqa: BLE001
+            pass
+        return None
+
+    def _login(self) -> None:
+        assert self._bs is not None
+        try:
+            self._bs.logout()
+        except Exception:  # noqa: BLE001
+            pass
+        lg = self._bs.login()
+        if lg.error_code != "0":
+            raise RuntimeError("baostock login: %s" % lg.error_msg)
+        self._queries = 0
+
+    def before_query(self) -> None:
+        self._queries += 1
+        if self._queries > 1 and (self._queries - 1) % self.relogin_every == 0:
+            self._login()
+
+    def relogin(self) -> None:
+        self._login()
+
+
+@contextmanager
+def baostock_session() -> Iterator[BaostockSession]:
+    """One login for a batch of flag queries; pair with session= on fetch."""
+    with BaostockSession() as sess:
+        yield sess
 
 
 def fetch_baostock_flags(
@@ -306,11 +342,12 @@ def fetch_baostock_flags(
     *,
     limiter: Optional[RateLimiter] = None,
     manage_session: bool = True,
+    session: Optional[BaostockSession] = None,
 ) -> List[Tuple[str, str, int, int]]:
     """网络：BaoStock 日线 tradestatus / isST → (ts_code, date, is_suspended, is_st)。
 
     ``manage_session=True`` (default): login/logout per call (CLI / single-name).
-    ``manage_session=False``: caller must hold ``baostock_session()``.
+    ``session=``: use batch ``BaostockSession`` (relogin every N / on error).
     """
     import baostock as bs
 
@@ -341,6 +378,13 @@ def fetch_baostock_flags(
         return out
 
     def _query():
+        if session is not None:
+            session.before_query()
+            try:
+                return _do_query()
+            except Exception:
+                session.relogin()
+                return _do_query()
         if manage_session:
             with baostock_session():
                 return _do_query()
@@ -359,11 +403,17 @@ def sync_baostock_flags(
     start: Optional[date] = None,
     limiter: Optional[RateLimiter] = None,
     manage_session: bool = True,
+    session: Optional[BaostockSession] = None,
 ) -> int:
     """拉取 BaoStock flags 并 UPSERT 进 bars。"""
     start = start or (end - timedelta(days=400))
     rows = fetch_baostock_flags(
-        ts_code, start, end, limiter=limiter, manage_session=manage_session
+        ts_code,
+        start,
+        end,
+        limiter=limiter,
+        manage_session=manage_session if session is None else False,
+        session=session,
     )
     return apply_flag_rows(conn, rows)
 
