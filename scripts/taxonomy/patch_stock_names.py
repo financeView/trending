@@ -39,10 +39,10 @@ def _fmt_code(code) -> str:
 
 
 def _fmt_name(name: str) -> str:
-    # Quote when YAML flow scalars would mis-parse (Ⅱ etc. are fine unquoted).
-    if any(ch in name for ch in (":", "#", "{", "}", "[", "]", ",", '"', "'", "\\")):
-        return yaml.dump(name, allow_unicode=True, default_style='"').strip()
-    return name
+    # Quote when YAML flow scalars would mis-parse (*ST… is an alias if bare).
+    from scripts.taxonomy.fetch_sw_members import _fmt_name_zh
+
+    return _fmt_name_zh(name)
 
 
 def rewrite_yaml(data: dict, names: dict[str, str]) -> str:

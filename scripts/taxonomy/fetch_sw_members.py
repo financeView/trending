@@ -60,8 +60,31 @@ def normalize_member(
     return {"ts_code": ts, "sw_l2_code": mapped}
 
 
+# YAML flow indicators / aliases — unquoted *ST美… is parsed as alias.
+_YAML_NAME_QUOTE_CHARS = (
+    ":",
+    "#",
+    "{",
+    "}",
+    "[",
+    "]",
+    ",",
+    '"',
+    "'",
+    "\\",
+    "*",
+    "&",
+    "!",
+    "|",
+    ">",
+    "%",
+    "@",
+    "`",
+)
+
+
 def _fmt_name_zh(name: str) -> str:
-    if any(ch in name for ch in (":", "#", "{", "}", "[", "]", ",", '"', "'", "\\")):
+    if any(ch in name for ch in _YAML_NAME_QUOTE_CHARS):
         return yaml.dump(name, allow_unicode=True, default_style='"').strip()
     return name
 

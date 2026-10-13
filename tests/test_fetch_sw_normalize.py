@@ -57,6 +57,24 @@ def test_dump_yaml_sorts_members_by_ts_code():
     assert i0 < i1
 
 
+def test_dump_yaml_quotes_st_star_name_zh():
+    """Bare ``*ST…`` is a YAML alias; must be quoted for safe_load."""
+    import yaml
+    from scripts.taxonomy.fetch_sw_members import _fmt_name_zh
+
+    assert _fmt_name_zh("*ST美丽").startswith('"')
+    rows = [
+        {
+            "ts_code": "000010.SZ",
+            "industry_code": "620300",
+            "industry_name": "",
+        }
+    ]
+    out = dump_yaml(rows, prior_names={"000010.SZ": "*ST美丽"})
+    data = yaml.safe_load(out)
+    assert data["members"][0]["name_zh"] == "*ST美丽"
+
+
 def test_read_map_version_header_keeps_bumped(tmp_path):
     p = tmp_path / "stock_sw_l2.yaml"
     p.write_text("map_version: sw2021-v3\nmembers:\n  []\n", encoding="utf-8")

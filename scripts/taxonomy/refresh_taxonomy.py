@@ -424,6 +424,22 @@ def refresh_taxonomy_once(
         prior_names=names,
         allowed=allowed,
     )
+    try:
+        import yaml
+
+        yaml.safe_load(text)
+    except Exception:
+        return _finish(
+            _status(
+                "fail",
+                map_version=head_version,
+                adds=adds,
+                deletes=deletes,
+                changes=changes,
+                head_mapped=head_mapped,
+                cand_mapped=cand_mapped,
+            )
+        )
     with open(stock_path, "w", encoding="utf-8") as f:
         f.write(text)
 
