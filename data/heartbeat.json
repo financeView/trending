@@ -8,17 +8,17 @@
     "statuses": [
       "ok"
     ],
-    "last_success": "2026-10-13T03:50:10"
+    "last_success": "2026-10-13T14:29:32"
   },
   "taxonomy": {
-    "taxonomy_fetch": "fail",
+    "taxonomy_fetch": "skipped_no_diff",
     "clist_fetch": "ok",
     "unmapped_count": 66,
     "ipo_unmapped_alert_count": 66,
     "yaml_quarantine_size": 67,
     "map_version": "sw2021-v1",
     "taxonomy_commit": "",
-    "updated_at": "2026-10-13T03:54:46Z"
+    "updated_at": "2026-10-13T14:34:34Z"
   },
-  "updated_at": "2026-10-13T03:50:10"
+  "updated_at": "2026-10-13T14:29:32"
 }
