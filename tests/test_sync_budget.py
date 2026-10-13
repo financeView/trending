@@ -299,6 +299,61 @@ def test_vendor_ohlc_error_continues_to_next_code(tmp_path, monkeypatch, capsys)
     assert "000003.SZ" in err or "No value to decode" in err or "warn" in err.lower()
 
 
+def test_flags_timeout_closes_batch_baostock_session(tmp_path, monkeypatch, capsys):
+    """Hard-timeout must logout/deregister batch session, not only clear bs_sess."""
+    from contextlib import contextmanager
+
+    from scripts.sync_bars_sample import main
+
+    _isolate_sync_status(tmp_path, monkeypatch)
+    closed = []
+
+    class _Sess:
+        pass
+
+    @contextmanager
+    def _fake_bs_session():
+        yield _Sess()
+        closed.append(True)
+
+    flag_calls = []
+
+    def _flags(_conn, code, end, **kwargs):
+        flag_calls.append(kwargs.get("session"))
+        if len(flag_calls) == 1:
+            raise RuntimeError("call failed after 1 attempts: baostock: exceeded 60s")
+        return 0
+
+    monkeypatch.setattr("scripts.sync_bars_sample.baostock_session", _fake_bs_session)
+    monkeypatch.setattr("scripts.sync_bars_sample.sync_baostock_flags", _flags)
+    monkeypatch.setattr("scripts.sync_bars_sample.sync_symbol_bars", lambda *a, **k: 0)
+    monkeypatch.setattr(
+        "scripts.sync_bars_sample.bars_conn",
+        lambda: bars_conn(str(tmp_path / "bars.db")),
+    )
+    monkeypatch.setattr(
+        "scripts.sync_bars_sample.latest_trade_day",
+        lambda: date(2026, 9, 30),
+    )
+    monkeypatch.setattr(
+        "scripts.sync_bars_sample.run_spec_e_passes", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        "scripts.sync_bars_sample.codes_from_universe",
+        lambda *a, **k: ["000001.SZ", "000002.SZ"],
+    )
+    out = tmp_path / "github_output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(out))
+    rc = main(
+        ["--codes", "000001.SZ,000002.SZ", "--end", "2026-09-30", "--skip-ohlc"]
+    )
+    assert rc == 0
+    assert closed == [True]
+    assert flag_calls[0] is not None
+    assert flag_calls[1] is None  # after close, per-ticker manage_session
+    assert "exceeded" in capsys.readouterr().err
+
+
 def test_latest_trade_day_warn_goes_to_stderr(monkeypatch, capsys):
     import datetime as dt
 

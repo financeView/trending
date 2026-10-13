@@ -397,6 +397,19 @@ def main(argv=None) -> int:
                     print("[sync_bars] flags %s rows=%d" % (code, nf))
                 except Exception as e:  # noqa: BLE001
                     failed_flags += 1
+                    # Hard-timeout: logout + deregister batch session now (not
+                    # just bs_sess=None), so per-ticker logins are not stacked
+                    # on a still-open ExitStack login / teardown logout.
+                    if bs_sess is not None and "exceeded" in str(e):
+                        try:
+                            stack.pop_all().close()
+                        except Exception as close_e:  # noqa: BLE001
+                            print(
+                                "[sync_bars] warn: baostock batch close: %s"
+                                % close_e,
+                                file=sys.stderr,
+                            )
+                        bs_sess = None
                     print(
                         "[sync_bars] warn: flags %s skipped: %s" % (code, e),
                         file=sys.stderr,
