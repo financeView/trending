@@ -374,3 +374,28 @@ def test_latest_trade_day_warn_goes_to_stderr(monkeypatch, capsys):
     assert captured.out.strip() == ""
     assert "[warn]" in captured.err
     cal.clear_trade_date_cache()
+
+
+def test_flag_window_start_resumes_from_last_flagged_day(tmp_path):
+    from scripts.common.bars import flag_window_start, bars_conn
+
+    conn = bars_conn(str(tmp_path / "bars.db"))
+    end = date(2026, 10, 13)
+    conn.execute(
+        """
+        INSERT INTO bars (ts_code, trade_date, flag_source)
+        VALUES ('000001.SZ', '2026-10-12', 'baostock')
+        """
+    )
+    conn.commit()
+    assert flag_window_start(conn, "000001.SZ", end) == date(2026, 10, 12)
+    conn.close()
+
+
+def test_flag_window_start_cold_uses_lookback(tmp_path):
+    from scripts.common.bars import flag_window_start, bars_conn
+
+    conn = bars_conn(str(tmp_path / "bars.db"))
+    end = date(2026, 10, 13)
+    assert flag_window_start(conn, "000001.SZ", end) == date(2025, 9, 8)
+    conn.close()

@@ -27,7 +27,8 @@ def test_workflow_has_sync_and_metrics_jobs():
     assert "--time-budget-min" not in body
     assert "needs.sync.outputs.sync_complete" in text
     assert text.count("bars-${{ github.run_id }}") >= 2
-    assert text.count("timeout-minutes: 360") >= 2
+    assert "timeout-minutes: 720" in _sync_block(text)
+    assert "timeout-minutes: 360" in _metrics_block(text)
     met = _metrics_block(text)
     assert "ref:" in met or "repository.default_branch" in met
     assert "cache-hit" in met

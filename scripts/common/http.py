@@ -13,6 +13,19 @@ socket.setdefaulttimeout(30)
 # Per-attempt wall clock; akshare/baostock may ignore socket default and block forever.
 DEFAULT_CALL_TIMEOUT_SEC = 60.0
 
+# Permanent vendor failures — retrying only burns the Actions clock (tip cold sync).
+_NON_RETRYABLE_SNIPPETS = (
+    "No value to decode",
+    "No data",
+)
+
+
+def _non_retryable(err: BaseException) -> bool:
+    if isinstance(err, (TimeoutError, KeyError)):
+        return True
+    msg = str(err)
+    return any(s in msg for s in _NON_RETRYABLE_SNIPPETS)
+
 
 class RateLimiter:
     def __init__(self, per_second=3.0):
@@ -77,8 +90,9 @@ def call_with_retry(
             break
         except Exception as e:  # noqa: BLE001
             last_err = e
-            if i < attempts - 1:
-                time.sleep(backoffs[min(i, len(backoffs) - 1)])
+            if _non_retryable(e) or i >= attempts - 1:
+                break
+            time.sleep(backoffs[min(i, len(backoffs) - 1)])
     raise RuntimeError(
         "call failed after %d attempts: %s: %s" % (attempts, desc, last_err)
     )

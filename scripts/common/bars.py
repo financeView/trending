@@ -395,6 +395,36 @@ def fetch_baostock_flags(
     )
 
 
+def flag_window_start(
+    conn: sqlite3.Connection,
+    ts_code: str,
+    end: date,
+    *,
+    lookback_days: int = 400,
+) -> date:
+    """Resume flags from last flagged day when present; else end-lookback.
+
+    Tip catch-up (cache already through T-1) must not re-pull ~400d every ticker —
+    that alone made cron tip sync miss Actions 6h.
+    """
+    ts = to_ts_code(ts_code)
+    row = conn.execute(
+        """
+        SELECT MAX(trade_date) FROM bars
+        WHERE ts_code=?
+          AND flag_source IS NOT NULL AND TRIM(flag_source) != ''
+          AND trade_date <= ?
+        """,
+        (ts, end.isoformat()),
+    ).fetchone()
+    if row and row[0]:
+        last = date.fromisoformat(str(row[0]))
+        if last >= end:
+            return end
+        return last
+    return end - timedelta(days=int(lookback_days))
+
+
 def sync_baostock_flags(
     conn: sqlite3.Connection,
     ts_code: str,
@@ -406,7 +436,7 @@ def sync_baostock_flags(
     session: Optional[BaostockSession] = None,
 ) -> int:
     """拉取 BaoStock flags 并 UPSERT 进 bars。"""
-    start = start or (end - timedelta(days=400))
+    start = start or flag_window_start(conn, ts_code, end)
     rows = fetch_baostock_flags(
         ts_code,
         start,

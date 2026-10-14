@@ -1,7 +1,8 @@
 name: daily-trend
 
 # 北京 19:00 = UTC 11:00（等 BaoStock 日K/复权）；见 market-data-contract
-# Spec F: sync job + metrics job（各 timeout 360）；废除 deferred 门闩 / 生产 time-budget 截断
+# Spec F: sync + metrics；废除 deferred / 生产 time-budget 截断。
+# sync timeout 720：tip 日冷启动 ~5500 票×sina 全量，360 会杀到一半（见 run 38443732944）。
 
 on:
   schedule:
@@ -40,7 +41,7 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 720
     env:
       BARS_SOURCE: sina
       PYTHONUNBUFFERED: "1"
