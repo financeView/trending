@@ -17,6 +17,7 @@ DEFAULT_BARS_DB = os.path.join(
 FLAG_SOURCE_BAOSTOCK = "baostock"
 LIMIT_SOURCE_EM = "em_f51f52"
 LIMIT_SOURCE_BOARD_CALC = "board_calc_v1"
+FLOAT_MV_SOURCE_EM = "em_f21"
 
 BARS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS bars (
@@ -285,6 +286,29 @@ def apply_flag_rows(
     return n
 
 
+# Session is poisoned: shared TCP socket returned truncated/binary frames.
+# Closing + backoff is required; wrapping decode with errors=replace is useless
+# (failure is inside baostock.util.socketutil.send_msg).
+_BAOSTOCK_POISON_SNIPPETS = (
+    "utf-8",
+    "invalid start byte",
+    "unicodedecodeerror",
+    "接收数据异常",
+    "网络接收错误",
+    "exceeded",
+    "timed out",
+    "timeout",
+)
+
+
+def is_baostock_session_poison(err: object) -> bool:
+    """True when the batch TCP session should be discarded (not reused)."""
+    if isinstance(err, TimeoutError):
+        return True
+    msg = str(err).lower()
+    return any(s in msg for s in _BAOSTOCK_POISON_SNIPPETS)
+
+
 class BaostockSession:
     """Batch login with periodic / on-error re-login (long Actions runs)."""
 
@@ -523,3 +547,71 @@ def sync_em_limits_asof(
     """将东财当日涨跌停写入 trade_date（session asof）。历史日勿用今日 spot 回刷。"""
     limits = fetch_em_limits_batch(ts_codes, limiter=limiter)
     return apply_limit_rows(conn, trade_date.isoformat(), limits)
+
+
+def apply_float_mv_rows(
+    conn: sqlite3.Connection,
+    trade_date: str,
+    float_mvs: Dict[str, float],
+    *,
+    commit: bool = True,
+) -> int:
+    """写入当日 bars.float_mv（元）。float_mvs: ts_code → float_mv。"""
+    now = _utc_now()
+    n = 0
+    for ts_code, mv in float_mvs.items():
+        try:
+            mv_f = float(mv)
+        except (TypeError, ValueError):
+            continue
+        if mv_f <= 0 or mv_f != mv_f:
+            continue
+        ts = to_ts_code(ts_code)
+        conn.execute(
+            """
+            INSERT INTO bars (
+              ts_code, trade_date, float_mv, fetched_at
+            ) VALUES (?,?,?,?)
+            ON CONFLICT(ts_code, trade_date) DO UPDATE SET
+              float_mv=excluded.float_mv,
+              fetched_at=excluded.fetched_at
+            """,
+            (ts, trade_date, mv_f, now),
+        )
+        n += 1
+    if commit:
+        conn.commit()
+    return n
+
+
+def fetch_em_float_mv_batch(
+    ts_codes: Optional[Iterable[str]] = None,
+    *,
+    limiter: Optional[RateLimiter] = None,
+) -> Dict[str, float]:
+    """网络：东财 clist f21 → {ts_code: float_mv_yuan}。"""
+    from scripts.common.em_client import fetch_float_mv_all_a
+
+    limiter = limiter or RateLimiter(2.0)
+    raw = call_with_retry(
+        fetch_float_mv_all_a, limiter, desc="em_f21", attempts=2, backoffs=(3, 10)
+    )
+    wanted = {to_ts_code(c) for c in ts_codes} if ts_codes is not None else None
+    out: Dict[str, float] = {}
+    for ts, mv in raw:
+        if wanted is not None and ts not in wanted:
+            continue
+        out[ts] = mv
+    return out
+
+
+def sync_em_float_mv_asof(
+    conn: sqlite3.Connection,
+    trade_date: date,
+    *,
+    ts_codes: Optional[Iterable[str]] = None,
+    limiter: Optional[RateLimiter] = None,
+) -> int:
+    """将东财当日流通市值写入 trade_date（session asof）。历史日勿用今日 spot 回刷。"""
+    mvs = fetch_em_float_mv_batch(ts_codes, limiter=limiter)
+    return apply_float_mv_rows(conn, trade_date.isoformat(), mvs)

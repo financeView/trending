@@ -8,6 +8,7 @@ def test_count_uses_member_set_not_sw_l2_field():
             "ts_code": "000001.SZ",
             "sw_l2_code": "WRONG",
             "l1_id": None,
+            "T": "温",
             "tag_warm_to_hot": 1,
             "amount": 1e8,
             "hard_frozen": False,
@@ -17,6 +18,7 @@ def test_count_uses_member_set_not_sw_l2_field():
             "ts_code": "000002.SZ",
             "sw_l2_code": "370100",
             "l1_id": "l1_health",
+            "T": "热",
             "tag_warm_to_hot": 1,
             "amount": 2e8,
             "hard_frozen": False,
@@ -43,6 +45,7 @@ def test_l1_count_ignores_l1_id_outside_closure():
         {
             "ts_code": "000001.SZ",
             "l1_id": "other",
+            "T": "温",
             "tag_warm_to_hot": 1,
             "amount": 1e8,
             "hard_frozen": False,
@@ -51,6 +54,7 @@ def test_l1_count_ignores_l1_id_outside_closure():
         {
             "ts_code": "999999.SZ",
             "l1_id": "l1_health",
+            "T": "热",
             "tag_warm_to_hot": 1,
             "amount": 9e8,
             "hard_frozen": False,
@@ -69,6 +73,36 @@ def test_l1_count_ignores_l1_id_outside_closure():
     assert out["amount"] == 1e8
 
 
+def test_amount_excludes_members_without_T():
+    """High-amount IPO/短史票 T=null 不得污染篮成交额读数（如 C力勤）。"""
+    members = ["001246.SZ", "000001.SZ"]
+    rows = [
+        {
+            "ts_code": "001246.SZ",
+            "T": None,
+            "amount": 8e9,
+            "hard_frozen": False,
+            "_is_suspended": False,
+        },
+        {
+            "ts_code": "000001.SZ",
+            "T": "寒",
+            "amount": 1e8,
+            "hard_frozen": False,
+            "_is_suspended": False,
+        },
+    ]
+    out = _basket_asof_row(
+        "240600",
+        members,
+        rows,
+        snap=None,
+        trade_date="2026-09-30",
+        members_total=2,
+    )
+    assert out["amount"] == 1e8
+
+
 def test_l1_density_only_accepts_stock_rows_not_l2_payload():
     """Spec §7.3: L2 industry tag must not feed L1 density.
 
@@ -83,6 +117,7 @@ def test_l1_density_only_accepts_stock_rows_not_l2_payload():
     rows = [
         {
             "ts_code": "000001.SZ",
+            "T": "凉",
             "tag_warm_to_hot": 0,
             "amount": 1e8,
             "hard_frozen": False,

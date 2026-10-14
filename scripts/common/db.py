@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS daily_stock (
   hard_frozen INTEGER,      -- P0 占位；P0.5+ 由 metrics 写入
   amount REAL,
   close_qfq REAL,           -- 前复权收盘；盯市用 bars.close_raw
+  close REAL,               -- legacy alias = close_qfq（旧库/读盘兼容）
   float_mv REAL,
   stage_score REAL,         -- 可空；结束日必须 SQL NULL，禁止用 0 顶
   stage_score_raw REAL,
@@ -148,6 +149,7 @@ RUN_META_ALTER_COLUMNS: Tuple[Tuple[str, str], ...] = (
 DAILY_STOCK_ALTER_COLUMNS: Tuple[Tuple[str, str], ...] = (
     ("hard_frozen", "INTEGER"),
     ("close_qfq", "REAL"),
+    ("close", "REAL"),  # legacy alias of close_qfq for older readers
     ("float_mv", "REAL"),
     ("stage_score", "REAL"),
     ("stage_score_raw", "REAL"),
@@ -199,6 +201,7 @@ DAILY_STOCK_COLS = (
     "hard_frozen",
     "amount",
     "close_qfq",
+    "close",
     "float_mv",
     "stage_score",
     "stage_score_raw",
@@ -384,6 +387,33 @@ def upsert_daily_l2(
     return _upsert_conflict(
         conn, "daily_l2", ("trade_date", "code"), DAILY_BASKET_COLS, rows, commit
     )
+
+
+def purge_invalid_daily_l2(
+    conn: sqlite3.Connection,
+    trade_date: str,
+    allowed: Iterable[str],
+    *,
+    commit: bool = True,
+) -> int:
+    """Delete daily_l2 rows for ``trade_date`` whose code is not in ``allowed``.
+
+    Clears stale 801xxx / non-§4 ghosts left by older pipelines (upsert never deletes).
+    """
+    allow = {str(c) for c in allowed}
+    rows = conn.execute(
+        "SELECT code FROM daily_l2 WHERE trade_date=?",
+        (str(trade_date),),
+    ).fetchall()
+    bad = [str(r[0]) for r in rows if str(r[0]) not in allow]
+    for code in bad:
+        conn.execute(
+            "DELETE FROM daily_l2 WHERE trade_date=? AND code=?",
+            (str(trade_date), code),
+        )
+    if commit and bad:
+        conn.commit()
+    return len(bad)
 
 
 def upsert_daily_l1(

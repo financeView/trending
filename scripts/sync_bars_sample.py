@@ -9,6 +9,7 @@ import argparse
 import datetime as dt
 import os
 import sys
+import time
 from contextlib import ExitStack
 
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -19,7 +20,9 @@ from scripts.common.bars import (
     DEFAULT_BARS_DB,
     baostock_session,
     bars_conn,
+    is_baostock_session_poison,
     sync_baostock_flags,
+    sync_em_float_mv_asof,
     sync_em_limits_asof,
     sync_symbol_bars,
 )
@@ -30,6 +33,21 @@ from scripts.common.universe import load_quarantine_codes, load_universe_codes
 
 # Probe one mapped name in Actions logs (does not change skip rules).
 _DIAG_SAMPLE_CODE = "300897.SZ"
+
+# Poison reopen budget; then skip remaining flags (no per-ticker login storm).
+_FLAGS_POISON_REOPEN_MAX = 3
+_FLAGS_POISON_BACKOFFS_SEC = (5.0, 15.0, 30.0)
+
+
+def flags_session_policy(*, batch_ok: bool, circuit_open: bool) -> tuple[bool, bool]:
+    """Return (manage_session, flags_disabled).
+
+    Batch owns login when healthy. Never fall back to per-ticker manage_session
+    after batch failure — that login-storms anonymous Baostock on tip cold sync.
+    """
+    if circuit_open or not batch_ok:
+        return False, True
+    return False, False
 
 
 def codes_from_universe(path: str = "") -> list[str]:
@@ -279,7 +297,7 @@ def main(argv=None) -> int:
     p.add_argument(
         "--with-limits",
         action="store_true",
-        help="同步东财 f51/f52 涨跌停到 --end 当日（仅 asof 有意义）",
+        help="同步东财涨跌停(f51/f52)与流通市值(f21)到 --end 当日（仅 asof 有意义）",
     )
     p.add_argument(
         "--skip-ohlc",
@@ -324,8 +342,9 @@ def main(argv=None) -> int:
     print_bars_preflight(
         conn, codes, end, session_asof=session_asof, bars_path=bars_path
     )
-    # 4/s: warm resume stays under Actions 6h; was 2/s + per-ticker login.
+    # OHLC can stay aggressive; baostock TCP needs a slower dedicated limiter.
     lim = RateLimiter(4.0)
+    lim_flags = RateLimiter(1.2)
     started = dt.datetime.utcnow()
     complete = True
     worked = 0
@@ -337,17 +356,41 @@ def main(argv=None) -> int:
     reason_ohlc_hist_short = 0
     reason_miss_flags = 0
     bs_sess = None
+    flags_circuit = False
+    poison_reopens = 0
     with ExitStack() as stack:
-        if not args.skip_flags:
+
+        def _close_bs_batch() -> None:
+            nonlocal bs_sess
+            if bs_sess is None:
+                return
             try:
-                bs_sess = stack.enter_context(baostock_session())
-            except Exception as e:  # noqa: BLE001
+                stack.pop_all().close()
+            except Exception as close_e:  # noqa: BLE001
                 print(
-                    "[sync_bars] warn: baostock batch login failed (%s); "
-                    "falling back to per-ticker login" % e,
+                    "[sync_bars] warn: baostock batch close: %s" % close_e,
                     file=sys.stderr,
                 )
+            bs_sess = None
+
+        def _open_bs_batch() -> bool:
+            nonlocal bs_sess, flags_circuit
+            try:
+                bs_sess = stack.enter_context(baostock_session())
+                return True
+            except Exception as e:  # noqa: BLE001
                 bs_sess = None
+                print(
+                    "[sync_bars] warn: baostock batch login failed (%s); "
+                    "disabling flags for remainder (no per-ticker login)"
+                    % e,
+                    file=sys.stderr,
+                )
+                flags_circuit = True
+                return False
+
+        if not args.skip_flags:
+            _open_bs_batch()
         for code in codes:
             if args.time_budget_min and args.time_budget_min > 0:
                 elapsed = (dt.datetime.utcnow() - started).total_seconds() / 60.0
@@ -357,7 +400,11 @@ def main(argv=None) -> int:
                     break
             # Gate must stay on skip_ohlc (tests monkeypatch it); gap is diag-only.
             need_ohlc = not args.skip_ohlc and not skip_ohlc(conn, code, end)
-            need_flags = not args.skip_flags and not skip_flags(conn, code, end)
+            need_flags = (
+                not args.skip_flags
+                and not flags_circuit
+                and not skip_flags(conn, code, end)
+            )
             if not need_ohlc and not need_flags:
                 skipped += 1
                 reason_skippable += 1
@@ -385,35 +432,59 @@ def main(argv=None) -> int:
                         file=sys.stderr,
                     )
             if need_flags:
-                try:
-                    nf = sync_baostock_flags(
-                        conn,
-                        code,
-                        end,
-                        limiter=lim,
-                        manage_session=bs_sess is None,
-                        session=bs_sess,
-                    )
-                    print("[sync_bars] flags %s rows=%d" % (code, nf))
-                except Exception as e:  # noqa: BLE001
-                    failed_flags += 1
-                    # Hard-timeout: logout + deregister batch session now (not
-                    # just bs_sess=None), so per-ticker logins are not stacked
-                    # on a still-open ExitStack login / teardown logout.
-                    if bs_sess is not None and "exceeded" in str(e):
-                        try:
-                            stack.pop_all().close()
-                        except Exception as close_e:  # noqa: BLE001
-                            print(
-                                "[sync_bars] warn: baostock batch close: %s"
-                                % close_e,
-                                file=sys.stderr,
-                            )
-                        bs_sess = None
-                    print(
-                        "[sync_bars] warn: flags %s skipped: %s" % (code, e),
-                        file=sys.stderr,
-                    )
+                _, flags_disabled = flags_session_policy(
+                    batch_ok=bs_sess is not None, circuit_open=flags_circuit
+                )
+                if flags_disabled or bs_sess is None:
+                    # Circuit / missing batch: skip flags; never manage_session=True.
+                    pass
+                else:
+                    try:
+                        nf = sync_baostock_flags(
+                            conn,
+                            code,
+                            end,
+                            limiter=lim_flags,
+                            manage_session=False,
+                            session=bs_sess,
+                        )
+                        print("[sync_bars] flags %s rows=%d" % (code, nf))
+                    except Exception as e:  # noqa: BLE001
+                        failed_flags += 1
+                        print(
+                            "[sync_bars] warn: flags %s skipped: %s" % (code, e),
+                            file=sys.stderr,
+                        )
+                        if is_baostock_session_poison(e):
+                            _close_bs_batch()
+                            if poison_reopens >= _FLAGS_POISON_REOPEN_MAX:
+                                flags_circuit = True
+                                print(
+                                    "[sync_bars] warn: baostock poison reopen "
+                                    "budget exhausted; skipping remaining flags",
+                                    file=sys.stderr,
+                                )
+                            else:
+                                delay = _FLAGS_POISON_BACKOFFS_SEC[
+                                    min(
+                                        poison_reopens,
+                                        len(_FLAGS_POISON_BACKOFFS_SEC) - 1,
+                                    )
+                                ]
+                                print(
+                                    "[sync_bars] warn: baostock session poisoned; "
+                                    "backoff %.0fs then reopen (%d/%d)"
+                                    % (
+                                        delay,
+                                        poison_reopens + 1,
+                                        _FLAGS_POISON_REOPEN_MAX,
+                                    ),
+                                    file=sys.stderr,
+                                )
+                                time.sleep(delay)
+                                if _open_bs_batch():
+                                    poison_reopens += 1
+                                # else flags_circuit already set inside _open_bs_batch
             worked += 1
             if worked % 100 == 0:
                 elapsed = (dt.datetime.utcnow() - started).total_seconds() / 60.0
@@ -461,6 +532,11 @@ def main(argv=None) -> int:
                 print("[sync_bars] limits asof=%s rows=%d" % (end, nl))
             except Exception as e:  # noqa: BLE001
                 print("[sync_bars] warn: limits skipped: %s" % e, file=sys.stderr)
+            try:
+                nm = sync_em_float_mv_asof(conn, end, ts_codes=codes, limiter=lim)
+                print("[sync_bars] float_mv asof=%s rows=%d" % (end, nm))
+            except Exception as e:  # noqa: BLE001
+                print("[sync_bars] warn: float_mv skipped: %s" % e, file=sys.stderr)
 
     # Spec E: full mapped U (ignore --codes subset); keep conn open
     if args.from_universe:

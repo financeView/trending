@@ -154,11 +154,15 @@ def load_quarantine_codes(path: Optional[str] = None) -> Set[str]:
 
 
 def l2_members_map(stock_path: Optional[str] = None) -> dict:
+    """§4 L2 → members. Drops 801xxx / codes outside sw_l2_to_l1 (no ghost boards)."""
+    allowed = section4_codes()
     mapping: dict = {}
     for row in load_stock_sw_l2(stock_path):
         code = row["sw_l2_code"]
         ts = row["ts_code"]
         if not code or not _ts_sh_sz(ts):
+            continue
+        if code not in allowed or str(code).startswith("801"):
             continue
         mapping.setdefault(code, []).append(ts)
     return mapping

@@ -32,6 +32,7 @@ from scripts.common.db import (
     get_conn,
     init_schema,
     last_ok_trade_date,
+    purge_invalid_daily_l2,
     upsert_daily_l1,
     upsert_daily_l2,
     upsert_daily_stock,
@@ -44,6 +45,7 @@ from scripts.common.universe import (
     load_map_version,
     load_quarantine_codes,
     load_universe_codes,
+    section4_codes,
 )
 from scripts.metrics.aggregate import (
     MEMBER_SET,
@@ -369,6 +371,8 @@ def _snap_to_daily_stock(ts_code: str, snap: dict) -> dict:
         "hard_frozen": _sql_int_bool(snap.get("hard_frozen")),
         "amount": _sql_float(snap.get("amount")),
         "close_qfq": _sql_float(snap.get("close_qfq")),
+        # legacy column still present on older trend.db; keep in sync with qfq
+        "close": _sql_float(snap.get("close_qfq")),
         "float_mv": _sql_float(snap.get("float_mv")),
         "stage_score": _sql_float(snap.get("stage_score")),
         "stage_score_raw": _sql_float(snap.get("stage_score_raw")),
@@ -396,8 +400,9 @@ def _basket_asof_row(
         if ts in member_set:
             if r.get("tag_warm_to_hot"):
                 warm_count += 1
+            # T=null（短史/IPO 未入 FSM）不计入篮成交额，避免脏额主导读数
             amt = _sql_float(r.get("amount"))
-            if amt is not None:
+            if amt is not None and r.get("T") is not None:
                 amount_sum += amt
                 any_amount = True
             if not r.get("hard_frozen") and not r.get("_is_suspended"):
@@ -675,6 +680,10 @@ def process_day(
         upsert_daily_stock(conn, stock_rows, commit=False)
     if l2_rows:
         upsert_daily_l2(conn, l2_rows, commit=False)
+    # Drop stale 801xxx / non-§4 ghosts (upsert never deletes orphans)
+    purge_invalid_daily_l2(
+        conn, D.isoformat(), section4_codes(), commit=False
+    )
     if l1_rows:
         upsert_daily_l1(conn, l1_rows, commit=False)
     if events:

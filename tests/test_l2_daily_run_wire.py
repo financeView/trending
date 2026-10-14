@@ -16,8 +16,20 @@ from tests.test_daily_run_metrics_wire import (
 def test_l2_tag_not_or_of_members():
     # Unit-level _l2_asof_row only — do NOT pass snap=None here (that is skip-day → NULL).
     stock_rows = [
-        {"ts_code": "A.SZ", "sw_l2_code": "370100", "tag_warm_to_hot": 0, "amount": 1e8},
-        {"ts_code": "B.SZ", "sw_l2_code": "370100", "tag_warm_to_hot": 1, "amount": 2e8},
+        {
+            "ts_code": "A.SZ",
+            "sw_l2_code": "370100",
+            "T": "凉",
+            "tag_warm_to_hot": 0,
+            "amount": 1e8,
+        },
+        {
+            "ts_code": "B.SZ",
+            "sw_l2_code": "370100",
+            "T": "热",
+            "tag_warm_to_hot": 1,
+            "amount": 2e8,
+        },
     ]
     cool_snap = {
         "T": "凉",
@@ -44,6 +56,7 @@ def test_l2_skip_day_writes_null_engine_fields():
         {
             "ts_code": "A.SZ",
             "sw_l2_code": "370100",
+            "T": "温",
             "tag_warm_to_hot": 1,
             "amount": 1e8,
             "hard_frozen": 0,

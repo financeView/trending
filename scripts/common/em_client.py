@@ -114,3 +114,25 @@ def fetch_limit_up_down_all_a() -> List[Tuple[str, float, float]]:
             continue
         out.append((ts, up, down))
     return out
+
+
+def fetch_float_mv_all_a() -> List[Tuple[str, float]]:
+    """返回 [(ts_code, float_mv_yuan), ...]；东财 clist f21 流通市值（元）。
+
+    仅用于 **session asof 当日 spot**；禁止回刷历史 trade_date（market-data §6.2）。
+    """
+    # f12 代码 f13 市场 f21 流通市值
+    df = fetch_clist_all_a(["f12", "f13", "f21"])
+    out: List[Tuple[str, float]] = []
+    for _, r in df.iterrows():
+        ts = _infer_ts_code(r.get("f12"), r.to_dict())
+        if not ts:
+            continue
+        try:
+            mv = float(r["f21"])
+        except (TypeError, ValueError, KeyError):
+            continue
+        if mv <= 0 or mv != mv:  # NaN
+            continue
+        out.append((ts, mv))
+    return out
