@@ -196,9 +196,13 @@ jobs:
           echo "=== controls (default verify, max-time 60) ==="
           EM_QS="pn=1&pz=3&po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fid=f6&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23&fields=f2,f6,f12,f14"
           probe "em-push2delay" --max-time 60 -H "$UA" "https://push2delay.eastmoney.com/api/qt/clist/get?$EM_QS"
-          # float_mv spot (f21 流通市值 / f20 总市值); same clist as production em_client
-          EM_MV_QS="pn=1&pz=5&po=1&np=1&fltt=2&invt=2&fid=f12&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23&fields=f12,f13,f20,f21"
-          probe "em-float-mv-f21" --max-time 60 -H "$UA" "https://push2delay.eastmoney.com/api/qt/clist/get?$EM_MV_QS"
+          # float_mv spot (f21 流通市值 / f20 总市值); include ut= like working limits probe
+          EM_MV_QS="pn=1&pz=5&po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fid=f12&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23&fields=f12,f13,f20,f21"
+          : > /tmp/em_mv_body
+          code=$(curl -sS -o /tmp/em_mv_body -w "%{http_code}" --max-time 60 -H "$UA" \
+            "https://push2delay.eastmoney.com/api/qt/clist/get?$EM_MV_QS" 2>/tmp/em_mv_err)
+          echo "[em-float-mv-f21] http=$code bytes=$(wc -c </tmp/em_mv_body) curl_ec=$?"
+          head -c 500 /tmp/em_mv_body; echo
           probe "sina-hq" --max-time 60 -H "Referer: https://finance.sina.com.cn" "https://hq.sinajs.cn/list=sh600000"
 
       - name: Probe EM float_mv f21 (python parse)
@@ -222,6 +226,7 @@ jobs:
               "pz": 20,
               "po": 1,
               "np": 1,
+              "ut": "bd1d9ddb04089700cf9c27f6f7426281",
               "fltt": 2,
               "invt": 2,
               "fid": "f12",
@@ -230,61 +235,61 @@ jobs:
           }
           last = None
           for host in HOSTS:
-              t0 = time.time()
-              try:
-                  r = requests.get(
-                      "https://%s/api/qt/clist/get" % host,
-                      params=params,
-                      headers={"User-Agent": UA},
-                      timeout=30,
-                  )
-                  r.raise_for_status()
-                  data = (r.json() or {}).get("data") or {}
-                  diff = data.get("diff") or []
-                  total = data.get("total")
-                  print(
-                      "[em-f21] host=%s status=%s n=%d total=%s elapsed=%.2fs"
-                      % (host, r.status_code, len(diff), total, time.time() - t0),
-                      flush=True,
-                  )
-                  if not diff:
-                      raise RuntimeError("empty diff")
-                  ok = 0
-                  for row in diff[:8]:
-                      f12, f13, f20, f21 = (
-                          row.get("f12"),
-                          row.get("f13"),
-                          row.get("f20"),
-                          row.get("f21"),
+              for attempt in range(3):
+                  t0 = time.time()
+                  try:
+                      r = requests.get(
+                          "https://%s/api/qt/clist/get" % host,
+                          params=params,
+                          headers={"User-Agent": UA},
+                          timeout=30,
                       )
-                      try:
-                          mv = float(f21)
-                      except (TypeError, ValueError):
-                          mv = None
-                      flag = "OK" if mv and mv > 0 else "BAD"
-                      if flag == "OK":
-                          ok += 1
+                      r.raise_for_status()
+                      data = (r.json() or {}).get("data") or {}
+                      diff = data.get("diff") or []
+                      total = data.get("total")
                       print(
-                          "  %s f12=%s f13=%s f20=%s f21=%s (%.1f亿)"
-                          % (
-                              flag,
-                              f12,
-                              f13,
-                              f20,
-                              f21,
-                              (mv or 0) / 1e8,
-                          ),
+                          "[em-f21] host=%s attempt=%d status=%s n=%d total=%s elapsed=%.2fs"
+                          % (host, attempt + 1, r.status_code, len(diff), total, time.time() - t0),
                           flush=True,
                       )
-                  if ok == 0:
-                      raise SystemExit("[em-f21] FAIL: no positive f21 in sample")
-                  print("[em-f21] SUCCESS sample_ok=%d/%d" % (ok, min(8, len(diff))))
-                  break
-              except Exception as e:  # noqa: BLE001
-                  last = e
-                  print("[em-f21] host=%s FAIL: %s" % (host, e), flush=True)
-          else:
-              raise SystemExit("[em-f21] FAIL all hosts: %s" % last)
+                      if not diff:
+                          raise RuntimeError("empty diff body=%r" % (r.text[:200],))
+                      ok = 0
+                      for row in diff[:8]:
+                          f12, f13, f20, f21 = (
+                              row.get("f12"),
+                              row.get("f13"),
+                              row.get("f20"),
+                              row.get("f21"),
+                          )
+                          try:
+                              mv = float(f21)
+                          except (TypeError, ValueError):
+                              mv = None
+                          flag = "OK" if mv and mv > 0 else "BAD"
+                          if flag == "OK":
+                              ok += 1
+                          print(
+                              "  %s f12=%s f13=%s f20=%s f21=%s (%.1f亿)"
+                              % (flag, f12, f13, f20, f21, (mv or 0) / 1e8),
+                              flush=True,
+                          )
+                      if ok == 0:
+                          raise RuntimeError("no positive f21 in sample")
+                      print("[em-f21] SUCCESS sample_ok=%d/%d" % (ok, min(8, len(diff))))
+                      raise SystemExit(0)
+                  except SystemExit:
+                      raise
+                  except Exception as e:  # noqa: BLE001
+                      last = e
+                      print(
+                          "[em-f21] host=%s attempt=%d FAIL: %s"
+                          % (host, attempt + 1, e),
+                          flush=True,
+                      )
+                      time.sleep(min(2**attempt, 6))
+          raise SystemExit("[em-f21] FAIL all hosts: %s" % last)
           PY
 
       - name: Python fetch via --cacert (no verify=False)
