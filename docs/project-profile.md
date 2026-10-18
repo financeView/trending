@@ -37,7 +37,7 @@
   - 文档用中文。
   - 子系统只指向 `docs/superpowers/specs/`，不另写当前行为。
   - 生成数据排除只加 `data/trend.db`。产出过程与理由见 [`automation/range-exclusions.json`](automation/range-exclusions.json)。
-  - `LESSONS.md` 的 `reviewed-through` 保持 `UNKNOWN`。不推断、不推进初始审阅起点，不配置复盘调度。
+  - `LESSONS.md` 的初始排他下界由维护者定为根提交 `b818174d9d04a54909932e23112d0f066ae96d36`。2026-10-18 的日审写入器已把水位推进到该次冻结的 through。不配置复盘调度。
 - 指标与运维的既有规格：见子系统索引中的 spec 链接。本次不把规格正文再抄一遍。
 - Agent 写权限边界：`UNKNOWN`。本次只授权填写上述项目事实与这一条排除规则，未授权合并、发布、部署或运行日更。
 - 是否允许直接合并、发布或部署：`UNKNOWN`。未确认前不视为已授权。
@@ -48,9 +48,9 @@
 - 每日复盘的执行方式 / agent：未配置。本次维护者要求不配置调度。
 - 运行时刻 / 时区：未配置。数据日更时区见上文，那不是复盘调度。
 - 并发、失败重试、超时与部分写入恢复：`UNKNOWN`。没有已配置的复盘调度器。
-- 复盘归档位置：`docs/reviews` 是固定根目录；只能在其下选择 Markdown 文件名与日期布局。本次没有创建归档，也没有跑写入器。
-- 审阅水位：唯一标记在 [`LESSONS.md`](../LESSONS.md) 第一行，当前保持 `UNKNOWN`。这里不复制第二份 SHA。
-- 最近一次复盘日期：`UNKNOWN`。
+- 复盘归档位置：`docs/reviews` 是固定根目录；只能在其下选择 Markdown 文件名与日期布局。2026-10-18 的写入器创建了 [`reviews/2026-10-18.md`](reviews/2026-10-18.md)。
+- 审阅水位：唯一标记在 [`LESSONS.md`](../LESSONS.md) 第一行。2026-10-18 日审完成后为 `666c78c7cb05f98a33ffc6a1391c9e7c7e40905f`。
+- 最近一次复盘日期：2026-10-18（Asia/Shanghai）。归档 [`reviews/2026-10-18.md`](reviews/2026-10-18.md)。
 - 教训升格门槛：默认 3 个不同复盘日。见 [`LESSONS.md`](../LESSONS.md)。只有维护者可以明确调整。
 
 ## 更新要求
