@@ -1,0 +1,32 @@
+完成日期: 2026-10-18
+Reviewed HEAD: 9e8122bf0d29fbe27df8271fd4cf7e9c8952f0ae
+
+审阅的是飞轮安装提交。本标记写在该提交的未提交工作区上，不是一次新的 git commit。
+
+已初始化:
+- docs/project-profile.md
+- docs/code-standards.md 的项目事实段（通用基线未改）
+- docs/contributors.md 的本仓库政策段
+- docs/subsystems/README.md（只指向 docs/superpowers/specs，没有新的当前行为页）
+- docs/automation/range-exclusions.json 的 generated-data-paths 只含 data/trend.db
+
+实际运行:
+- python3 scripts/freeze-review-range.py --validate-policy docs/automation/range-exclusions.json（退出码 0，无清单输出）
+- python3 scripts/validate_lesson_promotions.py（通过）
+- 上述文档的相对链接检查（缺失 0）
+- git diff --check（无输出）
+- 确认 LESSONS.md 无 diff
+
+未运行:
+- 全量 pytest。PR #16 记录它曾改写 clone 内 data/heartbeat.json。
+- freeze-review-range.py 的区间冻结、write-frozen-review.py、日更 workflow。水位仍是 UNKNOWN。
+
+仍为 UNKNOWN 或等待维护者:
+- 初始审阅水位。LESSONS.md 第一行保持 UNKNOWN，未推断、未推进。
+- 复盘调度。本次未配置。
+- 格式化、lint、类型检查、打包与发布。
+- 定向测试命令、测试隔离的完整约定、非 ubuntu/Python 3.11 的平台。
+- 集成验证的凭据与隔离方式。
+- 基线失败的负责人。
+- Agent 是否可以合并、发布、评论或开 PR。
+- 哪些事项必须升级、由谁决定。

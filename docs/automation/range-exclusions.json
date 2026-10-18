@@ -1,0 +1,35 @@
+{
+  "policy_version": 3,
+  "rules": [
+    {
+      "id": "generated-output",
+      "kind": "path-glob",
+      "patterns": [
+        "**/.cache/**",
+        "**/build/**",
+        "**/coverage/**",
+        "**/dist/**",
+        "**/generated/**",
+        "**/node_modules/**"
+      ],
+      "reason": "Exclude conventional cache, build, coverage, distribution, generated-source, and installed-dependency trees from retrospective path review; the exact matched paths are recorded in the manifest."
+    },
+    {
+      "id": "generated-data-paths",
+      "kind": "path-prefix",
+      "paths": ["data/trend.db"],
+      "producer": "日更 workflow（.github/workflows/daily-trend.yml 的 metrics 作业）调用 scripts/daily_run.py 之后，由该 workflow 提交的库",
+      "reason": "只排除 data/trend.db 的生成行情内容，不把它读进开发、评审与合并复盘。同一提交里的 data/heartbeat.json 以及其他路径仍要看。不使用目录 data，避免连带排除 heartbeat 与 data/cache/trade_dates.json。"
+    },
+    {
+      "id": "binary-nul-content",
+      "kind": "binary-nul-byte",
+      "reason": "Exclude a changed file from text review when either extant blob side of its parent comparison contains a NUL byte; the exact path and comparison are recorded in the manifest."
+    },
+    {
+      "id": "gitlink-submodule",
+      "kind": "gitlink",
+      "reason": "Exclude nested repository contents because the outer repository stores only a gitlink object ID; the exact path and old/new gitlink IDs are recorded in the manifest."
+    }
+  ]
+}
