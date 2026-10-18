@@ -40,3 +40,5 @@ If a later range supplies an existing Lesson ID, the writer merges only when the
 ## Verification
 
 Run `PYTHONDONTWRITEBYTECODE=1 python3 tests/test-range-writer.py` for writer-specific fixtures and `bash tests/test-install.sh` for the full installer and range/writer regression suite.
+
+These paths belong to the Self-Evolution Flywheel template, not to this repository. The installer does not copy `tests/test-range-writer.py` or `tests/test-install.sh`. Run them in a checkout of the pinned template commit `a8def36cee2caac1b81038bbd704e46d1874aaed` (https://github.com/jack4leo/self-evolution-flywheel/commit/a8def36cee2caac1b81038bbd704e46d1874aaed). Running them here fails because those files are absent.
