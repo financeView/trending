@@ -156,8 +156,46 @@ When recording a specific event, evidence may support checking whether it can be
 - **Why:** `5d7dd4be93` 删掉批量登录失败后的按票登录。剩余 flags 关掉；会话中毒只做有限次 backoff 重开，超过则跳过。
 - **Review evidence:**
   - `2026-10-18` — [5d7dd4be93 禁止按票登录风暴](https://github.com/financeView/trending/commit/5d7dd4be93a3fdb0d6e93b0d7cd1158eb6bb7dbb)
-- **Fix or follow-up:** 已有 `tests/test_baostock_poison.py`。同笔说明里的 L2 幽灵行、空 T 篮子成交额、close_qfq 和 f21 流通市值，这次没有逐行打开。
+- **Fix or follow-up:** 已有 `tests/test_baostock_poison.py`。同笔其余审计硬修已拆为 L-0017–L-0020。
 - **Done right:** 无。
+- **Status:** active
+
+### L-0017 — daily_l2 不得保留 801* 或非 §4 幽灵板；空 §4 不得伪造板面
+- **Why:** upsert 不删孤儿时，旧的 `801xxx` / 非税表码会留在 `daily_l2`。`5d7dd4be93` 增加 `purge_invalid_daily_l2`，并把 `l2_members_map` 钉在 §4；成员数为 0 的 §4 码（如 460700/720800/480600）不应出现板面行。
+- **Review evidence:**
+  - `2026-10-18` — [5d7dd4be93 提交说明含 Purge non-§4/801](https://github.com/financeView/trending/commit/5d7dd4be93a3fdb0d6e93b0d7cd1158eb6bb7dbb)
+  - `2026-10-18` — [tests/test_purge_daily_l2.py](tests/test_purge_daily_l2.py)
+  - `2026-10-18` — [tests/test_l2_members_section4.py](tests/test_l2_members_section4.py)
+- **Fix or follow-up:** 已合入 purge 与 §4 夹具；日更路径见 `daily_run` 写 L2 后的 purge。
+- **Done right:** 空 §4 用税表成员计数断言，而不是靠板面缺席猜测。
+- **Status:** active
+
+### L-0018 — 篮 amount 不得计入成分 T is null 的成交额
+- **Why:** 短史/IPO 等未入 FSM 的票 `T=null` 但成交额可极大（如能源金属 C力勤），会把 L2 篮额与读数带偏。`5d7dd4be93` 在 `_basket_asof_row` 只累加 `T is not None` 的 amount。
+- **Review evidence:**
+  - `2026-10-18` — [5d7dd4be93 提交说明含 exclude T=null from basket amount](https://github.com/financeView/trending/commit/5d7dd4be93a3fdb0d6e93b0d7cd1158eb6bb7dbb)
+  - `2026-10-18` — [tests/test_basket_asof_row.py::test_amount_excludes_members_without_T](tests/test_basket_asof_row.py)
+- **Fix or follow-up:** `scripts/daily_run.py` `_basket_asof_row` 已闸。
+- **Done right:** 夹具直接锁「高额 null-T + 低额有 T → 篮额=有 T 侧」。
+- **Status:** active
+
+### L-0019 — daily_stock.close 必须与 close_qfq 同源落库
+- **Why:** 只写 `close_qfq` 而 `close` 全日 NULL 时，下游读 `close` 的路径会误判无价。`5d7dd4be93` 将 `close` 镜像为 `close_qfq`。
+- **Review evidence:**
+  - `2026-10-18` — [5d7dd4be93 提交说明含 mirror close_qfq](https://github.com/financeView/trending/commit/5d7dd4be93a3fdb0d6e93b0d7cd1158eb6bb7dbb)
+  - `2026-10-18` — [daily_run.py stock row close←close_qfq](scripts/daily_run.py)
+- **Fix or follow-up:** `_stock_asof_row`（或等价落库路径）保持 `close` 与 `close_qfq` 同值。
+- **Done right:** 无。
+- **Status:** active
+
+### L-0020 — 历史日 float_mv 为 null 属契约预期，不得当回归失败；禁 spot 回刷
+- **Why:** market-data §6 只允许 tip/session asof 写东财 f21 spot；历史补旧日无历史市值源则保持 null，权重走 §6.3 `w_raw=1.0`。`5d7dd4be93` 增加 asof 写入路径，但 probe/workflow 仍不能也不应用今日 spot 回刷旧日。
+- **Review evidence:**
+  - `2026-10-18` — [5d7dd4be93 提交说明含 asof float_mv via EM f21](https://github.com/financeView/trending/commit/5d7dd4be93a3fdb0d6e93b0d7cd1158eb6bb7dbb)
+  - `2026-10-18` — [tests/test_float_mv_asof.py](tests/test_float_mv_asof.py)
+  - `2026-10-18` — [market-data-contract §6](docs/superpowers/specs/2026-10-01-market-data-contract-design.md)
+- **Fix or follow-up:** tip 日需 `end==session_asof` 且带 limits/f21 路径才可能非空；接历史源（如 Tushare `daily_basic.circ_mv`）前保持 null 预期。
+- **Done right:** 夹具只测 asof upsert，不把历史回刷写进生产路径。
 - **Status:** active
 <!-- /frozen-review-lessons: sha256:a0fff8321f1f34aa4f37e738cfffcabb4f49dea8273f5a5ca8775ae74668122b -->
 <!-- ACTIVE_LESSONS:END -->
