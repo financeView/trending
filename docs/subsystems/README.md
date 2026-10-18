@@ -1,26 +1,22 @@
-# Subsystem Index
+# 子系统索引
 
-> Bootstrap must generate this index from the target repository's actual runtime responsibilities. The example structure below does not mean the project has these modules; mark unknown or pending boundaries instead of inferring responsibilities from folder names.
+> 本次只把职责指向已有规格，不另写当前行为页。`TEMPLATE.md` 仍是空模板，没有按它复制新页。行为以 `docs/superpowers/specs/` 为准。
 
-A subsystem page answers “how does the current system work, who is responsible for the behavior, and where can it be verified?” It is not a roadmap or implementation plan. Split documentation by stable responsibility boundaries: one subsystem may span multiple directories, and one directory may contain multiple subsystems. Create a separate page only when there is an independent responsibility, data/state contract, or boundary that is easy to modify incorrectly; avoid one document per file.
+## 规格索引
 
-## Subsystem List (Fill After Initialization)
-
-| Subsystem | Current responsibility / boundary | Authoritative documentation |
+| 职责 | 不在本页重述的边界 | 规格 |
 | --- | --- | --- |
-| `BOOTSTRAP REQUIRED` | Fill in current responsibilities and what it does not cover | Copy [`TEMPLATE.md`](TEMPLATE.md) and change it into a real subsystem page |
+| 行业分类与股票池 | 成员、映射与宇宙扩张的当前规则 | [`2026-09-28-industry-taxonomy-design.md`](../superpowers/specs/2026-09-28-industry-taxonomy-design.md)、[`2026-10-05-sw-yaml-universe-design.md`](../superpowers/specs/2026-10-05-sw-yaml-universe-design.md)、[`2026-10-08-universe-expansion-design.md`](../superpowers/specs/2026-10-08-universe-expansion-design.md) |
+| 行情合同与硬冻 | bars、戳、限价回退、asof 权限 | [`2026-10-01-market-data-contract-design.md`](../superpowers/specs/2026-10-01-market-data-contract-design.md)、[`2026-10-08-spec-e-fill-hard-freeze-design.md`](../superpowers/specs/2026-10-08-spec-e-fill-hard-freeze-design.md)、[`2026-10-10-protocol-b-hard-freeze-stamp-design.md`](../superpowers/specs/2026-10-10-protocol-b-hard-freeze-stamp-design.md)、[`2026-10-11-limit-rule-rollback-guard-design.md`](../superpowers/specs/2026-10-11-limit-rule-rollback-guard-design.md)、[`2026-10-11-incomplete-asof-authority-design.md`](../superpowers/specs/2026-10-11-incomplete-asof-authority-design.md) |
+| 趋势指标 | FSM、L1/L2、RS、止盈标签、篮子量 | [`2026-09-29-trend-metrics-engine-design.md`](../superpowers/specs/2026-09-29-trend-metrics-engine-design.md)、[`2026-10-06-l2-same-engine-digest-design.md`](../superpowers/specs/2026-10-06-l2-same-engine-digest-design.md)、[`2026-10-07-l1-same-engine-design.md`](../superpowers/specs/2026-10-07-l1-same-engine-design.md)、[`2026-10-07-rs-c1-vol-design.md`](../superpowers/specs/2026-10-07-rs-c1-vol-design.md)、[`2026-10-11-exit-tags-design.md`](../superpowers/specs/2026-10-11-exit-tags-design.md)、[`2026-10-11-basket-vol-score-design.md`](../superpowers/specs/2026-10-11-basket-vol-score-design.md) |
+| 日更作业 | sync 与 metrics 的分工 | [`2026-10-07-ops-daily-run-hemostasis-design.md`](../superpowers/specs/2026-10-07-ops-daily-run-hemostasis-design.md)、[`2026-10-08-workflow-split-jobs-design.md`](../superpowers/specs/2026-10-08-workflow-split-jobs-design.md) |
+| 纸面评估 | 回测与影子账 | [`2026-09-30-backtest-eval-design.md`](../superpowers/specs/2026-09-30-backtest-eval-design.md)、[`2026-09-30-ops-action-and-eval-design.md`](../superpowers/specs/2026-09-30-ops-action-and-eval-design.md) |
+| Issue 与榜单展示 | digest 与雷达的展示合同 | [`2026-10-10-digest-radar-ux-design.md`](../superpowers/specs/2026-10-10-digest-radar-ux-design.md) |
 
-## Modification Protocol
+实现入口仍在 `scripts/`。验收命令见 [`../project-profile.md`](../project-profile.md)。
 
-Before changing a subsystem, first read its page and the code standards, API/configuration contracts, and tests linked from it. If a change alters an entry point, call path, storage, state transition, dependency boundary, error/fallback behavior, permissions, security defaults, or compatibility, update the corresponding page and this index in the same change. Documentation describes verified current behavior; mark future ideas as proposals separately instead of mixing them with facts.
+## 修改约定
 
-When describing a semantic change, state the trigger or input and set out the observable behavior before and after the change. Separately identify whether interfaces, state, compatibility, and failure behavior changed (yes/no/unknown); dimensions unrelated to this change need not be expanded, while unexamined dimensions remain `UNKNOWN` rather than being obscured by general wording.
+行为、接口、状态、失败或兼容性变了，改上表对应的 spec。不要在 `docs/subsystems/` 再写一份当前行为。本索引只在规格文件增删或职责归属变化时一起改。
 
-Every important behavior should be traceable to a source path, public interface/configuration, or test. Use relative links and point to stable files and symbols where possible; if the repository supports line links and they will not drift frequently, line numbers may be added. Do not copy long code listings or write only abstract slogans. Keep concrete acceptance commands in `docs/project-profile.md` / `docs/code-standards.md`; pages retain only targeted verification relevant to that subsystem.
-
-## How to Verify
-
-- Every entry should have a concrete owner/implementation path and verification evidence, avoiding vague statements such as “handled by the backend.”
-- Documentation links must exist in the repository; test commands must come from existing scripts, workflows, or maintainer confirmation.
-- For critical paths, check state changes, failure branches, and compatibility rather than documenting only the success path.
-- If a responsibility boundary is disputed, retain established facts, mark it `UNKNOWN`, and ask the project owner to confirm; do not split or merge modules on your own.
+未核实的边界保持 `UNKNOWN`，不按目录名拆分模块。

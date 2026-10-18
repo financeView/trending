@@ -17,8 +17,9 @@
     {
       "id": "generated-data-paths",
       "kind": "path-prefix",
-      "paths": [],
-      "reason": "Exclude generated data content only beneath repository-relative file or directory paths explicitly listed by a maintainer, with a concrete producer process and exclusion rationale when populated; producers may be training, intermediate-stage, ETL, script, runtime, or other generation processes. An empty list adds no project-specific generated-data exclusions."
+      "paths": ["data/trend.db"],
+      "producer": "日更 workflow（.github/workflows/daily-trend.yml 的 metrics 作业）调用 scripts/daily_run.py 之后，由该 workflow 提交的库",
+      "reason": "只排除 data/trend.db 的生成行情内容，不把它读进开发、评审与合并复盘。同一提交里的 data/heartbeat.json 以及其他路径仍要看。不使用目录 data，避免连带排除 heartbeat 与 data/cache/trade_dates.json。"
     },
     {
       "id": "binary-nul-content",

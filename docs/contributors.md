@@ -15,11 +15,11 @@ This document provides a review framework for community/external PRs; it does no
 
 Be especially cautious when inspecting `.github/workflows/`, build/install scripts, package-manager hooks, dependency sources, automated release steps, database/data migrations, permission models, secret reads, uploads/telemetry, and network downloads. Confirm isolation of the execution environment and secrets; do not give an authorized runner, production data, or real user credentials to unreviewed code. If isolation cannot be established or permissions are unclear, stop execution and state that maintainer action is required.
 
-## Project-specific policies (maintained after Bootstrap)
+## 本仓库政策（bootstrap 之后）
 
-- Contribution guide and code of conduct: `BOOTSTRAP REQUIRED`
-- Protected branches / required checks / CODEOWNERS: `BOOTSTRAP REQUIRED`
-- Which issues require escalation and who decides: `BOOTSTRAP REQUIRED`
-- Boundaries for agents to comment, submit fixes, or create PRs: `BOOTSTRAP REQUIRED`
+- 贡献指南与行为准则：仓库内没有 `CONTRIBUTING` 或 `CODEOWNERS`。
+- 受保护分支 / required checks / CODEOWNERS：2026-10-18 对 `main` 的 GitHub branch protection API 返回未保护（HTTP 404）。没有从保护规则读到 required checks。workflow 文件存在，不等于它们是必需检查。
+- 哪些事项必须升级、由谁决定：`UNKNOWN`。本次不发明拒绝名单、信任分或合并权限。
+- Agent 评论、提交修复或创建 PR 的边界：`UNKNOWN`。本次未授权合并、发布或运行日更。
 
 Do not infer malicious intent or automatically reject based on the identity of an “external contributor”; nor replace the result of a security review with the author's personal judgment. Any rule based on a contributor list, trust status, or rejection policy must have an explicit project policy and maintainer authorization.

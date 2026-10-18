@@ -34,23 +34,23 @@ This document defines the minimum review standards applicable to all projects, a
 
 > Bootstrap must complete this section from the project's source code, tool configuration, CI, existing rules, and real retrospectives; mark unknowns as `UNKNOWN` and include questions requiring confirmation. Do not copy template examples.
 
-### Technology and repository conventions
+### 技术与仓库约定
 
-- Language, framework, and directory/module conventions: `BOOTSTRAP REQUIRED`
-- Formatting, linting, type checking, and build commands: `BOOTSTRAP REQUIRED`
-- Dependency, code-generation, migration, and release conventions: `BOOTSTRAP REQUIRED`
+- 语言、框架与目录：Python。CI 为 Python 3.11。命令行脚本在 `scripts/`，测试在 `tests/`，行为规格在 `docs/superpowers/specs/`。证据：[`requirements.txt`](../requirements.txt)、[`.github/workflows/daily-trend.yml`](../.github/workflows/daily-trend.yml)、[`pytest.ini`](../pytest.ini)。
+- 格式化、lint、类型检查与构建：`UNKNOWN`。仓库内没有 black、ruff、mypy 或 flake8 配置，也没有打包配置。
+- 依赖、代码生成、迁移与发布：依赖版本钉在 [`requirements.txt`](../requirements.txt)。发布流程：`UNKNOWN`。
 
-### Acceptance and validation requirements
+### 验收与验证
 
-- Targeted and full test commands (including working directory and tags/arguments): `BOOTSTRAP REQUIRED`
-- Required CI workflows and passing conditions: `BOOTSTRAP REQUIRED`
-- Integration/real-environment tests, isolation method, and untestable scope: `BOOTSTRAP REQUIRED`
-- Project-specific normal, boundary, failure, rollback, and compatibility test requirements: `BOOTSTRAP REQUIRED`
+- 全量测试：仓库根目录 `python -m pytest tests/ -q`。没有单独的定向测试命令。证据：[`pytest.ini`](../pytest.ini) 与 `daily-trend.yml` 的 Unit tests 步。
+- CI：`daily-trend.yml`、`probe-data-sources.yml`、`lesson-promotion-gate.yml` 的触发方式与权限见 [`project-profile.md`](project-profile.md)。2026-10-18 查询到 `main` 未被 GitHub branch protection 保护，所以上述 workflow 不是从保护规则读到的 required check。
+- 集成与真实环境：日更访问外部行情源并提交 `data/trend.db`。本次不跑、不读该库。全量 pytest 曾改写过 clone 内的 `data/heartbeat.json`（见 PR #16 说明），本次不跑全量 pytest。
+- 项目特定的正常、边界、失败与兼容：行为合同以 `docs/superpowers/specs/` 为准，见 [`subsystems/README.md`](subsystems/README.md)。本次不把规格正文抄进本节。
 
-### Project-specific risks and stable rules
+### 项目风险与稳定规则
 
-- Sensitive paths, credentials, personal information, and high-risk operations: `BOOTSTRAP REQUIRED`
-- Confirmed design/compatibility decisions and their sources: `BOOTSTRAP REQUIRED`
+- 敏感路径与高风险操作：已跟踪 `data/trend.db`、`data/heartbeat.json`、`data/cache/trade_dates.json`。`daily-trend.yml` 拥有 `contents: write` 与 `issues: write`，并会提交数据库。未授权不运行。
+- 已确认的设计决定及来源：本次维护者指示——文档用中文；子系统只指向现有 spec；生成数据排除只加 `data/trend.db`；水位保持 `UNKNOWN`；不配置复盘调度。指标与运维的其余决定见对应 spec，不在这里重述。
 - Stable rules promoted from Lessons are listed in the block below. Give each rule a unique `PS-0001` ID and cite one or more promoted `L-0001` lesson IDs. The cited lessons must collectively contain at least three distinct, structured review-evidence dates as defined in [`LESSONS.md`](../LESSONS.md).
 
 #### Stable promoted rules
