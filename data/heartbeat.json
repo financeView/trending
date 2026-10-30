@@ -1,14 +1,14 @@
 {
   "daily_run": {
     "status": "ok",
-    "asof": "2024-01-10",
+    "asof": "2026-10-30",
     "days": [
-      "2024-01-10"
+      "2026-10-30"
     ],
     "statuses": [
       "ok"
     ],
-    "last_success": "2026-10-30T17:00:31"
+    "last_success": "2026-10-30T21:55:02"
   },
   "taxonomy": {
     "taxonomy_fetch": "skipped_no_diff",
@@ -20,5 +20,5 @@
     "taxonomy_commit": "",
     "updated_at": "2026-10-30T17:07:28Z"
   },
-  "updated_at": "2026-10-30T17:00:31"
+  "updated_at": "2026-10-30T21:55:02"
 }
