@@ -1,4 +1,4 @@
-map_version: sw2021-v1
+map_version: sw2021-v2
 note: >
   Canonical 14 L1 theme buckets (taxonomy §3.3). L2 membership comes from
   config/taxonomy/sw_l2_to_l1.yaml + stock_sw_l2.yaml (map_version sw2021-v1).

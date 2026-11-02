@@ -1,4 +1,4 @@
-map_version: sw2021-v1
+map_version: sw2021-v2
 source: taxonomy-spec-section-4
 l2:
   - {code: "370100", name_zh: 化学制药, l1_id: l1_health, sort_order: 1}
