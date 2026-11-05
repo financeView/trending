@@ -1,24 +1,24 @@
 {
   "daily_run": {
     "status": "ok",
-    "asof": "2026-11-04",
+    "asof": "2024-01-10",
     "days": [
-      "2026-11-04"
+      "2024-01-10"
     ],
     "statuses": [
       "ok"
     ],
-    "last_success": "2026-11-04T23:33:40"
+    "last_success": "2026-11-05T18:40:10"
   },
   "taxonomy": {
-    "taxonomy_fetch": "ok",
-    "clist_fetch": "ok",
-    "unmapped_count": 65,
-    "ipo_unmapped_alert_count": 65,
+    "taxonomy_fetch": "skipped_no_diff",
+    "clist_fetch": "fail",
+    "unmapped_count": null,
+    "ipo_unmapped_alert_count": null,
     "yaml_quarantine_size": 67,
     "map_version": "sw2021-v2",
-    "taxonomy_commit": "4773faf91332aac9e2eaec3a202839b5c610e643",
-    "updated_at": "2026-11-04T18:42:10Z"
+    "taxonomy_commit": "",
+    "updated_at": "2026-11-05T18:46:52Z"
   },
-  "updated_at": "2026-11-04T23:33:40"
+  "updated_at": "2026-11-05T18:40:10"
 }
