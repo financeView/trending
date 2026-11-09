@@ -8,7 +8,7 @@
     "statuses": [
       "ok"
     ],
-    "last_success": "2026-11-06T17:54:53"
+    "last_success": "2026-11-09T21:24:46"
   },
   "taxonomy": {
     "taxonomy_fetch": "ok",
@@ -17,8 +17,8 @@
     "ipo_unmapped_alert_count": 65,
     "yaml_quarantine_size": 67,
     "map_version": "sw2021-v2",
-    "taxonomy_commit": "22ba68483b4eddad9c1147675fc62fc47fc0872b",
-    "updated_at": "2026-11-06T18:00:22Z"
+    "taxonomy_commit": "95c185edc0b389db81216c4c624862ca7c4dc482",
+    "updated_at": "2026-11-09T21:30:24Z"
   },
-  "updated_at": "2026-11-06T17:54:53"
+  "updated_at": "2026-11-09T21:24:46"
 }
