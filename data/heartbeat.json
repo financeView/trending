@@ -1,18 +1,14 @@
 {
   "daily_run": {
-    "status": "partial",
-    "asof": "2026-11-19",
+    "status": "ok",
+    "asof": "2024-01-10",
     "days": [
-      "2026-11-17",
-      "2026-11-18",
-      "2026-11-19"
+      "2024-01-10"
     ],
     "statuses": [
-      "ok",
-      "ok",
-      "partial"
+      "ok"
     ],
-    "last_success": "2026-11-19T01:17:01"
+    "last_success": "2026-11-19T19:28:11"
   },
   "taxonomy": {
     "taxonomy_fetch": "skipped_no_diff",
@@ -22,7 +18,7 @@
     "yaml_quarantine_size": 67,
     "map_version": "sw2021-v2",
     "taxonomy_commit": "",
-    "updated_at": "2026-11-18T19:26:04Z"
+    "updated_at": "2026-11-19T19:34:05Z"
   },
-  "updated_at": "2026-11-19T01:17:01"
+  "updated_at": "2026-11-19T19:28:11"
 }
