@@ -1,14 +1,16 @@
 {
   "daily_run": {
-    "status": "ok",
-    "asof": "2024-01-10",
+    "status": "partial",
+    "asof": "2026-11-24",
     "days": [
-      "2024-01-10"
+      "2026-11-23",
+      "2026-11-24"
     ],
     "statuses": [
-      "ok"
+      "ok",
+      "partial"
     ],
-    "last_success": "2026-11-23T22:32:19"
+    "last_success": "2026-11-24T03:53:06"
   },
   "taxonomy": {
     "taxonomy_fetch": "skipped_no_diff",
@@ -20,5 +22,5 @@
     "taxonomy_commit": "",
     "updated_at": "2026-11-23T22:38:02Z"
   },
-  "updated_at": "2026-11-23T22:32:19"
+  "updated_at": "2026-11-24T03:53:06"
 }
