@@ -378,7 +378,7 @@ members:
   - {ts_code: 000817.SZ, sw_l2_code: null, name_zh: 辽河油田}
   - {ts_code: 000818.SZ, sw_l2_code: '220200', name_zh: 航锦科技}
   - {ts_code: 000819.SZ, sw_l2_code: '750300', name_zh: 岳阳兴长}
-  - {ts_code: 000820.SZ, sw_l2_code: '760200', name_zh: 神雾节能}
+  - {ts_code: 000820.SZ, sw_l2_code: '760200', name_zh: ST节能}
   - {ts_code: 000821.SZ, sw_l2_code: '630500', name_zh: ST京机}
   - {ts_code: 000822.SZ, sw_l2_code: '220200', name_zh: 山东海化}
   - {ts_code: 000823.SZ, sw_l2_code: '270200', name_zh: 超声电子}
@@ -424,7 +424,7 @@ members:
   - {ts_code: 000888.SZ, sw_l2_code: '461000', name_zh: 峨眉山Ａ}
   - {ts_code: 000889.SZ, sw_l2_code: '730100', name_zh: 中嘉博创}
   - {ts_code: 000890.SZ, sw_l2_code: '760200', name_zh: 法尔胜}
-  - {ts_code: 000892.SZ, sw_l2_code: '720600', name_zh: 欢瑞世纪}
+  - {ts_code: 000892.SZ, sw_l2_code: '720600', name_zh: ST欢瑞}
   - {ts_code: 000893.SZ, sw_l2_code: '220800', name_zh: 亚钾国际}
   - {ts_code: 000895.SZ, sw_l2_code: '340400', name_zh: 双汇发展}
   - {ts_code: 000897.SZ, sw_l2_code: '430100', name_zh: 津滨发展}
@@ -755,7 +755,7 @@ members:
   - {ts_code: 002119.SZ, sw_l2_code: '270100', name_zh: 康强电子}
   - {ts_code: 002120.SZ, sw_l2_code: '420800', name_zh: 韵达股份}
   - {ts_code: 002121.SZ, sw_l2_code: '630800', name_zh: 科陆电子}
-  - {ts_code: 002122.SZ, sw_l2_code: '640100', name_zh: ST汇洲}
+  - {ts_code: 002122.SZ, sw_l2_code: '640100', name_zh: 汇洲智能}
   - {ts_code: 002123.SZ, sw_l2_code: '730100', name_zh: 梦网科技}
   - {ts_code: 002124.SZ, sw_l2_code: '110700', name_zh: 天邦食品}
   - {ts_code: 002125.SZ, sw_l2_code: '630700', name_zh: 湘潭电化}
@@ -1493,7 +1493,7 @@ members:
   - {ts_code: 002869.SZ, sw_l2_code: '710100', name_zh: 金溢科技}
   - {ts_code: 002870.SZ, sw_l2_code: '280200', name_zh: 香山股份}
   - {ts_code: 002871.SZ, sw_l2_code: '640100', name_zh: 伟隆股份}
-  - {ts_code: 002872.SZ, sw_l2_code: '370100', name_zh: ST天圣}
+  - {ts_code: 002872.SZ, sw_l2_code: '370100', name_zh: 天圣制药}
   - {ts_code: 002873.SZ, sw_l2_code: '370200', name_zh: 新天药业}
   - {ts_code: 002875.SZ, sw_l2_code: '350200', name_zh: 安奈儿}
   - {ts_code: 002876.SZ, sw_l2_code: '270300', name_zh: 三利谱}
@@ -2001,7 +2001,7 @@ members:
   - {ts_code: 300348.SZ, sw_l2_code: '710400', name_zh: 长亮科技}
   - {ts_code: 300349.SZ, sw_l2_code: '640100', name_zh: 金卡智能}
   - {ts_code: 300350.SZ, sw_l2_code: '420800', name_zh: 华鹏飞}
-  - {ts_code: 300351.SZ, sw_l2_code: '640500', name_zh: 永贵电器}
+  - {ts_code: 300351.SZ, sw_l2_code: '640500', name_zh: 永贵智能}
   - {ts_code: 300352.SZ, sw_l2_code: '710400', name_zh: ST信源}
   - {ts_code: 300353.SZ, sw_l2_code: '730200', name_zh: 东土科技}
   - {ts_code: 300354.SZ, sw_l2_code: '640100', name_zh: 东华测试}
@@ -2142,7 +2142,7 @@ members:
   - {ts_code: 300489.SZ, sw_l2_code: '270300', name_zh: 光智科技}
   - {ts_code: 300490.SZ, sw_l2_code: '630700', name_zh: 华自科技}
   - {ts_code: 300491.SZ, sw_l2_code: '630300', name_zh: 通合科技}
-  - {ts_code: 300492.SZ, sw_l2_code: '461100', name_zh: 华图山鼎}
+  - {ts_code: 300492.SZ, sw_l2_code: '461100', name_zh: 华图科技}
   - {ts_code: 300493.SZ, sw_l2_code: '270400', name_zh: 润欣科技}
   - {ts_code: 300494.SZ, sw_l2_code: '720400', name_zh: 盛天网络}
   - {ts_code: 300495.SZ, sw_l2_code: '620300', name_zh: "*ST美尚"}
@@ -2150,7 +2150,7 @@ members:
   - {ts_code: 300497.SZ, sw_l2_code: '370100', name_zh: 富祥股份}
   - {ts_code: 300498.SZ, sw_l2_code: '110700', name_zh: 温氏股份}
   - {ts_code: 300499.SZ, sw_l2_code: '640200', name_zh: 高澜股份}
-  - {ts_code: 300500.SZ, sw_l2_code: '620600', name_zh: 启迪设计}
+  - {ts_code: 300500.SZ, sw_l2_code: '620600', name_zh: ST启设}
   - {ts_code: 300501.SZ, sw_l2_code: '360200', name_zh: 海顺新材}
   - {ts_code: 300502.SZ, sw_l2_code: '730200', name_zh: 新易盛}
   - {ts_code: 300503.SZ, sw_l2_code: '640100', name_zh: 昊志机电}
@@ -2317,7 +2317,7 @@ members:
   - {ts_code: 300667.SZ, sw_l2_code: '640100', name_zh: 必创科技}
   - {ts_code: 300668.SZ, sw_l2_code: '620600', name_zh: 杰恩股份}
   - {ts_code: 300669.SZ, sw_l2_code: '640200', name_zh: 沪宁股份}
-  - {ts_code: 300670.SZ, sw_l2_code: '630800', name_zh: 大烨智能}
+  - {ts_code: 300670.SZ, sw_l2_code: '630800', name_zh: ST大烨}
   - {ts_code: 300671.SZ, sw_l2_code: '270100', name_zh: 富满微}
   - {ts_code: 300672.SZ, sw_l2_code: '270100', name_zh: 国科微}
   - {ts_code: 300673.SZ, sw_l2_code: '110400', name_zh: 佩蒂股份}
@@ -3086,7 +3086,7 @@ members:
   - {ts_code: 301656.SZ, sw_l2_code: '280200', name_zh: 联合动力}
   - {ts_code: 301658.SZ, sw_l2_code: '630500', name_zh: 首航新能}
   - {ts_code: 301660.SZ, sw_l2_code: '270100', name_zh: 粤芯半导-U}
-  - {ts_code: 301661.SZ, sw_l2_code: '640700'}
+  - {ts_code: 301661.SZ, sw_l2_code: '640700', name_zh: 猎奇智能}
   - {ts_code: 301662.SZ, sw_l2_code: '630700', name_zh: 宏工科技}
   - {ts_code: 301665.SZ, sw_l2_code: '220800', name_zh: 泰禾股份}
   - {ts_code: 301666.SZ, sw_l2_code: '270100', name_zh: 大普微-UW}
@@ -3159,7 +3159,7 @@ members:
   - {ts_code: 600059.SH, sw_l2_code: '340600', name_zh: 古越龙山}
   - {ts_code: 600060.SH, sw_l2_code: '330200', name_zh: 海信视像}
   - {ts_code: 600061.SH, sw_l2_code: '490100', name_zh: 国投资本}
-  - {ts_code: 600062.SH, sw_l2_code: '370100', name_zh: XD华润双}
+  - {ts_code: 600062.SH, sw_l2_code: '370100', name_zh: 华润双鹤}
   - {ts_code: 600063.SH, sw_l2_code: '220400', name_zh: 皖维高新}
   - {ts_code: 600064.SH, sw_l2_code: '430100', name_zh: 南京高科}
   - {ts_code: 600065.SH, sw_l2_code: null, name_zh: "*ST联谊"}
@@ -3196,11 +3196,11 @@ members:
   - {ts_code: 600096.SH, sw_l2_code: '220800', name_zh: 云天化}
   - {ts_code: 600097.SH, sw_l2_code: '110200', name_zh: 开创国际}
   - {ts_code: 600098.SH, sw_l2_code: '410100', name_zh: 广州发展}
-  - {ts_code: 600099.SH, sw_l2_code: '280400', name_zh: 林海股份}
+  - {ts_code: 600099.SH, sw_l2_code: '280400', name_zh: XD林海股}
   - {ts_code: 600100.SH, sw_l2_code: '710100', name_zh: 同方股份}
   - {ts_code: 600101.SH, sw_l2_code: '410100', name_zh: 明星电力}
   - {ts_code: 600102.SH, sw_l2_code: null, name_zh: 莱钢股份}
-  - {ts_code: 600103.SH, sw_l2_code: '360100', name_zh: 青山纸业}
+  - {ts_code: 600103.SH, sw_l2_code: '360100', name_zh: XD青山纸}
   - {ts_code: 600104.SH, sw_l2_code: '280500', name_zh: 上汽集团}
   - {ts_code: 600105.SH, sw_l2_code: '730200', name_zh: 永鼎股份}
   - {ts_code: 600106.SH, sw_l2_code: '420900', name_zh: 重庆路桥}
@@ -3227,7 +3227,7 @@ members:
   - {ts_code: 600128.SH, sw_l2_code: '450200', name_zh: 苏豪弘业}
   - {ts_code: 600129.SH, sw_l2_code: '370200', name_zh: 太极集团}
   - {ts_code: 600130.SH, sw_l2_code: '270500', name_zh: 波导股份}
-  - {ts_code: 600131.SH, sw_l2_code: '710300', name_zh: 国网信通}
+  - {ts_code: 600131.SH, sw_l2_code: '710300', name_zh: XD国网信}
   - {ts_code: 600132.SH, sw_l2_code: '340600', name_zh: 重庆啤酒}
   - {ts_code: 600133.SH, sw_l2_code: '760100', name_zh: 东湖高新}
   - {ts_code: 600135.SH, sw_l2_code: '220500', name_zh: 乐凯胶片}
@@ -3904,7 +3904,7 @@ members:
   - {ts_code: 600879.SH, sw_l2_code: '650100', name_zh: 航天电子}
   - {ts_code: 600880.SH, sw_l2_code: '461100', name_zh: 博瑞传播}
   - {ts_code: 600881.SH, sw_l2_code: '510100', name_zh: 亚泰集团}
-  - {ts_code: 600882.SH, sw_l2_code: '340700', name_zh: 妙可蓝多}
+  - {ts_code: 600882.SH, sw_l2_code: '340700', name_zh: XD妙可蓝}
   - {ts_code: 600883.SH, sw_l2_code: '110100', name_zh: 博闻科技}
   - {ts_code: 600884.SH, sw_l2_code: '630700', name_zh: 杉杉股份}
   - {ts_code: 600885.SH, sw_l2_code: '630800', name_zh: 宏发股份}
@@ -3951,7 +3951,7 @@ members:
   - {ts_code: 600959.SH, sw_l2_code: '721000', name_zh: 江苏有线}
   - {ts_code: 600960.SH, sw_l2_code: '280200', name_zh: 渤海汽车}
   - {ts_code: 600961.SH, sw_l2_code: '240300', name_zh: 株冶集团}
-  - {ts_code: 600962.SH, sw_l2_code: '110500', name_zh: 国投中鲁}
+  - {ts_code: 600962.SH, sw_l2_code: '110500', name_zh: 国投电子}
   - {ts_code: 600963.SH, sw_l2_code: '360100', name_zh: 岳阳林纸}
   - {ts_code: 600965.SH, sw_l2_code: '110700', name_zh: "*ST福成"}
   - {ts_code: 600966.SH, sw_l2_code: '360100', name_zh: 博汇纸业}
@@ -3983,7 +3983,7 @@ members:
   - {ts_code: 600995.SH, sw_l2_code: '410100', name_zh: 南网储能}
   - {ts_code: 600996.SH, sw_l2_code: '721000', name_zh: 贵广网络}
   - {ts_code: 600997.SH, sw_l2_code: '740100', name_zh: 开滦股份}
-  - {ts_code: 600998.SH, sw_l2_code: '370400', name_zh: 九州通}
+  - {ts_code: 600998.SH, sw_l2_code: '370400', name_zh: XD九州通}
   - {ts_code: 600999.SH, sw_l2_code: '490100', name_zh: 招商证券}
   - {ts_code: 601000.SH, sw_l2_code: '421100', name_zh: 唐山港}
   - {ts_code: 601001.SH, sw_l2_code: '740100', name_zh: 晋控煤业}
@@ -4465,7 +4465,7 @@ members:
   - {ts_code: 603293.SH, sw_l2_code: '280200', name_zh: 埃泰克}
   - {ts_code: 603296.SH, sw_l2_code: '270500', name_zh: 华勤技术}
   - {ts_code: 603297.SH, sw_l2_code: '270300', name_zh: 永新光学}
-  - {ts_code: 603298.SH, sw_l2_code: '640600', name_zh: 杭叉集团}
+  - {ts_code: 603298.SH, sw_l2_code: '640600', name_zh: XD杭叉集}
   - {ts_code: 603299.SH, sw_l2_code: '220200', name_zh: 苏盐井神}
   - {ts_code: 603300.SH, sw_l2_code: '490300', name_zh: 海南华铁}
   - {ts_code: 603301.SH, sw_l2_code: '370500', name_zh: 振德医疗}
@@ -4535,7 +4535,7 @@ members:
   - {ts_code: 603380.SH, sw_l2_code: '270500', name_zh: 易德龙}
   - {ts_code: 603381.SH, sw_l2_code: '630500', name_zh: 永臻股份}
   - {ts_code: 603382.SH, sw_l2_code: '220400', name_zh: 海阳科技}
-  - {ts_code: 603383.SH, sw_l2_code: '710400', name_zh: XD顶点软}
+  - {ts_code: 603383.SH, sw_l2_code: '710400', name_zh: 顶点软件}
   - {ts_code: 603385.SH, sw_l2_code: '360300', name_zh: 惠达卫浴}
   - {ts_code: 603386.SH, sw_l2_code: '270200', name_zh: 骏亚科技}
   - {ts_code: 603387.SH, sw_l2_code: '370500', name_zh: 基蛋生物}
@@ -4617,7 +4617,7 @@ members:
   - {ts_code: 603588.SH, sw_l2_code: '760100', name_zh: 高能时代}
   - {ts_code: 603589.SH, sw_l2_code: '340500', name_zh: 口子窖}
   - {ts_code: 603590.SH, sw_l2_code: '370300', name_zh: 康辰药业}
-  - {ts_code: 603595.SH, sw_l2_code: '270500', name_zh: ST东尼}
+  - {ts_code: 603595.SH, sw_l2_code: '270500', name_zh: 东尼电子}
   - {ts_code: 603596.SH, sw_l2_code: '280200', name_zh: 伯特利}
   - {ts_code: 603598.SH, sw_l2_code: '720500', name_zh: 引力传媒}
   - {ts_code: 603599.SH, sw_l2_code: '220800', name_zh: 广信股份}
@@ -4706,14 +4706,14 @@ members:
   - {ts_code: 603729.SH, sw_l2_code: '720500', name_zh: ST龙韵}
   - {ts_code: 603730.SH, sw_l2_code: '280200', name_zh: 岱美股份}
   - {ts_code: 603733.SH, sw_l2_code: '360100', name_zh: 仙鹤股份}
-  - {ts_code: 603737.SH, sw_l2_code: '610300', name_zh: 三棵树}
+  - {ts_code: 603737.SH, sw_l2_code: '610300', name_zh: XD三棵树}
   - {ts_code: 603738.SH, sw_l2_code: '270200', name_zh: 泰晶科技}
   - {ts_code: 603739.SH, sw_l2_code: '220300', name_zh: 蔚蓝生物}
   - {ts_code: 603755.SH, sw_l2_code: '340900', name_zh: 日辰股份}
   - {ts_code: 603757.SH, sw_l2_code: '640100', name_zh: 大元泵业}
   - {ts_code: 603758.SH, sw_l2_code: '280200', name_zh: 秦安股份}
   - {ts_code: 603759.SH, sw_l2_code: '760100', name_zh: 海天股份}
-  - {ts_code: 603766.SH, sw_l2_code: '280400', name_zh: XD隆鑫通}
+  - {ts_code: 603766.SH, sw_l2_code: '280400', name_zh: 隆鑫通用}
   - {ts_code: 603767.SH, sw_l2_code: '280200', name_zh: 中马传动}
   - {ts_code: 603768.SH, sw_l2_code: '280200', name_zh: 常青股份}
   - {ts_code: 603773.SH, sw_l2_code: '270300', name_zh: 沃格光电}
@@ -4814,7 +4814,7 @@ members:
   - {ts_code: 603948.SH, sw_l2_code: '220300', name_zh: 建业股份}
   - {ts_code: 603949.SH, sw_l2_code: '280200', name_zh: 雪龙集团}
   - {ts_code: 603950.SH, sw_l2_code: '280200', name_zh: 长源东谷}
-  - {ts_code: 603955.SH, sw_l2_code: '620300', name_zh: 大千生态}
+  - {ts_code: 603955.SH, sw_l2_code: '620300', name_zh: 灵动股份}
   - {ts_code: 603956.SH, sw_l2_code: '640200', name_zh: 威派格}
   - {ts_code: 603958.SH, sw_l2_code: '350200', name_zh: 哈森股份}
   - {ts_code: 603959.SH, sw_l2_code: '620400', name_zh: ST百利}
@@ -4874,9 +4874,9 @@ members:
   - {ts_code: 605088.SH, sw_l2_code: '280200', name_zh: 冠盛股份}
   - {ts_code: 605089.SH, sw_l2_code: '340400', name_zh: 味知香}
   - {ts_code: 605090.SH, sw_l2_code: '410300', name_zh: 九丰能源}
-  - {ts_code: 605098.SH, sw_l2_code: '461100', name_zh: XD行动教}
+  - {ts_code: 605098.SH, sw_l2_code: '461100', name_zh: 行动教育}
   - {ts_code: 605099.SH, sw_l2_code: '360300', name_zh: 共创草坪}
-  - {ts_code: 605100.SH, sw_l2_code: '640100', name_zh: XD华丰股}
+  - {ts_code: 605100.SH, sw_l2_code: '640100', name_zh: 华丰股份}
   - {ts_code: 605108.SH, sw_l2_code: '460900', name_zh: 同庆楼}
   - {ts_code: 605111.SH, sw_l2_code: '270100', name_zh: 新洁能}
   - {ts_code: 605116.SH, sw_l2_code: '370100', name_zh: 奥锐特}
@@ -5058,7 +5058,7 @@ members:
   - {ts_code: 688109.SH, sw_l2_code: '710400', name_zh: 品茗科技}
   - {ts_code: 688110.SH, sw_l2_code: '270100', name_zh: 东芯股份}
   - {ts_code: 688111.SH, sw_l2_code: '710400', name_zh: 金山办公}
-  - {ts_code: 688112.SH, sw_l2_code: '640100', name_zh: 鼎阳科技}
+  - {ts_code: 688112.SH, sw_l2_code: '640100', name_zh: XD鼎阳科}
   - {ts_code: 688113.SH, sw_l2_code: '640200', name_zh: 联测科技}
   - {ts_code: 688114.SH, sw_l2_code: '370500', name_zh: 华大智造}
   - {ts_code: 688115.SH, sw_l2_code: '640100', name_zh: 思林杰}
@@ -5089,7 +5089,7 @@ members:
   - {ts_code: 688146.SH, sw_l2_code: '270100', name_zh: 中船特气}
   - {ts_code: 688147.SH, sw_l2_code: '630500', name_zh: 微导纳米}
   - {ts_code: 688148.SH, sw_l2_code: '630700', name_zh: 芳源股份}
-  - {ts_code: 688150.SH, sw_l2_code: '270600', name_zh: XD莱特光}
+  - {ts_code: 688150.SH, sw_l2_code: '270600', name_zh: 莱特光电}
   - {ts_code: 688151.SH, sw_l2_code: '370500', name_zh: 华强科技}
   - {ts_code: 688152.SH, sw_l2_code: '710400', name_zh: 麒麟信安}
   - {ts_code: 688153.SH, sw_l2_code: '270100', name_zh: 唯捷创芯}
@@ -5579,6 +5579,6 @@ members:
   - {ts_code: 688835.SH, sw_l2_code: '640700', name_zh: 高凯技术}
   - {ts_code: 688836.SH, sw_l2_code: '640700', name_zh: 宇树科技-W}
   - {ts_code: 688837.SH, sw_l2_code: '370300', name_zh: 信诺维}
-  - {ts_code: 688845.SH, sw_l2_code: '640700'}
+  - {ts_code: 688845.SH, sw_l2_code: '640700', name_zh: 傲拓科技}
   - {ts_code: 688981.SH, sw_l2_code: '270100', name_zh: 中芯国际}
   - {ts_code: 689009.SH, sw_l2_code: '280400', name_zh: 九号公司-WD}
